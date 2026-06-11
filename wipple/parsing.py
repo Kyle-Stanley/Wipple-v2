@@ -307,23 +307,56 @@ def parse_table(
         if _TOTAL_LABEL.search(job_labels[i]):
             _strip(i, "label matched total/subtotal")
 
-    if body and len(body) >= 3:
-        last = body[-1]
-        rest = body[:-1]
-        money_like = [j for j in numeric_cols if j not in pct_glyph_cols]
-        if money_like:
-            sums = np.nansum(parsed[np.ix_(rest, money_like)], axis=0)
-            stated = parsed[last, money_like]
-            with np.errstate(invalid="ignore"):
-                close = np.isclose(stated, sums, rtol=0.005, atol=1.0)
-            informative = np.abs(sums) > 1.0
-            if informative.sum() >= 3 and close[informative].all():
-                _strip(last, "numerically matches column sums")
+    # Numeric totals detection over the WHOLE body, not just the final row:
+    # CPA schedules carry interior section subtotals, often with a blank
+    # name cell. A row matching the running column sums (of the body so
+    # far, of the current section since the last subtotal, or of the body
+    # plus already-stripped subtotals for double-counted grand totals) is a
+    # totals row wherever it sits, and feeding it to the validator poisons
+    # that row's identities.
+    money_like = [j for j in numeric_cols if j not in pct_glyph_cols]
+    if money_like and len(body) >= 3:
+        m = len(money_like)
+        cum_total = np.zeros(m)
+        cum_section = np.zeros(m)
+        stripped_sum = np.zeros(m)
+        n_total = n_section = 0
+        for i in list(body):
+            vals = np.nan_to_num(parsed[i, money_like])
+
+            def _matches(target):
+                informative = np.abs(target) > 1.0
+                if informative.sum() < 3:
+                    return False
+                ok = np.isclose(vals[informative], target[informative],
+                                rtol=0.005, atol=1.0)
+                return bool(ok.all())
+
+            why = None
+            if n_section >= 2 and _matches(cum_section):
+                why = "matches section column sums"
+            elif n_total >= 2 and _matches(cum_total):
+                why = "matches column sums"
+            elif n_total >= 2 and _matches(cum_total + stripped_sum):
+                why = "matches column sums including subtotal rows"
+            if why:
+                _strip(i, why)
+                stripped_sum += vals
+                cum_section[:] = 0.0
+                n_section = 0
+            else:
+                cum_total += vals
+                cum_section += vals
+                n_total += 1
+                n_section += 1
 
     # Totals check: stated (last stripped totals row) vs computed body sums.
     totals_check = None
     if stripped and body:
-        grand = stripped[-1]
+        grand = max(stripped, key=lambda r: r["row"])
+        subtotal_sum = {j: sum((r["values"].get(j) or 0.0)
+                               for r in stripped if r is not grand)
+                        for j in numeric_cols}
         per_col = {}
         for j in numeric_cols:
             if j in pct_glyph_cols:
@@ -332,12 +365,15 @@ def parse_table(
             if stated_v is None:
                 continue
             computed = float(np.nansum(parsed[body, j]))
+            tol = max(1.0, 0.005 * abs(computed))
+            plain = abs(stated_v - computed) <= tol
+            with_subs = abs(stated_v - (computed + subtotal_sum.get(j, 0.0))) <= tol
             per_col[j] = {
                 "stated": stated_v,
                 "computed": round(computed, 2),
                 "difference": round(stated_v - computed, 2),
-                "matches": bool(abs(stated_v - computed)
-                                <= max(1.0, 0.005 * abs(computed))),
+                "matches": bool(plain or with_subs),
+                "includes_subtotals": bool(with_subs and not plain),
             }
         if per_col:
             totals_check = {

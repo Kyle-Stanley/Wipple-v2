@@ -99,6 +99,7 @@ def fallback_node(state: WippleState) -> dict:
     )
     try:
         text = get_client().generate(prompt, tier="fallback", json_only=True,
+                                     model_override=state.get("model_override") or None,
                                      metrics=metrics, purpose="header_fallback")
         obj = extract_json(text)
         raw_mapping = obj.get("mapping", {}) or {}
@@ -144,6 +145,7 @@ def disambiguate_node(state: WippleState) -> dict:
     )
     try:
         text = get_client().generate(prompt, tier="fallback", json_only=True,
+                                     model_override=state.get("model_override") or None,
                                      metrics=metrics, purpose="disambiguation")
         obj = extract_json(text)
         chosen = "competing" if str(obj.get("chosen", "A")).upper() == "B" \

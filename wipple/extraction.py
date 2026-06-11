@@ -60,6 +60,7 @@ def extract_node(state: WippleState) -> dict:
             tier=tier,
             pdf_bytes=state["pdf_bytes"],
             media_type=state.get("media_type") or "application/pdf",
+            model_override=state.get("model_override") or None,
             json_only=True,
             metrics=metrics,
             purpose=f"extraction[{tier}]",

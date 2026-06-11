@@ -257,3 +257,51 @@ def test_majority_corrupted_column_dropped_not_fabricated():
     assert res.matrix.shape[1] == 2
     assert any(d["reason"] == "non-numeric" and d["col"] == 1
                for d in res.dropped_columns)
+
+
+# --------------------------------------------- interior subtotal handling
+
+def _subtotal_book():
+    """Two sections of jobs, a BLANK-labeled subtotal after each section,
+    and a grand total that double-counts (= body + subtotals)."""
+    import numpy as np
+    rng = np.random.default_rng(5)
+    def m(x): return f"{int(round(x)):,}"
+    rows, money = [], []
+    def job(name, V, P):
+        mg = 0.12
+        C = round(V * (1 - mg)); D = round(C * P); E = round(V * P)
+        B = E + 2000
+        vals = (V, C, V - C, D, C - D, E, B)
+        money.append(vals)
+        rows.append([name, m(V), m(C), m(V - C), m(D), m(C - D),
+                     f"{P*100:.1f}%", m(E), m(B)])
+        return vals
+    hdr = ["Job", "Contract", "Est Cost", "Est GP", "CTD", "CTC", "% Comp",
+           "Earned", "Billed"]
+    sec1 = [job(f"A-{k}", 400_000 + 100_000 * k, 0.2 + 0.1 * k) for k in range(4)]
+    s1 = [sum(v[i] for v in sec1) for i in range(7)]
+    rows.append(["", m(s1[0]), m(s1[1]), m(s1[2]), m(s1[3]), m(s1[4]), "",
+                 m(s1[5]), m(s1[6])])                       # blank-label subtotal
+    sec2 = [job(f"B-{k}", 600_000 + 100_000 * k, 0.3 + 0.1 * k) for k in range(4)]
+    s2 = [sum(v[i] for v in sec2) for i in range(7)]
+    rows.append(["", m(s2[0]), m(s2[1]), m(s2[2]), m(s2[3]), m(s2[4]), "",
+                 m(s2[5]), m(s2[6])])                       # second subtotal
+    g = [s1[i] + s2[i] for i in range(7)]
+    gg = [2 * x for x in g]  # double-counted grand: body + subtotals
+    rows.append(["Total", m(gg[0]), m(gg[1]), m(gg[2]), m(gg[3]), m(gg[4]),
+                 "", m(gg[5]), m(gg[6])])
+    return {"headers": hdr, "rows": rows, "page_count": 1, "notes": []}
+
+
+def test_interior_blank_subtotals_stripped(patch_client):
+    book = _subtotal_book()
+    patch_client([json.dumps(book)])
+    final = invoke(build_graph())
+    rep = final["report"]
+    assert rep["table"] and len(rep["table"]["values"]) == 8   # 8 real jobs
+    assert len(rep["parse"]["stripped_total_rows"]) == 3       # 2 subs + grand
+    assert rep["validator_status"] == "success"
+    assert rep["totals_check"]["all_match"]                    # via subtotals
+    assert any(c.get("includes_subtotals")
+               for c in rep["totals_check"]["columns"].values())

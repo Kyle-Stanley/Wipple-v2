@@ -25,6 +25,17 @@ class TierConfig:
     output_per_m: float
 
 
+# Pinnable models for the UI selector. Pricing per million tokens.
+MODEL_REGISTRY: dict[str, TierConfig] = {
+    "gemini-3.1-flash-lite-preview": TierConfig("gemini-3.1-flash-lite-preview", "google", 0.25, 1.50),
+    "gemini-3-flash-preview": TierConfig("gemini-3-flash-preview", "google", 0.50, 3.00),
+    "gemini-3.5-flash": TierConfig("gemini-3.5-flash", "google", 1.50, 9.00),
+    "gemini-3.1-pro-preview": TierConfig("gemini-3.1-pro-preview", "google", 2.00, 12.00),
+    "claude-haiku-4-5-20251001": TierConfig("claude-haiku-4-5-20251001", "anthropic", 1.00, 5.00),
+    "claude-sonnet-4-6": TierConfig("claude-sonnet-4-6", "anthropic", 3.00, 15.00),
+    "claude-opus-4-6": TierConfig("claude-opus-4-6", "anthropic", 5.00, 25.00),
+}
+
 TIERS: dict[str, TierConfig] = {
     "primary": TierConfig(
         model_id=os.environ.get("WIPPLE_PRIMARY_MODEL",
@@ -50,12 +61,13 @@ class CallRecord:
     output_tokens: int
     seconds: float
     purpose: str
+    input_per_m: float = 0.0
+    output_per_m: float = 0.0
 
     @property
     def cost_usd(self) -> float:
-        t = TIERS[self.tier]
-        return (self.input_tokens * t.input_per_m
-                + self.output_tokens * t.output_per_m) / 1e6
+        return (self.input_tokens * self.input_per_m
+                + self.output_tokens * self.output_per_m) / 1e6
 
 
 @dataclass
@@ -113,8 +125,11 @@ class ModelClient:
         max_tokens: int = 16384,
         metrics: Optional[Metrics] = None,
         purpose: str = "",
+        model_override: Optional[str] = None,
     ) -> str:
-        cfg = TIERS[tier]
+        cfg = MODEL_REGISTRY.get(model_override) if model_override else None
+        if cfg is None:
+            cfg = TIERS[tier]
         t0 = time.time()
         if cfg.provider == "google":
             text, ti, to = self._call_google(cfg, prompt, pdf_bytes,
@@ -124,7 +139,8 @@ class ModelClient:
                                                 media_type, max_tokens)
         if metrics is not None:
             metrics.record(CallRecord(tier, cfg.model_id, ti, to,
-                                      time.time() - t0, purpose))
+                                      time.time() - t0, purpose,
+                                      cfg.input_per_m, cfg.output_per_m))
         return text
 
     # -- providers -----------------------------------------------------------
@@ -136,7 +152,13 @@ class ModelClient:
             key = os.environ.get("GOOGLE_API_KEY", "").strip()
             if not key:
                 raise RuntimeError("GOOGLE_API_KEY not set")
-            self._google = genai.Client(api_key=key)
+            try:
+                from google.genai import types as gt0
+                self._google = genai.Client(
+                    api_key=key,
+                    http_options=gt0.HttpOptions(timeout=120_000))
+            except Exception:
+                self._google = genai.Client(api_key=key)
         from google.genai import types as gt
         contents: list[Any] = []
         if pdf_bytes:
@@ -165,7 +187,7 @@ class ModelClient:
             key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
             if not key:
                 raise RuntimeError("ANTHROPIC_API_KEY not set")
-            self._anthropic = anthropic.Anthropic(api_key=key)
+            self._anthropic = anthropic.Anthropic(api_key=key, timeout=120.0)
         content: list[dict] = []
         if pdf_bytes:
             kind = "image" if media_type.startswith("image/") else "document"

@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
+import time
 
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, Form, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
 from wipple.demo import demo_raw_table
 from wipple.ingest import csv_to_raw_table, sniff, xlsx_to_raw_table
 from wipple.graph import build_graph
-from wipple.model_client import Metrics
+from wipple.model_client import MODEL_REGISTRY, Metrics
 
 app = FastAPI(title="wipple")
+# Allow the frontend to be served from a different origin (e.g. Firebase
+# Hosting at wipple.ai) while the API lives here. No cookies or auth are
+# involved, so a permissive policy is fine.
+app.add_middleware(CORSMiddleware, allow_origins=["*"],
+                   allow_methods=["*"], allow_headers=["*"])
 GRAPH = build_graph()
 
 
@@ -72,21 +81,55 @@ def _stream(initial: dict):
     metrics = Metrics()
     initial["_metrics"] = metrics
     state = dict(initial)
+    q: queue.Queue = queue.Queue()
+    t0 = time.time()
+
+    def run():
+        try:
+            for update in GRAPH.stream(initial, stream_mode="updates"):
+                q.put(("update", update))
+        except Exception as e:  # noqa: BLE001
+            q.put(("error", str(e)))
+        q.put(("done", None))
+
+    threading.Thread(target=run, daemon=True).start()
 
     def gen():
-        for update in GRAPH.stream(initial, stream_mode="updates"):
-            for node, up in update.items():
-                state.update(up or {})
-                for line in _narrate(node, up or {}, state):
-                    yield ("event: progress\ndata: "
-                           + json.dumps({"node": node, "message": line})
-                           + "\n\n")
-        report = state.get("report", {})
+        # Heartbeat every 10s so proxies don't kill the connection while a
+        # long model call is in flight.
+        while True:
+            try:
+                kind, payload = q.get(timeout=10)
+            except queue.Empty:
+                yield ": keepalive\n\n"
+                continue
+            if kind == "update":
+                for node, up in payload.items():
+                    state.update(up or {})
+                    for line in _narrate(node, up or {}, state):
+                        yield ("event: progress\ndata: "
+                               + json.dumps({"node": node, "message": line})
+                               + "\n\n")
+            elif kind == "error":
+                state["report"] = {"overall_status": "pipeline_error",
+                                   "validator_reason": payload}
+                break
+            else:
+                break
+        report = state.get("report") or {"overall_status": "pipeline_error",
+                                         "validator_reason": "no report produced"}
         report["metrics"] = metrics.summary()
+        report["metrics"]["elapsed_seconds"] = round(time.time() - t0, 1)
         yield "event: report\ndata: " + json.dumps(report, default=str) + "\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/models")
+def models():
+    return {"models": [{"id": k, "provider": v.provider}
+                       for k, v in MODEL_REGISTRY.items()]}
 
 
 def _initial(**kw) -> dict:
@@ -112,10 +155,11 @@ def sample():
 
 
 @app.post("/api/scan")
-async def scan(file: UploadFile):
+async def scan(file: UploadFile, model: str = Form("")):
     data = await file.read()
     name = file.filename or "upload"
     kind = sniff(data, name)
+    override = model.strip() if model and model.strip() in MODEL_REGISTRY else None
     if kind == "xlsx":
         # spreadsheets carry their cells natively: deterministic ingest,
         # no model call, no re-extract loop to fall into
@@ -126,4 +170,4 @@ async def scan(file: UploadFile):
                                 source_name=name, reextract_count=1))
     media = kind if kind != "unknown" else "application/pdf"
     return _stream(_initial(pdf_bytes=data, media_type=media,
-                            source_name=name))
+                            source_name=name, model_override=override))

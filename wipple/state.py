@@ -34,6 +34,7 @@ class WippleState(TypedDict, total=False):
     # ---- input -------------------------------------------------------------
     pdf_bytes: bytes
     media_type: str                 # application/pdf | image/* for vision path
+    model_override: Optional[str]   # pinned model id, or None for tiering
     source_name: str
 
     # ---- extract node ------------------------------------------------------
