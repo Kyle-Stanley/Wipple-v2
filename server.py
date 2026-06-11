@@ -143,6 +143,11 @@ def index():
     return FileResponse("static/index.html")
 
 
+@app.get("/how")
+def how():
+    return FileResponse("static/how.html")
+
+
 @app.get("/api/sample")
 def sample():
     # Demo injects a pre-transcribed table: extraction is bypassed (no key

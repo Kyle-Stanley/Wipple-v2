@@ -1,0 +1,1636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why Wipple Works · The Geometry of WIP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #F2EFE6;
+    --bg2:       #FBFAF7;
+    --bg3:       #EDE9DD;
+    --border:    rgba(45,55,45,0.18);
+    --border2:   rgba(45,55,45,0.34);
+    --text:      #20251F;
+    --text2:     #555F56;
+    --text3:     #6C7165;
+    --accent:    #3A4C3E;
+    --accent2:   rgba(58,76,62,0.09);
+    --red:       #A3402F;
+    --green:     #2e7d43;
+    --blue:      #2f5d8f;
+    --amber:     #92671E;
+    --mono:      'IBM Plex Mono', 'JetBrains Mono', 'Courier New', monospace;
+    --sans:      'Inter', system-ui, -apple-system, sans-serif;
+    --display:   'Fraunces', Georgia, serif;
+    --radius:    8px;
+    --radius-lg: 11px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background:
+      repeating-linear-gradient(to bottom, transparent 0px, transparent 31px, rgba(47,93,143,0.05) 31px, rgba(47,93,143,0.05) 32px),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15.5px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Layout ── */
+  .page { max-width: 860px; margin: 0 auto; padding: 0 24px 80px; position: relative; }
+  @media (min-width: 960px) {
+    .page::before {
+      content: '';
+      position: absolute; top: 0; bottom: 0; left: -34px;
+      width: 1px; background: rgba(157,44,28,0.4);
+      box-shadow: 4px 0 0 rgba(157,44,28,0.16);
+    }
+  }
+
+  .hero {
+    padding: 68px 0 44px;
+    border-bottom: 4px double var(--border2);
+    margin-bottom: 56px;
+  }
+  .hero-eyebrow {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    text-transform: uppercase;
+    border: 1.5px solid rgba(157,44,28,0.65);
+    border-radius: 2px;
+    padding: 4px 11px 3px;
+    transform: rotate(-1deg);
+    margin-bottom: 26px;
+  }
+  .hero h1 {
+    font-family: var(--display);
+    font-size: clamp(32px, 5.6vw, 52px);
+    font-weight: 600;
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin-bottom: 22px;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); }
+  .hero p {
+    font-size: 16.5px;
+    color: var(--text2);
+    max-width: 600px;
+    line-height: 1.75;
+  }
+
+  /* ── Sections ── */
+  .section { margin-bottom: 76px; }
+  .section-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.14em;
+    margin-bottom: 10px;
+  }
+  .section-num::before { content: 'No. '; color: var(--text3); font-weight: 400; }
+  .section h2 {
+    font-family: var(--display);
+    font-size: 27px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 18px;
+    line-height: 1.25;
+    padding-bottom: 10px;
+    border-bottom: 4px double var(--border2);
+  }
+  .section p { color: var(--text2); margin-bottom: 16px; max-width: 690px; }
+  .section p:last-child { margin-bottom: 0; }
+  strong { color: var(--text); font-weight: 600; }
+
+  /* ── Widget containers ── */
+  .widget-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin: 28px 0;
+    box-shadow: 0 1px 0 rgba(45,55,45,0.06);
+  }
+  .widget-caption {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text3);
+    margin-top: 14px;
+    letter-spacing: 0.03em;
+  }
+
+  /* ── Mode toggle ── */
+  .mode-toggle {
+    display: flex;
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    overflow: hidden;
+    align-self: flex-start;
+    margin-bottom: 16px;
+  }
+  .mode-btn {
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text2);
+    transition: background .15s, color .15s;
+  }
+  .mode-btn.active { background: var(--text); color: var(--bg2); }
+
+  /* ── Cube controls ── */
+  .cube-controls { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 16px; }
+  .ctrl-col { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 10px; }
+  .axis-row-c { display: flex; flex-direction: column; gap: 3px; }
+  .axis-head-c { display: flex; justify-content: space-between; align-items: center; }
+  .axis-lbl-c { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; color: var(--text); }
+  .axis-dot-c { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .axis-val-c { font-family: var(--mono); font-size: 11px; color: var(--text2); min-width: 28px; text-align: right; }
+  .sl-row-c { display: flex; align-items: center; gap: 6px; }
+  .sl-row-c input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+  .link-btn-c {
+    width: 26px; height: 26px; border-radius: 3px;
+    border: 1px solid var(--border2);
+    background: transparent; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0; color: var(--text3);
+    transition: background .15s, border-color .15s, color .15s;
+    flex-shrink: 0; font-size: 13px;
+  }
+  .link-btn-c:hover { background: var(--bg3); color: var(--text2); }
+  .link-btn-c.on { background: var(--accent); border-color: var(--accent); color: var(--bg2); }
+  .mag-row-c { display: flex; align-items: center; gap: 10px; padding: 7px 10px; background: var(--bg3); border-radius: 3px; border: 1px solid var(--border); }
+  .mag-lbl-c { font-size: 11px; color: var(--text2); flex-shrink: 0; min-width: 62px; }
+  .mag-bar-wrap-c { flex: 1; height: 5px; background: var(--border2); border-radius: 3px; overflow: hidden; }
+  .mag-bar-c { height: 100%; border-radius: 3px; transition: width .05s, background .05s; }
+  .mag-val-c { font-family: var(--mono); font-size: 11px; color: var(--text2); min-width: 48px; text-align: right; }
+  .divider-c { height: 1px; background: var(--border); }
+
+  /* ── Cube swatch ── */
+  .swatch-panel-c { display: flex; gap: 12px; align-items: center; }
+  .swatch-c { width: 44px; height: 44px; border-radius: 3px; border: 1px solid var(--border2); flex-shrink: 0; }
+  .swatch-info-c .s-primary { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text); }
+  .swatch-info-c .s-secondary { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .swatch-info-c .s-tertiary { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .billing-pill-c { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--border2); font-size: 11px; font-weight: 600; font-family: var(--mono); }
+
+  /* ── Snap section ── */
+  .snap-section-c { background: var(--bg3); border-radius: 3px; padding: 10px 12px; border: 1px solid var(--border); }
+  .snap-lbl-c { font-size: 11px; color: var(--text3); margin-bottom: 8px; }
+  .snaps-c { display: flex; flex-wrap: wrap; gap: 6px; }
+  .snap-btn-c { border: 1px solid var(--border2); background: var(--bg2); border-radius: 2px; padding: 4px 9px; cursor: pointer; font-size: 11px; display: flex; align-items: center; gap: 5px; color: var(--text2); transition: border-color .15s, color .15s; font-family: var(--sans); }
+  .snap-btn-c:hover { border-color: var(--accent); color: var(--text); }
+  .snap-color-c { width: 11px; height: 11px; border-radius: 2px; flex-shrink: 0; border: 1px solid rgba(45,55,45,0.18); }
+
+  canvas { display: block; border-radius: 3px; }
+
+  /* ── Column identifier ── */
+  .hint-pill-d { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text2); background: var(--bg3); border: 1px solid var(--border2); border-radius: 2px; padding: 3px 10px; margin-bottom: 10px; font-family: var(--mono); }
+  .columns-grid-d { display: grid; grid-template-columns: repeat(5,1fr); gap: 8px; }
+  .col-card-d { background: #fffefa; border: 1.5px solid var(--border); border-radius: var(--radius); padding: 8px 10px; cursor: grab; user-select: none; transition: border-color .2s, background .2s, opacity .2s; position: relative; }
+  .col-card-d:hover { border-color: var(--border2); }
+  .col-card-d.assigned-d { opacity: 0.45; }
+  .col-card-d.hint-contract-d { border-color: var(--green); background: rgba(46,125,67,0.06); }
+  .col-card-d.hint-costs-d { border-color: rgba(182,72,60,0.6); background: rgba(182,72,60,0.05); }
+  .col-card-d.hint-billings-d { border-color: rgba(47,93,143,0.55); background: rgba(47,93,143,0.05); }
+  .col-card-d.hint-invalid-d { opacity: 0.4; }
+  .col-name-d { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; font-family: var(--mono); letter-spacing: 0.04em; }
+  .col-tag-d { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 2px; font-family: var(--mono); }
+  .tag-contract-d { background: rgba(46,125,67,0.14); color: var(--green); }
+  .tag-costs-d    { background: rgba(182,72,60,0.12); color: #8B3527; }
+  .tag-billings-d { background: rgba(47,93,143,0.12); color: var(--blue); }
+  .col-vals-d { display: flex; flex-direction: column; gap: 1px; }
+  .val-row-d { font-family: var(--mono); font-size: 10px; color: #39423b; padding: 1px 3px; border-radius: 2px; transition: background .2s, color .2s; line-height: 1.7; }
+  .val-row-d.match-d { background: rgba(46,125,67,0.14); color: #1c6e45; }
+  .val-row-d.match-cost-d { background: rgba(182,72,60,0.12); color: #8B3527; }
+  .val-row-d.match-billing-d { background: rgba(47,93,143,0.12); color: var(--blue); }
+  .biggest-badge-d { position: absolute; top: 6px; right: 7px; font-size: 9px; font-weight: 600; background: var(--green); color: #fff; border-radius: 2px; padding: 1px 5px; font-family: var(--mono); }
+  .slots-row-d { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .slot-d { border: 1.5px dashed var(--border2); border-radius: var(--radius); padding: 10px; min-height: 120px; display: flex; flex-direction: column; gap: 4px; transition: border-color .15s, background .15s; background: rgba(255,255,255,0.4); }
+  .slot-d.over-d { border-color: var(--accent); background: var(--accent2); }
+  .slot-label-d { font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 6px; color: var(--text); font-family: var(--mono); letter-spacing: 0.03em; }
+  .slot-dot-d { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .slot-hint-d { font-size: 10px; color: var(--text3); padding-left: 14px; font-family: var(--mono); }
+  .slot-empty-d { font-size: 11px; color: var(--text3); flex: 1; display: flex; align-items: center; justify-content: center; }
+  .slot-col-name-d { font-size: 11px; font-weight: 600; color: var(--text); display: flex; justify-content: space-between; align-items: center; font-family: var(--mono); cursor: grab; }
+  .slot-vals-d { font-family: var(--mono); font-size: 10px; color: var(--text2); line-height: 1.7; }
+  .clear-btn-d { font-size: 11px; color: var(--text3); cursor: pointer; border: none; background: none; padding: 0 2px; }
+  .clear-btn-d:hover { color: var(--accent); }
+  .score-row-d { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 12px; transition: border-color .3s; flex: 1; background: var(--bg3); }
+  .score-dot-d { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; transition: background .3s; }
+  .action-btn-d { border: 1px solid var(--border2); background: var(--bg2); border-radius: var(--radius); padding: 7px 13px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; color: var(--text2); transition: background .15s, color .15s, border-color .15s; font-family: var(--mono); }
+  .action-btn-d:hover { background: var(--bg3); color: var(--text); border-color: var(--text3); }
+  .answer-row-d { font-size: 11px; color: var(--text2); display: none; padding: 7px 12px; background: var(--bg3); border-radius: var(--radius); font-family: var(--mono); border: 1px solid var(--border); }
+
+  /* ── Divider between sections ── */
+  .rule { border: none; border-top: 1px solid var(--border); margin: 64px 0; }
+
+  /* ── Footer ── */
+  footer { border-top: 4px double var(--border2); padding: 28px 0; color: var(--text3); font-size: 12px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div style="display:flex;align-items:baseline;justify-content:space-between;padding:24px 0 0">
+    <a href="/" style="text-decoration:none"><img src="/static/logo/logo2_bw.png" alt="wipple" style="height:28px;display:block" onerror="this.outerHTML='<span style=\'font-family:var(--display);font-weight:600;font-size:22px;color:var(--accent)\'>w<span style=\'color:#5C7160\'>i</span>pple</span>'"></a>
+    <a href="/" style="font-size:13px;color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent)">Run a schedule</a>
+  </div>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="hero-eyebrow">Wipple · Foundations</div>
+    <h1>WIP Schedules viewed as <em>geometry</em>,<br>not spreadsheets</h1>
+    <p>A work-in-progress schedule isn't a pile of labeled columns. It's a single mathematical object whose parts can only fit together one way. That's why an engine that never reads a header can name every column, prove the table is internally consistent, and point at the exact cell that's wrong. This page builds that idea from scratch, one intuition at a time.</p>
+  </header>
+
+  <!-- Section 1: The cube -->
+  
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px 26px;margin:34px 0 10px">
+    <div style="font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--accent);text-transform:uppercase;margin-bottom:12px">The short version</div>
+    <p style="color:var(--text2);margin-bottom:14px">The economics of the pipeline come from one division of labor. The only AI in the loop does <strong>perception</strong>: turning pixels into a grid of numbers, once. Everything after that is plain arithmetic on arrays: deterministic, identical on every run, finished in microseconds, costing effectively nothing. No tokens are ever spent asking a language model to double-check math, because <strong>the model is trusted to read, and never trusted to calculate</strong>. Verification, the part you'd otherwise pay a careful human or a frontier model to do, is the free part.</p>
+    <p style="color:var(--text2);margin:0">It's also the auditable part. The output isn't a confidence score; it's a certificate that lists every identity witnessed and every cell that failed. Anyone with a calculator can re-derive it. The rest of this page is the geometry that makes that possible.</p>
+  </div>
+
+  <section class="section">
+    <div class="section-num">01</div>
+    <h2>A job is a point in space</h2>
+    <p>Start with something intuitive: color. Every color is three numbers (Red, Green, Blue) plotted as a point in a cube. The <strong>direction</strong> of that vector from the origin is the hue. The <strong>magnitude</strong> is brightness. Link all three axes, then drag any slider: the point moves along the same ray, getting brighter or darker without ever changing color.</p>
+    <p>Toggle to <strong>Job mode</strong>. The axes become Costs Incurred, Contract Value, and Billings to Date. The math is identical. A contractor who doubles the size of a job, keeping the same margin and the same billing pace, produces a point twice as far from the origin in exactly the same direction. The direction of the vector is the financial fingerprint of the job. The magnitude is the job size.</p>
+    <p>A real WIP actually lives in four dimensions, with Estimated Total Cost as the fourth axis. Since we can't draw that, this demo collapses one dimension by treating Estimated Cost as equal to Contract Value (a zero-margin job), so % Complete reads directly as cost ÷ contract. The geometry is unchanged; production just carries one more axis of it.</p>
+    <p>The gray diagonal plane in Job mode is where <strong>Billings = Costs</strong>: the perfectly billed position for any job at any size. The dashed line from the real dot to its ghost on that plane is the over/under billing gap, readable directly from the geometry.</p>
+
+    <div class="widget-wrap">
+      <!-- Mode toggle -->
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+        <div class="mode-toggle">
+          <button class="mode-btn active" id="btn-color" onclick="setMode('color')">Color</button>
+          <button class="mode-btn" id="btn-wip" onclick="setMode('wip')">Job</button>
+        </div>
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono);">drag canvas to rotate · link to lock direction</span>
+      </div>
+
+      <div style="display:flex;gap:16px;align-items:flex-start;">
+        <div style="flex:1;min-width:0;">
+          <canvas id="cv" width="812" height="420" style="width:100%;"></canvas>
+        </div>
+        <div id="wip-vals" style="display:none;flex-direction:column;gap:10px;flex-shrink:0;width:160px;padding-top:8px;">
+          <div style="font-size:10px;font-weight:600;color:var(--text3);font-family:var(--mono);letter-spacing:0.08em;margin-bottom:2px;">DERIVED VALUES</div>
+          <div style="background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;">
+            <div style="font-size:10px;color:#2e7d43;font-family:var(--mono);margin-bottom:3px;">Earned Revenue</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);font-family:var(--mono);" id="wv-earned">$0k</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px;">% complete x contract</div>
+          </div>
+          <div style="background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;">
+            <div style="font-size:10px;color:#2f5d8f;font-family:var(--mono);margin-bottom:3px;" id="wv-bill-label">Billing Position</div>
+            <div style="font-size:15px;font-weight:600;font-family:var(--mono);" id="wv-bill-val">$0k</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px;" id="wv-bill-sub">billings vs earned rev</div>
+          </div>
+          <div style="background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;">
+            <div style="font-size:10px;color:#A3402F;font-family:var(--mono);margin-bottom:3px;">% Complete</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);font-family:var(--mono);" id="wv-pct">0%</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px;">cost / contract</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cube-controls">
+        <div class="ctrl-col">
+          <div class="axis-row-c">
+            <div class="axis-head-c">
+              <div class="axis-lbl-c"><span class="axis-dot-c" style="background:#A3402F"></span><span id="lbl-r">Red</span></div>
+              <div style="display:flex;align-items:center;gap:4px;"><span class="axis-val-c" id="vr">128</span><button class="link-btn-c" id="lnk-r" onclick="toggleLink('r')" aria-label="Link R">⇔</button></div>
+            </div>
+            <div class="sl-row-c"><input type="range" min="0" max="255" value="128" step="1" id="sl-r" oninput="slideAxis('r',+this.value)"></div>
+          </div>
+          <div class="axis-row-c">
+            <div class="axis-head-c">
+              <div class="axis-lbl-c"><span class="axis-dot-c" style="background:#2e7d43"></span><span id="lbl-g">Green</span></div>
+              <div style="display:flex;align-items:center;gap:4px;"><span class="axis-val-c" id="vg">200</span><button class="link-btn-c" id="lnk-g" onclick="toggleLink('g')" aria-label="Link G">⇔</button></div>
+            </div>
+            <div class="sl-row-c"><input type="range" min="0" max="255" value="200" step="1" id="sl-g" oninput="slideAxis('g',+this.value)"></div>
+          </div>
+          <div class="axis-row-c">
+            <div class="axis-head-c">
+              <div class="axis-lbl-c"><span class="axis-dot-c" style="background:#2f5d8f"></span><span id="lbl-b">Blue</span></div>
+              <div style="display:flex;align-items:center;gap:4px;"><span class="axis-val-c" id="vb">160</span><button class="link-btn-c" id="lnk-b" onclick="toggleLink('b')" aria-label="Link B">⇔</button></div>
+            </div>
+            <div class="sl-row-c"><input type="range" min="0" max="255" value="160" step="1" id="sl-b" oninput="slideAxis('b',+this.value)"></div>
+          </div>
+          <div class="divider-c"></div>
+          <div class="axis-row-c">
+            <div class="axis-head-c">
+              <div class="axis-lbl-c" style="font-size:11px;color:var(--text2);" id="mag-lbl">Magnitude</div>
+              <span class="axis-val-c" id="mag-display">255</span>
+            </div>
+            <div class="sl-row-c"><input type="range" min="1" max="441" value="255" step="1" id="sl-mag" oninput="slideMag(+this.value)"></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;flex-shrink:0;">
+          <div class="swatch-panel-c">
+            <div class="swatch-c" id="swatch"></div>
+            <div class="swatch-info-c">
+              <div class="s-primary" id="info-primary">#8000DC</div>
+              <div class="s-secondary" id="info-secondary">Purple</div>
+              <div class="s-tertiary" id="info-tertiary">R 128 · G 0 · B 220</div>
+            </div>
+          </div>
+          <div class="billing-pill-c" id="billing-pill" style="display:none;">
+            <span id="billing-dot" style="width:8px;height:8px;border-radius:50%;display:inline-block;"></span>
+            <span id="billing-text">On billing</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="snap-section-c" id="snap-section" style="margin-top:14px;">
+        <div class="snap-lbl-c" id="snap-lbl">Jump to a named color</div>
+        <div class="snaps-c" id="snaps"></div>
+      </div>
+
+      <div class="widget-caption">Fig 1 · Toggle between color space and job space. The geometry is identical.</div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- Section 2: The bridge -->
+  <section class="section">
+    <div class="section-num">02</div>
+    <h2>Now flip the perspective</h2>
+    <p>The cube shows one job as a point. But a WIP schedule has dozens of jobs, and that's where the real power is.</p>
+    <p>Instead of thinking about a job as a point in column-space, think about a <strong>column as a vector in job-space</strong>. The "Contract Value" column isn't a label on an axis. It's a vector with one component per job, maybe 200 numbers long. "Estimated Cost" is another 200-dimensional vector. GAAP says these vectors have to satisfy exact identities across every single job simultaneously, for example:</p>
+    <p style="font-family:var(--mono);font-size:13px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--accent);">Contract[i] − Est. Cost[i] = Est. Gross Profit[i] &nbsp; for every job i</p>
+    <p>This is what makes a WIP a <em>system</em> rather than a row-by-row check. You're not validating job 1, then job 2. You're asking: do these 200-dimensional vectors satisfy this exact relationship across their entire length? If yes, you've identified all three columns at once, with mathematical certainty, without reading a single header.</p>
+    <p>And more jobs means <em>more</em> confidence, not less. Two random columns might accidentally satisfy an identity on one or two jobs. Satisfying it on 200 jobs simultaneously is essentially impossible unless the columns genuinely are what the identity says they are.</p>
+  </section>
+
+  <hr class="rule">
+
+  <!-- Section 3: Column identifier -->
+  <section class="section">
+    <div class="section-num">03</div>
+    <h2>Columns identify themselves</h2>
+    <p>Here's that process made interactive. Five unlabeled columns, 10 jobs each. Three are real: Contract Value, Est. Cost at Completion, and Est. Gross Profit. Two are decoys that look like plausible numbers but break the identity.</p>
+    <p><strong>The identity:</strong> <code style="font-family:var(--mono);font-size:13px;color:var(--accent);">Contract Value − Est. Cost = Est. Gross Profit</code>. That's it. If your column assignment satisfies this equation for every single job simultaneously, you've found the right columns. If even one job breaks it, something is wrong.</p>
+    <p>Start with the column carrying the <strong>largest numbers</strong>; the simplest prior in the book says that's Contract Value. Once you assign it, the columns that stay below contract on every job light up as cost candidates. Assign the cost column, and exactly one remaining column satisfies the identity on every job: that's your Gross Profit. Cards stay draggable the whole time, so you can shuffle them between slots freely.</p>
+
+    <div class="widget-wrap">
+      <div>
+        <div style="font-size:11px;font-weight:500;color:var(--text2);margin-bottom:8px;font-family:var(--mono);">Mystery columns · 10 jobs, values in $k</div>
+        <div class="hint-pill-d">⬡ Start with the biggest numbers: that is Contract Value</div>
+        <div class="columns-grid-d" id="col-pool" ondragover="event.preventDefault()" ondrop="dDropPool(event)"></div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <div style="font-size:11px;font-weight:500;color:var(--text2);margin-bottom:8px;font-family:var(--mono);">Assign columns · the identity: Contract Value − Est. Cost = Est. Gross Profit</div>
+        <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:0;align-items:center;">
+          <div class="slot-d" id="slot-y" ondragover="dOnOver(event,'y')" ondragleave="dOnLeave('y')" ondrop="dOnDrop(event,'y')">
+            <div class="slot-label-d"><span class="slot-dot-d" style="background:#2e7d43"></span>Contract Value</div>
+            <div class="slot-hint-d">Biggest numbers</div>
+            <div class="slot-empty-d" id="slot-y-empty">Drop here</div>
+            <div id="slot-y-filled" style="display:none;flex-direction:column;gap:3px;"></div>
+          </div>
+          <div style="font-size:28px;font-weight:300;color:var(--text2);text-align:center;padding:0 10px;line-height:1;">−</div>
+          <div class="slot-d" id="slot-x" ondragover="dOnOver(event,'x')" ondragleave="dOnLeave('x')" ondrop="dOnDrop(event,'x')">
+            <div class="slot-label-d"><span class="slot-dot-d" style="background:#A3402F"></span>Est. Cost at Completion</div>
+            <div class="slot-hint-d">Less than contract</div>
+            <div class="slot-empty-d" id="slot-x-empty">Drop here</div>
+            <div id="slot-x-filled" style="display:none;flex-direction:column;gap:3px;"></div>
+          </div>
+          <div style="font-size:28px;font-weight:300;color:var(--text2);text-align:center;padding:0 10px;line-height:1;">=</div>
+          <div class="slot-d" id="slot-z" ondragover="dOnOver(event,'z')" ondragleave="dOnLeave('z')" ondrop="dOnDrop(event,'z')">
+            <div class="slot-label-d"><span class="slot-dot-d" style="background:#2f5d8f"></span>Est. Gross Profit</div>
+            <div class="slot-hint-d">Contract minus cost</div>
+            <div class="slot-empty-d" id="slot-z-empty">Drop here</div>
+            <div id="slot-z-filled" style="display:none;flex-direction:column;gap:3px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+        <div class="score-row-d" id="score-row">
+          <span class="score-dot-d" id="score-dot" style="background:var(--border2)"></span>
+          <span id="score-text">Assign all three columns to score</span>
+        </div>
+        <button class="action-btn-d" onclick="dReveal()">Reveal answer</button>
+        <button class="action-btn-d" onclick="dRegenerate()">New dataset</button>
+      </div>
+      <div class="answer-row-d" id="answer-row"></div>
+
+      <div class="widget-caption">Fig 2 · Drag a column into each slot. The identity has to hold on every job at once, and only one assignment survives that test.</div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- Section 4: The swap problem -->
+  <section class="section">
+    <div class="section-num">04</div>
+    <h2>There is a catch: some columns are swappable</h2>
+    <p>The identity <code style="font-family:var(--mono);font-size:13px;color:var(--accent);">Contract − Est. Cost = Est. GP</code> is symmetric in its two right-hand players. Swap Est. Cost and Est. GP and the equation still balances. The math can't tell them apart on its own, because both assignments satisfy the identity perfectly on every job.</p>
+    <p>This is the fundamental ambiguity problem in header-blind column identification: any formula that's algebraically symmetric produces multiple valid assignments. The system needs a way to break that symmetry.</p>
+    <p>The answer isn't more math on the same columns. It's <strong>witness columns</strong>: other columns on the WIP that interact with the core in <em>asymmetric</em> ways. If even one column's relationship to the core can only be satisfied by one of the two swappable candidates, the ambiguity collapses immediately.</p>
+    <p>The good news: you don't need many. As long as the right combination of witnesses is present on the WIP, <strong>as few as two additional columns are enough to validate and fully identify everything</strong>, almost instantly, still without reading a single header.</p>
+  </section>
+
+  <hr class="rule">
+
+  <!-- Section 5: Witness grid -->
+  <section class="section">
+    <div class="section-num">05</div>
+    <h2>The validation grid</h2>
+    <p>Assume the core is present: contract value, the cost estimate, cost to date, and billings to date. Those four alone are a trap. From them you can <em>compute</em> every other WIP number, but you can't <em>check</em> anything, because there's no second column to compare any answer against. You can't tell whether a mapping is right without looking at columns where the numbers interact. That's what a validator column is for: it gives the engine two independent routes to the same numbers, and agreement between those routes is the proof. It's the same reason a credit card number carries a check digit. If every 16-digit string were a valid card number, no typo could ever be caught.</p>
+    <p>The grid shows what happens when you add one <strong>cost validator</strong> (rows) and one <strong>billing validator</strong> (columns) to the core. The two halves each need their own confirmation, since the cost side and the billing side don't overlap. Most combinations validate fully. The one systematic trap is <em>Remaining Billings</em>, which mirrors Billings to Date so exactly that the engine needs help from another column to tell them apart.</p>
+
+    <div class="widget-wrap" style="overflow-x:auto;">
+      <div id="witness-grid"></div>
+      <div class="widget-caption">Fig 3 · Cost validators (rows) × Billing validators (columns). Most combinations validate fully. Remaining Billings is the only column that creates systematic ambiguity.</div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- Section 6: Peeling -->
+  <section class="section">
+    <div class="section-num">06</div>
+    <h2>Peeling: identification spreads like a chain reaction</h2>
+    <p>The grid above says <em>which</em> column sets are sufficient. Here's <em>how</em> the engine actually resolves one. The procedure is called <strong>peeling</strong>, borrowed from how error-correcting codes are decoded, though you already know it from sudoku: every value you lock in creates new cells you can deduce.</p>
+    <p>It starts with a tiny hypothesis, four <strong>seed anchors</strong>: Contract Value, one estimate column, Cost to Date, and Billings to Date. From there, any formula whose inputs are all known <strong>predicts an entire column of numbers</strong> for some still-unknown variable. That prediction is held up against the unassigned physical columns. If one matches, job by job, it's identified, and it becomes a known input for the next round of formulas. The cascade runs until every column is explained.</p>
+    <p>Two details matter. When a predicted variable matches <em>no</em> physical column, the engine constructs it <strong>virtually</strong> and keeps going. A missing column never stalls the cascade, but a virtual earns zero evidence. And when several formulas are different spellings of the same underlying fact (Underbillings, Overbillings, and Net Billing are one identity wearing three hats), their matches are <strong>merged into a single unit of evidence</strong>. Counting them separately would be the engine citing itself as a source. It counts independent confirmations, not formulas.</p>
+
+    <div class="widget-wrap">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <button class="action-btn-d" id="peel-step" onclick="peelStep()">Step</button>
+        <button class="action-btn-d" id="peel-play" onclick="peelPlay()">Auto-play</button>
+        <button class="action-btn-d" onclick="peelReset()">Reset</button>
+        <div class="score-row-d" style="flex:1;min-width:220px;">
+          <span class="score-dot-d" id="peel-dot" style="background:var(--accent)"></span>
+          <span id="peel-status">Four seed anchors hypothesized · press Step</span>
+        </div>
+      </div>
+      <svg id="peel-svg" viewBox="0 0 812 350" style="width:100%;display:block;" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap;">
+        <div style="flex:1.5;min-width:300px;">
+          <div style="font-size:10px;font-weight:600;color:var(--text3);font-family:var(--mono);letter-spacing:0.08em;margin-bottom:8px;">CASCADE LOG</div>
+          <div id="peel-log" style="font-family:var(--mono);font-size:11px;line-height:1.7;color:var(--text2);background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;min-height:120px;"></div>
+        </div>
+        <div style="flex:1;min-width:230px;">
+          <div style="font-size:10px;font-weight:600;color:var(--text3);font-family:var(--mono);letter-spacing:0.08em;margin-bottom:8px;">EVIDENCE · INDEPENDENT CONFIRMATIONS</div>
+          <div id="peel-evidence" style="display:flex;flex-direction:column;gap:5px;"></div>
+        </div>
+      </div>
+      <div class="widget-caption">Fig 4 · Each step, a formula with known inputs predicts a full column and hunts for a physical match. Matches propagate; misses become virtuals; same-family matches merge into one unit of evidence.</div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+
+  <!-- Section 8: Economic priors -->
+  <section class="section">
+    <div class="section-num">07</div>
+    <h2>Breaking ties with economics</h2>
+    <p>One blind spot the algebra cannot fix from inside: <strong>perfect symmetries</strong>. Swap Est. Cost with Est. GP and the subtraction still balances (section 04). Less obviously, the earned-revenue identity <code style="font-family:var(--mono);font-size:13px;color:var(--accent);">Earned × Est. Cost = Contract × Cost to Date</code> survives swapping the <em>pairs</em> (Contract, Cost&nbsp;to&nbsp;Date) ↔ (Earned, Est.&nbsp;Cost). The algebra is equally happy with both readings.</p>
+    <p>What breaks them isn't more algebra. It's the fact that these numbers describe a <em>business</em>. Three observable regularities act as tiebreakers, and crucially, they're only ever used to rank candidates and orient readings, never as proof:</p>
+
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:12px 16px;align-items:start;margin:20px 0;">
+      <div style="font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:2px;white-space:nowrap;">Band</div>
+      <div style="font-size:14px;color:var(--text2);">Contractors don't run 60% gross margins. Est. Cost ÷ Contract sits high, typically 55–98%, while margin sits low. Whichever way you read the estimate column, only one orientation lands in a believable band.</div>
+      <div style="font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:2px;white-space:nowrap;">Stability</div>
+      <div style="font-size:14px;color:var(--text2);">An estimate ratio is a property of how the contractor <em>bids</em>, so it's tight across the whole portfolio. Progress ratios like % complete and % billed are a property of where each job <em>is in its life</em>, so they smear across 0–100%. Tight versus spread separates estimates from anchors at a glance.</div>
+      <div style="font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:2px;white-space:nowrap;">Order</div>
+      <div style="font-size:14px;color:var(--text2);">Cost to date rarely exceeds estimated cost, and billings rarely exceed contract by much. The first of these, Cost to Date ≤ Est. Cost, is exactly the observation that settles the pair-swap above.</div>
+    </div>
+
+    <div class="widget-wrap">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+        <div style="font-size:11px;font-weight:500;color:var(--text2);font-family:var(--mono);">Per-job ratios across a 16-job portfolio</div>
+        <button class="action-btn-d" onclick="prGenerate()">New portfolio</button>
+      </div>
+      <canvas id="pr-cv" width="812" height="270" style="width:100%;"></canvas>
+      <div class="widget-caption">Fig 5 · Estimate ratios cluster tightly inside their economic band; progress ratios smear across the axis. Regenerate a few portfolios: the pattern never changes, because it's the structure of the business, not of the sample.</div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- Section 9: Error detection -->
+  <section class="section">
+    <div class="section-num">08</div>
+    <h2>Catch the error, name the cell</h2>
+    <p>Identification and certification run at <strong>two different tolerances</strong>, and the gap between them is deliberate.</p>
+    <p><strong>Identification is forgiving.</strong> A column is placed if it fits a loose tolerance on all but a small number of rows, and at least one bad row is <em>always</em> tolerated. This is a structural guarantee, not generosity: a single OCR-mangled cell must not be allowed to eject the true column from consideration, or the engine would silently "explain" the table while hiding its worst cell inside a virtual.</p>
+    <p><strong>Certification is merciless.</strong> Once columns have names, every accepted identity is re-checked on every row at propagated dollar precision. A $37 misprint doesn't lower some confidence score. It produces a named row, a named column, the observed value, the expected value, and the signed difference.</p>
+    <p>Be clear about what a flagged cell means, though: it isn't the system failing. It's the system working. The columns were identified fine; the table simply contradicted itself in one spot, the engine caught it, and everything it reports from there is an explanation of exactly where and why.</p>
+    <p>Then comes the part that feels like magic but is just bookkeeping: <strong>triangulation</strong>. Every identity implicates exactly the cells it touches. Failing identities vote on a culprit; passing identities exonerate the innocent. The intersection usually pins a single cell, and because the surviving identities still connect that cell to the rest of the table, they jointly imply what the value <em>should have been</em>. The engine doesn't just find the error. It proposes the correction and tells you what kind of typo it was.</p>
+    <p>Try it. <strong>Click any number</strong> to corrupt one of its digits, the way an OCR misread would, and watch the identities triangulate.</p>
+
+    <div class="widget-wrap">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <button class="action-btn-d" onclick="xtCorruptRandom()">Corrupt a random cell</button>
+        <button class="action-btn-d" onclick="xtRepair()">Repair table</button>
+        <button class="action-btn-d" onclick="xtNewPortfolio()">New portfolio</button>
+        <div class="score-row-d" style="flex:1;min-width:200px;">
+          <span class="score-dot-d" id="xt-dot" style="background:#2e7d43"></span>
+          <span id="xt-status">All identities hold · table certifies clean</span>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table id="xt-table" style="border-collapse:separate;border-spacing:2px;width:100%;min-width:700px;"></table>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:280px;">
+          <div style="font-size:10px;font-weight:600;color:var(--text3);font-family:var(--mono);letter-spacing:0.08em;margin-bottom:8px;">IDENTITY CHECKS · STRICT, EVERY ROW</div>
+          <div id="xt-checks" style="display:flex;flex-direction:column;gap:5px;"></div>
+        </div>
+        <div style="flex:1.2;min-width:300px;">
+          <div style="font-size:10px;font-weight:600;color:var(--text3);font-family:var(--mono);letter-spacing:0.08em;margin-bottom:8px;">DIAGNOSIS</div>
+          <div id="xt-diag" style="font-family:var(--mono);font-size:11px;line-height:1.8;color:var(--text2);background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:12px 14px;min-height:110px;"></div>
+        </div>
+      </div>
+      <div class="widget-caption">Fig 6 · Columns were already identified by the cascade; this is strict certification. Amber cells are implicated by a failing identity; the red ring is the engine's verdict, computed from the votes, not from where you clicked.</div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+
+  <!-- Section 11: Efficiency -->
+  <section class="section">
+    <div class="section-num">09</div>
+    <h2>Why this is fast and nearly free</h2>
+    <p>The naive approach to column identification is brute force: try every assignment of columns to roles and check which one satisfies all the identities. With N columns that's N! orderings, and factorials do not negotiate:</p>
+
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin:20px 0;font-family:var(--mono);font-size:12px;line-height:2;color:var(--text2);overflow-wrap:anywhere;">
+      <div><span style="color:var(--text3);">&nbsp;8 columns&nbsp;→</span> 8!&nbsp;= <span style="color:var(--text);">40,320</span> orderings</div>
+      <div><span style="color:var(--text3);">12 columns&nbsp;→</span> 12! = <span style="color:var(--text);">479,001,600</span> orderings</div>
+      <div><span style="color:var(--text3);">30 columns&nbsp;→</span> 30! = <span style="color:var(--accent);">265,252,859,812,191,058,636,308,480,000,000</span> orderings</div>
+    </div>
+
+    <p>A heavyweight 30-column WIP, the kind a large contractor actually submits, is about 2.65 × 10³² orderings. Checking a billion per second would take roughly eight quadrillion years, around 600,000 times the age of the universe. The geometric approach never goes there. It exploits the structure of the problem to prune the search at each step:</p>
+
+    <div style="display:flex;flex-direction:column;gap:10px;margin:20px 0;">
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:12px 16px;align-items:start;">
+        <div style="font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:2px;white-space:nowrap;">Step 1 · O(N)</div>
+        <div style="font-size:14px;color:var(--text2);">Shortlist the columns with the largest portfolio-wide values as Contract candidates. One pass over N columns. This is a prior, not proof. If no shortlisted reading survives, the list expands.</div>
+
+        <div style="font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:2px;white-space:nowrap;">Step 2 · O(N × J)</div>
+        <div style="font-size:14px;color:var(--text2);">Screen each remaining column against the candidate: does <code style="font-family:var(--mono);font-size:12px;">col[j] ÷ contract[j]</code> stay inside its economic band on at least 90% of jobs? Robust by design: real WIPs carry OCR noise, rounding, and the occasional zero row, so a single bad value never disqualifies a column.</div>
+
+        <div style="font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:2px;white-space:nowrap;">Step 3 · O(K × J)</div>
+        <div style="font-size:14px;color:var(--text2);">Only the K surviving anchor placements (usually a handful) proceed to peeling. Each cascade is a fixed sequence of vector predictions and matches, and the validation grid already says which combinations can resolve, so this is closer to a lookup than a search.</div>
+
+        <div style="font-family:var(--mono);font-size:12px;color:var(--accent);padding-top:2px;white-space:nowrap;">Total · O(N × J)</div>
+        <div style="font-size:14px;color:var(--text2);">Linear in columns, linear in jobs. Even a 30-column WIP with 200 jobs is on the order of <em>thousands</em> of vectorized checks, not nonillions. The combinatorial explosion never happens because each constraint eliminates candidates before the next step runs.</div>
+      </div>
+    </div>
+
+    <p>The reason the pruning is so brutal: each GAAP identity carves the space of possible assignments down to a thin slice, and a valid assignment has to sit inside every slice at once. The engine isn't searching the whole space. It's applying one constraint at a time and keeping only what survives, and after three or four constraints almost nothing is left except the correct assignment.</p>
+    
+  </section>
+
+  <hr class="rule">
+
+  <footer>
+    <span style="color:var(--accent);">Wipple</span> · deterministic WIP column identification from GAAP identities
+  </footer>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+// CUBE
+// ════════════════════════════════════════════════════════
+const COLOR_PRESETS=[
+  {n:'Violet',r:238,g:130,b:238},{n:'Coral',r:255,g:127,b:80},
+  {n:'Chartreuse',r:127,g:255,b:0},{n:'Cyan',r:0,g:255,b:255},
+  {n:'Orange',r:255,g:165,b:0},{n:'Royal Blue',r:65,g:105,b:225},
+  {n:'Crimson',r:220,g:20,b:60},{n:'Hot Pink',r:255,g:105,b:180},
+  {n:'Indigo',r:75,g:0,b:130},{n:'Gold',r:255,g:215,b:0},
+  {n:'Turquoise',r:64,g:224,b:208},{n:'White',r:255,g:255,b:255},
+];
+const JOB_PRESETS=[
+  {n:'Healthy',r:128,g:200,b:128},{n:'Overbilled',r:100,g:200,b:160},
+  {n:'Underbilled',r:140,g:200,b:80},{n:'Loss job',r:200,g:160,b:180},
+  {n:'Early stage',r:40,g:220,b:30},{n:'Near complete',r:195,g:210,b:200},
+];
+const APPROX=[
+  {n:'Black',c:[[0,18],[0,18],[0,18]]},{n:'White',c:[[230,255],[230,255],[230,255]]},
+  {n:'Red',c:[[170,255],[0,70],[0,70]]},{n:'Green',c:[[0,70],[140,255],[0,70]]},
+  {n:'Blue',c:[[0,70],[0,70],[140,255]]},{n:'Yellow',c:[[170,255],[170,255],[0,80]]},
+  {n:'Cyan',c:[[0,80],[170,255],[170,255]]},{n:'Magenta',c:[[170,255],[0,80],[170,255]]},
+  {n:'Orange',c:[[200,255],[80,175],[0,70]]},{n:'Purple',c:[[70,190],[0,90],[90,240]]},
+  {n:'Pink',c:[[180,255],[60,190],[90,230]]},{n:'Violet',c:[[90,230],[0,100],[90,250]]},
+  {n:'Teal',c:[[0,90],[140,230],[130,230]]},{n:'Gray',c:[[70,210],[70,210],[70,210]]},
+  {n:'Indigo',c:[[40,120],[0,70],[100,210]]},{n:'Coral',c:[[190,255],[70,165],[40,130]]},
+  {n:'Gold',c:[[190,255],[140,235],[0,70]]},{n:'Sienna',c:[[90,195],[30,120],[0,75]]},
+];
+function approxName(r,g,b){for(const c of APPROX){const[rc,gc,bc]=c.c;if(r>=rc[0]&&r<=rc[1]&&g>=gc[0]&&g<=gc[1]&&b>=bc[0]&&b<=bc[1])return c.n;}const mx=Math.max(r,g,b),mn=Math.min(r,g,b);if(mx-mn<35)return mx>200?'White':mx>110?'Gray':'Black';return r>g&&r>b?'Red':g>r&&g>b?'Green':'Blue';}
+function hexStr(r,g,b){return'#'+[r,g,b].map(x=>Math.max(0,Math.min(255,Math.round(x))).toString(16).padStart(2,'0')).join('');}
+function fmt$(v){return'$'+Math.round(v/255*1000)+'k';}
+
+let cMode='color';
+let cRgb={r:128,g:200,b:160};
+let cUnitVec={r:null,g:null,b:null};
+let cLinked=new Set();
+let cRotX=-0.3800,cRotY=0.5160,cDragging=false,cLx=0,cLy=0;
+
+function buildSnaps(){
+  const container=document.getElementById('snaps');container.innerHTML='';
+  const presets=cMode==='color'?COLOR_PRESETS:JOB_PRESETS;
+  presets.forEach(p=>{
+    const btn=document.createElement('button');btn.className='snap-btn-c';
+    if(cMode==='color'){const dot=document.createElement('span');dot.className='snap-color-c';dot.style.background=hexStr(p.r,p.g,p.b);btn.appendChild(dot);}
+    btn.appendChild(document.createTextNode(p.n));
+    btn.onclick=()=>cJumpTo(p.r,p.g,p.b);
+    container.appendChild(btn);
+  });
+}
+
+function setMode(m){
+  cMode=m;
+  document.getElementById('btn-color').classList.toggle('active',m==='color');
+  document.getElementById('btn-wip').classList.toggle('active',m==='wip');
+  document.getElementById('lbl-r').textContent=m==='color'?'Red':'Costs Incurred';
+  document.getElementById('lbl-g').textContent=m==='color'?'Green':'Contract Value';
+  document.getElementById('lbl-b').textContent=m==='color'?'Blue':'Billings to Date';
+  document.getElementById('mag-lbl').textContent=m==='color'?'Magnitude':'Job size';
+  document.getElementById('snap-lbl').textContent=m==='color'?'Jump to a named color':'Example jobs';
+  document.getElementById('billing-pill').style.display=m==='wip'?'inline-flex':'none';
+  document.getElementById('wip-vals').style.display=m==='wip'?'flex':'none';
+  buildSnaps();cSyncUI();cDraw();
+}
+
+function cJumpTo(r,g,b){cRgb={r,g,b};cRecomputeUnit();cSyncUI();cDraw();}
+
+function toggleLink(ax){
+  if(cLinked.has(ax)){cLinked.delete(ax);cUnitVec[ax]=null;}else{cLinked.add(ax);}
+  document.getElementById('lnk-'+ax).classList.toggle('on',cLinked.has(ax));
+  cRecomputeUnit();
+}
+
+function cRecomputeUnit(){
+  if(cLinked.size===0){cUnitVec={r:null,g:null,b:null};return;}
+  const maxVal=Math.max(...['r','g','b'].map(a=>cLinked.has(a)?cRgb[a]:0));
+  if(maxVal===0){cUnitVec={r:null,g:null,b:null};return;}
+  ['r','g','b'].forEach(a=>{cUnitVec[a]=cLinked.has(a)?cRgb[a]/maxVal:null;});
+}
+
+function slideAxis(ax,newVal){
+  if(cLinked.has(ax)&&cLinked.size>1&&cUnitVec[ax]!==null&&cUnitVec[ax]!==0){
+    const mag=newVal/cUnitVec[ax];
+    ['r','g','b'].forEach(a=>{if(cUnitVec[a]!==null)cRgb[a]=Math.max(0,Math.min(255,mag*cUnitVec[a]));});
+  }else{cRgb[ax]=newVal;cRecomputeUnit();}
+  cSyncUI();cDraw();
+}
+
+function slideMag(newMag){
+  const cur=Math.sqrt(cRgb.r**2+cRgb.g**2+cRgb.b**2);
+  if(cur<0.001){const v=newMag/Math.sqrt(3);cRgb={r:Math.min(255,v),g:Math.min(255,v),b:Math.min(255,v)};}
+  else{const s=newMag/cur;cRgb.r=Math.max(0,Math.min(255,cRgb.r*s));cRgb.g=Math.max(0,Math.min(255,cRgb.g*s));cRgb.b=Math.max(0,Math.min(255,cRgb.b*s));}
+  cRecomputeUnit();cSyncUI();cDraw();
+}
+
+function cSyncUI(){
+  const dr=Math.round(cRgb.r),dg=Math.round(cRgb.g),db=Math.round(cRgb.b);
+  ['r','g','b'].forEach(a=>{document.getElementById('sl-'+a).value=Math.round(cRgb[a]);document.getElementById('v'+a).textContent=Math.round(cRgb[a]);});
+  const mag=Math.sqrt(cRgb.r**2+cRgb.g**2+cRgb.b**2);
+  document.getElementById('sl-mag').value=Math.round(mag);
+  document.getElementById('mag-display').textContent=cMode==='color'?Math.round(mag):'$'+Math.round(mag/441*1000)+'k';
+  if(cMode==='color'){
+    const h=hexStr(dr,dg,db);
+    document.getElementById('swatch').style.background=h;
+    document.getElementById('info-primary').textContent=h.toUpperCase();
+    document.getElementById('info-secondary').textContent=approxName(dr,dg,db);
+    document.getElementById('info-tertiary').textContent=`R ${dr} · G ${dg} · B ${db}`;
+  }else{
+    const cost=Math.round(cRgb.r/255*1000),contract=Math.round(cRgb.g/255*1000),billing=Math.round(cRgb.b/255*1000);
+    const pct=cRgb.g>0?Math.round(cRgb.r/cRgb.g*100):0;const gp=contract-cost;
+    const margin=cRgb.g>0?(cRgb.g-cRgb.r)/cRgb.g:0,cc=Math.max(-1,Math.min(1,margin));
+    const swCol=cc>=0?`rgb(40,${Math.round(80+cc*155)},60)`:`rgb(${Math.round(120+Math.abs(cc)*135)},40,40)`;
+    document.getElementById('swatch').style.background=swCol;
+    document.getElementById('info-primary').textContent=`$${contract}k contract`;
+    document.getElementById('info-secondary').textContent=`${pct}% complete`;
+    document.getElementById('info-tertiary').textContent=`Cost $${cost}k · GP ${gp>=0?'+':''}$${gp}k · Billed $${billing}k`;
+    const gap=cRgb.b-cRgb.r,gapK=Math.round(Math.abs(gap)/255*1000);
+    const bdot=document.getElementById('billing-dot'),btxt=document.getElementById('billing-text');
+    if(Math.abs(gap)<4){bdot.style.background='#6e776c';btxt.textContent='On billing';}
+    else if(gap>0){bdot.style.background='#A3402F';btxt.textContent=`Overbilled $${gapK}k`;}
+    else{bdot.style.background='#2f5d8f';btxt.textContent=`Underbilled $${gapK}k`;}
+    // right-side live value panel
+    const earnedRev=Math.round(pct/100*contract);
+    document.getElementById('wv-earned').textContent='$'+earnedRev+'k';
+    document.getElementById('wv-pct').textContent=pct+'%';
+    const billGap=billing-earnedRev;const billGapK=Math.round(Math.abs(billGap)/1)*1;
+    if(Math.abs(billGap)<5){
+      document.getElementById('wv-bill-label').textContent='Billing Position';
+      document.getElementById('wv-bill-val').style.color='#6e776c';
+      document.getElementById('wv-bill-val').textContent='On billing';
+    }else if(billGap>0){
+      document.getElementById('wv-bill-label').textContent='Overbilled';
+      document.getElementById('wv-bill-val').style.color='#A3402F';
+      document.getElementById('wv-bill-val').textContent='+$'+billGapK+'k';
+    }else{
+      document.getElementById('wv-bill-label').textContent='Underbilled';
+      document.getElementById('wv-bill-val').style.color='#2f5d8f';
+      document.getElementById('wv-bill-val').textContent='-$'+Math.abs(billGapK)+'k';
+    }
+  }
+}
+
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d');
+
+cv.addEventListener('mousedown',e=>{cDragging=true;cLx=e.clientX;cLy=e.clientY;});
+window.addEventListener('mouseup',()=>{cDragging=false;});
+window.addEventListener('mousemove',e=>{if(!cDragging)return;cRotY+=(e.clientX-cLx)*0.012;cRotX-=(e.clientY-cLy)*0.012;cLx=e.clientX;cLy=e.clientY;cDraw();});
+cv.addEventListener('touchstart',e=>{cDragging=true;cLx=e.touches[0].clientX;cLy=e.touches[0].clientY;e.preventDefault();},{passive:false});
+window.addEventListener('touchend',()=>{cDragging=false;});
+window.addEventListener('touchmove',e=>{if(!cDragging)return;cRotY+=(e.touches[0].clientX-cLx)*0.012;cRotX-=(e.touches[0].clientY-cLy)*0.012;cLx=e.touches[0].clientX;cLy=e.touches[0].clientY;cDraw();e.preventDefault();},{passive:false});
+
+function cRot3(x,y,z){const cy=Math.cos(cRotY),sy=Math.sin(cRotY),cx=Math.cos(cRotX),sx=Math.sin(cRotX);const x1=x*cy+z*sy,z1=-x*sy+z*cy,y1=y*cx-z1*sx,z2=y*sx+z1*cx;return{x:x1,y:y1,z:z2};}
+function cProj(x,y,z){const d=8.0,r=cRot3(x-0.5,y-0.5,z-0.5),W=cv.width,H=cv.height,s=d/(r.z+d)*Math.min(W,H)*0.46;return{sx:W/2+r.x*s,sy:H/2-r.y*s,z:r.z};}
+function CP(x,y,z){return cProj(x,y,z);}
+
+const C_CORNERS=[[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
+const C_COLORS=['#000000','#ff0000','#00ff00','#ffff00','#0000ff','#ff00ff','#00ffff','#ffffff'];
+const C_EDGES=[[0,1],[0,2],[0,4],[1,3],[1,5],[2,3],[2,6],[3,7],[4,5],[4,6],[5,7],[6,7]];
+const C_FACES=[{v:[0,1,3,2]},{v:[4,5,7,6]},{v:[0,1,5,4]},{v:[2,3,7,6]},{v:[0,2,6,4]},{v:[1,3,7,5]}];
+
+function cFaceNormal(vi){const pts=vi.map(i=>C_CORNERS[i]);const ax=pts[1][0]-pts[0][0],ay=pts[1][1]-pts[0][1],az=pts[1][2]-pts[0][2];const bx=pts[2][0]-pts[0][0],by=pts[2][1]-pts[0][1],bz=pts[2][2]-pts[0][2];return{x:ay*bz-az*by,y:az*bx-ax*bz,z:ax*by-ay*bx};}
+
+function cDrawLabel(c,text,x,y,color){
+  c.save();c.font='bold 11px "Public Sans",system-ui,sans-serif';c.textAlign='center';c.textBaseline='middle';
+  const pad=4,lh=13,lines=text.split('\n');
+  const maxW=Math.max(...lines.map(l=>c.measureText(l).width));
+  const bw=maxW+pad*2,bh=lines.length*lh+pad*2;
+  c.fillStyle='rgba(252,251,245,0.94)';c.beginPath();c.roundRect(x-bw/2,y-bh/2,bw,bh,4);c.fill();
+  c.fillStyle=color;lines.forEach((l,i)=>c.fillText(l,x,y+(i-(lines.length-1)/2)*lh));c.restore();
+}
+
+function cDraw(){
+  const W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  const edgeC='rgba(45,55,45,0.16)';const textC='rgba(60,70,60,0.75)';const isWip=cMode==='wip';
+
+  const faceData=C_FACES.map(f=>{
+    const projected=f.v.map(i=>{const c=C_CORNERS[i];return CP(c[0],c[1],c[2]);});
+    const avgZ=projected.reduce((s,p)=>s+p.z,0)/4;
+    const n=cFaceNormal(f.v);const nr=cRot3(n.x,n.y,n.z);
+    return{f,projected,avgZ,visible:nr.z<0};
+  });
+  faceData.sort((a,b)=>b.avgZ-a.avgZ);
+
+  faceData.forEach(({f,projected,visible})=>{
+    if(visible)return;
+    ctx.save();ctx.beginPath();ctx.moveTo(projected[0].sx,projected[0].sy);
+    for(let i=1;i<4;i++)ctx.lineTo(projected[i].sx,projected[i].sy);
+    ctx.closePath();
+    const c=f.v.map(i=>C_COLORS[i]);
+    const g=ctx.createLinearGradient(projected[0].sx,projected[0].sy,projected[2].sx,projected[2].sy);
+    g.addColorStop(0,c[0]+'14');g.addColorStop(1,c[2]+'14');ctx.fillStyle=g;ctx.fill();ctx.restore();
+  });
+
+  C_EDGES.forEach(([a,b])=>{
+    const pA=CP(...C_CORNERS[a]),pB=CP(...C_CORNERS[b]);
+    ctx.save();ctx.strokeStyle=edgeC;ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(pA.sx,pA.sy);ctx.lineTo(pB.sx,pB.sy);ctx.stroke();ctx.restore();
+  });
+
+  const O=CP(0,0,0);const axisLen=1.18;
+  const axesDef=isWip?
+    [{dir:[axisLen,0,0],color:'#A3402F',label:'Cost'},{dir:[0,axisLen,0],color:'#2e7d43',label:'Contract'},{dir:[0,0,axisLen],color:'#2f5d8f',label:'Billing'}]:
+    [{dir:[axisLen,0,0],color:'#A3402F',label:'R'},{dir:[0,axisLen,0],color:'#2e7d43',label:'G'},{dir:[0,0,axisLen],color:'#2f5d8f',label:'B'}];
+
+  axesDef.forEach(ax=>{
+    const tip=CP(...ax.dir);
+    ctx.save();ctx.strokeStyle=ax.color+'cc';ctx.lineWidth=1.5;ctx.setLineDash([]);
+    ctx.beginPath();ctx.moveTo(O.sx,O.sy);ctx.lineTo(tip.sx,tip.sy);ctx.stroke();
+    const dx=tip.sx-O.sx,dy=tip.sy-O.sy,len=Math.sqrt(dx*dx+dy*dy),ux=dx/len,uy=dy/len;
+    ctx.beginPath();ctx.moveTo(tip.sx,tip.sy);ctx.lineTo(tip.sx-ux*10-uy*5,tip.sy-uy*10+ux*5);ctx.lineTo(tip.sx-ux*10+uy*5,tip.sy-uy*10-ux*5);ctx.closePath();ctx.fillStyle=ax.color+'cc';ctx.fill();
+    ctx.fillStyle=ax.color;ctx.font='bold 13px "Public Sans",system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(ax.label,tip.sx+(tip.sx-O.sx)*0.14,tip.sy+(tip.sy-O.sy)*0.14);
+    if(!isWip){for(let t=1;t<=4;t++){
+      const tf=t/4/axisLen,tp=CP(ax.dir[0]*tf,ax.dir[1]*tf,ax.dir[2]*tf);
+      ctx.strokeStyle=ax.color+'88';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(tp.sx-uy*4,tp.sy+ux*4);ctx.lineTo(tp.sx+uy*4,tp.sy-ux*4);ctx.stroke();
+      ctx.fillStyle=textC;ctx.font='10px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText([0,64,128,192,255][t],tp.sx+uy*6+5,tp.sy-ux*6-2);
+    }}
+    ctx.restore();
+  });
+
+  faceData.forEach(({f,projected,visible})=>{
+    if(!visible)return;
+    ctx.save();ctx.beginPath();ctx.moveTo(projected[0].sx,projected[0].sy);
+    for(let i=1;i<4;i++)ctx.lineTo(projected[i].sx,projected[i].sy);
+    ctx.closePath();
+    const c=f.v.map(i=>C_COLORS[i]);
+    const g=ctx.createLinearGradient(projected[0].sx,projected[0].sy,projected[2].sx,projected[2].sy);
+    g.addColorStop(0,c[0]+'50');g.addColorStop(0.5,c[1]+'38');g.addColorStop(1,c[2]+'50');ctx.fillStyle=g;ctx.fill();ctx.restore();
+  });
+
+  // healthy billing plane, drawn after faces so it's visible
+  if(isWip){
+    const hp=[CP(0,0,0),CP(1,0,1),CP(1,1,1),CP(0,1,0)];
+    ctx.save();ctx.beginPath();ctx.moveTo(hp[0].sx,hp[0].sy);
+    hp.forEach(p=>ctx.lineTo(p.sx,p.sy));ctx.closePath();
+    ctx.fillStyle='rgba(45,55,45,0.05)';ctx.fill();
+    ctx.setLineDash([5,5]);ctx.strokeStyle='rgba(45,55,45,0.30)';ctx.lineWidth=1.2;ctx.stroke();ctx.restore();
+    const mid=CP(0.62,0.62,0.62);
+    cDrawLabel(ctx,'Healthy\n(Costs = Billings)',mid.sx+56,mid.sy-16,'#6e776c');
+  }
+
+  const px=cRgb.r/255,py=cRgb.g/255,pz=cRgb.b/255;
+  const PP=CP(px,py,pz);
+
+  if(isWip){
+    const HP=CP(px,py,px);const gap=cRgb.b-cRgb.r;
+    const gapColor=gap>4?'#A3402F':gap<-4?'#2f5d8f':'#6e776c';
+    ctx.save();ctx.strokeStyle=gapColor;ctx.lineWidth=1.5;ctx.setLineDash([3,3]);ctx.globalAlpha=0.8;
+    ctx.beginPath();ctx.moveTo(HP.sx,HP.sy);ctx.lineTo(PP.sx,PP.sy);ctx.stroke();ctx.restore();
+    ctx.save();ctx.beginPath();ctx.arc(HP.sx,HP.sy,7,0,Math.PI*2);ctx.fillStyle='rgba(45,55,45,0.08)';ctx.fill();
+    ctx.strokeStyle='rgba(60,70,60,0.6)';ctx.lineWidth=1.5;ctx.setLineDash([3,3]);ctx.stroke();ctx.restore();
+    if(Math.abs(gap)>6){const gapK=Math.round(Math.abs(gap)/255*1000);cDrawLabel(ctx,gap>0?`+$${gapK}k over`:`-$${gapK}k under`,(HP.sx+PP.sx)/2+28,(HP.sy+PP.sy)/2,gapColor);}
+  }
+
+  const floorPt=CP(px,0,pz),backPt=CP(px,py,0),leftPt=CP(0,py,pz);
+  const rAxisPt=CP(px,0,0),gAxisPt=CP(0,py,0),bAxisPt=CP(0,0,pz);
+
+  function dropLine(from,to,color){ctx.save();ctx.strokeStyle=color;ctx.lineWidth=1.2;ctx.setLineDash([4,4]);ctx.globalAlpha=0.55;ctx.beginPath();ctx.moveTo(from.sx,from.sy);ctx.lineTo(to.sx,to.sy);ctx.stroke();ctx.restore();}
+  function cdot(pt,color,alpha=0.5,r=4){ctx.save();ctx.beginPath();ctx.arc(pt.sx,pt.sy,r,0,Math.PI*2);ctx.fillStyle=color;ctx.globalAlpha=alpha;ctx.fill();ctx.restore();}
+
+  dropLine(PP,floorPt,'#2e7d43');dropLine(PP,backPt,'#2f5d8f');dropLine(PP,leftPt,'#A3402F');
+  cdot(floorPt,'#2e7d43');cdot(backPt,'#2f5d8f');cdot(leftPt,'#A3402F');
+  dropLine(floorPt,rAxisPt,'#A3402F');dropLine(floorPt,bAxisPt,'#2f5d8f');
+  dropLine(backPt,rAxisPt,'#A3402F');dropLine(backPt,gAxisPt,'#2e7d43');
+  dropLine(leftPt,gAxisPt,'#2e7d43');dropLine(leftPt,bAxisPt,'#2f5d8f');
+  cdot(rAxisPt,'#A3402F',0.75);cdot(gAxisPt,'#2e7d43',0.75);cdot(bAxisPt,'#2f5d8f',0.75);
+
+  ctx.save();ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.globalAlpha=0.85;
+  ctx.fillStyle='#A3402F';ctx.fillText(isWip?fmt$(cRgb.r):Math.round(cRgb.r),CP(px,-0.09,0).sx,CP(px,-0.09,0).sy);
+  ctx.fillStyle='#2e7d43';ctx.fillText(isWip?fmt$(cRgb.g):Math.round(cRgb.g),CP(-0.1,py,0).sx,CP(-0.1,py,0).sy);
+  ctx.fillStyle='#2f5d8f';ctx.fillText(isWip?fmt$(cRgb.b):Math.round(cRgb.b),CP(0,-0.09,pz).sx,CP(0,-0.09,pz).sy);
+  ctx.restore();
+
+  const vecColor=isWip?(()=>{const m=cRgb.g>0?(cRgb.g-cRgb.r)/cRgb.g:0,cc=Math.max(-1,Math.min(1,m));return cc>=0?`rgb(40,${Math.round(80+cc*155)},60)`:`rgb(${Math.round(120+Math.abs(cc)*135)},40,40)`;})():hexStr(Math.round(cRgb.r),Math.round(cRgb.g),Math.round(cRgb.b));
+  // parse vecColor to rgba for gradient stops
+  const vcMatch=vecColor.match(/rgb\((\d+),(\d+),(\d+)\)/);
+  const vcGlow=vcMatch?`rgba(${vcMatch[1]},${vcMatch[2]},${vcMatch[3]},0.53)`:'rgba(128,128,128,0.53)';
+  const vcGlow0=vcMatch?`rgba(${vcMatch[1]},${vcMatch[2]},${vcMatch[3]},0)`:'rgba(128,128,128,0)';
+  ctx.save();ctx.strokeStyle=vecColor;ctx.lineWidth=2.5;ctx.globalAlpha=0.8;ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(O.sx,O.sy);ctx.lineTo(PP.sx,PP.sy);ctx.stroke();ctx.restore();
+  ctx.save();const grad=ctx.createRadialGradient(PP.sx,PP.sy,0,PP.sx,PP.sy,18);grad.addColorStop(0,vcGlow);grad.addColorStop(1,vcGlow0);ctx.beginPath();ctx.arc(PP.sx,PP.sy,18,0,Math.PI*2);ctx.fillStyle=grad;ctx.fill();ctx.restore();
+  ctx.save();ctx.beginPath();ctx.arc(PP.sx,PP.sy,11,0,Math.PI*2);ctx.fillStyle=vecColor;ctx.fill();ctx.strokeStyle='rgba(45,55,45,0.45)';ctx.lineWidth=1.8;ctx.stroke();ctx.restore();
+  ctx.save();ctx.beginPath();ctx.arc(PP.sx-3.5,PP.sy-3.5,4,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.75)';ctx.fill();ctx.restore();
+}
+
+buildSnaps();setMode('color');
+
+// ════════════════════════════════════════════════════════
+// COLUMN IDENTIFIER
+// ════════════════════════════════════════════════════════
+const DN=10;
+let dJobs=[],dColumns=[],dAnswer={};
+let dSlots={x:null,y:null,z:null};
+let dDragCol=null;
+
+function dRnd(a,b){return Math.random()*(b-a)+a;}
+
+function dGenerate(){
+  dJobs=[];
+  for(let i=0;i<DN;i++){
+    const contract=Math.round(dRnd(300,950)/50)*50;
+    const margin=dRnd(0.08,0.28); // gross margin 8-28%
+    const estCost=Math.round(contract*(1-margin)/10)*10;
+    const estGP=contract-estCost;
+    dJobs.push({contract,estCost,estGP});
+  }
+  // decoy 1: running costs to date, smaller than estCost, not a clean subtraction partner
+  // decoy 2: overhead allocation, random fraction of estCost, clearly wrong
+  const colDefs=[
+    {id:'contract', role:'y', vals:dJobs.map(j=>j.contract)},
+    {id:'estCost',  role:'x', vals:dJobs.map(j=>j.estCost)},
+    {id:'estGP',    role:'z', vals:dJobs.map(j=>j.estGP)},
+    // decoy: costs incurred to date, partial, not the right number
+    {id:'costsToDate', role:'decoy', vals:dJobs.map(j=>Math.round(j.estCost*dRnd(0.15,0.75)/10)*10)},
+    // decoy: overhead, a flat percentage of contract, doesn't satisfy contract-x=z
+    {id:'overhead', role:'decoy', vals:dJobs.map(j=>Math.round(j.contract*dRnd(0.04,0.09)/10)*10)},
+  ];
+  const contractCol=colDefs.find(c=>c.id==='contract');
+  const rest=colDefs.filter(c=>c.id!=='contract').sort(()=>Math.random()-0.5);
+  const letters=['A','B','C','D','E'];
+  dColumns=[contractCol,...rest].map((c,i)=>({...c,label:'Col '+letters[i]}));
+  dAnswer={};
+  dColumns.forEach(c=>{if(c.role==='x')dAnswer.x=c.label;if(c.role==='y')dAnswer.y=c.label;if(c.role==='z')dAnswer.z=c.label;});
+  dSlots={x:null,y:null,z:null};
+  document.getElementById('answer-row').style.display='none';
+}
+
+function dBuildPool(){
+  const pool=document.getElementById('col-pool');pool.innerHTML='';
+  const medians=dColumns.map(c=>{const s=[...c.vals].sort((a,b)=>a-b);return s[Math.floor(DN/2)];});
+  const maxMed=Math.max(...medians);
+  dColumns.forEach((col,ci)=>{
+    const card=document.createElement('div');card.className='col-card-d';card.id='dcard-'+col.id;card.draggable=true;
+    const nameDiv=document.createElement('div');nameDiv.className='col-name-d';nameDiv.textContent=col.label;card.appendChild(nameDiv);
+    if(medians[ci]===maxMed){const badge=document.createElement('div');badge.className='biggest-badge-d';badge.textContent='largest';card.appendChild(badge);}
+    const valsDiv=document.createElement('div');valsDiv.className='col-vals-d';
+    col.vals.forEach((v,vi)=>{const row=document.createElement('div');row.className='val-row-d';row.id=`dval-${col.id}-${vi}`;row.textContent='$'+v+'k';valsDiv.appendChild(row);});
+    card.appendChild(valsDiv);
+    card.addEventListener('dragstart',e=>{dDragCol=col;card.classList.add('dragging');});
+    card.addEventListener('dragend',e=>{card.classList.remove('dragging');});
+    pool.appendChild(card);
+  });
+}
+
+function dUpdateHighlights(){
+  const yCol=dSlots.y,xCol=dSlots.x;
+  dColumns.forEach(col=>{
+    if(dSlots.x?.id===col.id||dSlots.y?.id===col.id||dSlots.z?.id===col.id)return;
+    const card=document.getElementById('dcard-'+col.id);if(!card)return;
+    card.classList.remove('hint-contract-d','hint-costs-d','hint-billings-d','hint-invalid-d');
+    col.vals.forEach((_,vi)=>{const row=document.getElementById(`dval-${col.id}-${vi}`);if(row)row.classList.remove('match-d','match-cost-d','match-billing-d');});
+    const existing=card.querySelector('.col-tag-d');if(existing)existing.remove();
+  });
+  if(!yCol&&!xCol)return;
+
+  dColumns.forEach(col=>{
+    if(dSlots.x?.id===col.id||dSlots.y?.id===col.id||dSlots.z?.id===col.id)return;
+    const card=document.getElementById('dcard-'+col.id);if(!card)return;
+
+    if(yCol&&!xCol){
+      // phase 1: col[i] < yCol[i] for all jobs AND col[i]/yCol[i] in (0,1), cost candidate
+      const allLess=col.vals.every((v,i)=>v>0&&v<yCol.vals[i]);
+      if(allLess){
+        card.classList.add('hint-costs-d');
+        const tag=document.createElement('span');tag.className='col-tag-d tag-costs-d';tag.textContent='candidate';
+        card.querySelector('.col-name-d').appendChild(tag);
+        col.vals.forEach((_,vi)=>{const row=document.getElementById(`dval-${col.id}-${vi}`);if(row)row.classList.add('match-cost-d');});
+      }else{card.classList.add('hint-invalid-d');}
+    }
+
+    if(yCol&&xCol){
+      // phase 2: does yCol[i] - xCol[i] = col[i] for every job?
+      const allMatch=col.vals.every((v,i)=>Math.abs((yCol.vals[i]-xCol.vals[i])-v)<=20);
+      if(allMatch){
+        card.classList.add('hint-billings-d');
+        const tag=document.createElement('span');tag.className='col-tag-d tag-billings-d';tag.textContent='= this!';
+        card.querySelector('.col-name-d').appendChild(tag);
+        col.vals.forEach((_,vi)=>{const row=document.getElementById(`dval-${col.id}-${vi}`);if(row)row.classList.add('match-billing-d');});
+      }else{card.classList.add('hint-invalid-d');}
+    }
+  });
+}
+
+function dOnOver(e,s){e.preventDefault();document.getElementById('slot-'+s).classList.add('over-d');}
+function dOnLeave(s){document.getElementById('slot-'+s).classList.remove('over-d');}
+
+function dOnDrop(e,s){
+  e.preventDefault();document.getElementById('slot-'+s).classList.remove('over-d');
+  if(!dDragCol)return;
+  ['x','y','z'].forEach(k=>{if(dSlots[k]&&dSlots[k].id===dDragCol.id)dClearSlot(k);});
+  if(dSlots[s])dReturnToPool(dSlots[s]);
+  dSlots[s]=dDragCol;dFillSlot(s,dDragCol);dMarkAssigned(dDragCol.id,true);
+  dDragCol=null;dUpdateHighlights();dRefresh();
+}
+
+function dFillSlot(s,col){
+  document.getElementById('slot-'+s+'-empty').style.display='none';
+  const el=document.getElementById('slot-'+s+'-filled');el.style.display='flex';
+  el.innerHTML=`<div class="slot-col-name-d" draggable="true" ondragstart="dDragFromSlot('${s}')" title="Drag to move, or click ✕">${col.label}<button class="clear-btn-d" onclick="dClearSlot('${s}')">✕</button></div><div class="slot-vals-d">${col.vals.slice(0,7).map(v=>'$'+v+'k').join('<br>')}</div>`;
+}
+
+function dDragFromSlot(s){dDragCol=dSlots[s];}
+
+function dDropPool(e){
+  e.preventDefault();
+  if(!dDragCol)return;
+  ['x','y','z'].forEach(k=>{if(dSlots[k]&&dSlots[k].id===dDragCol.id)dClearSlot(k);});
+  dDragCol=null;
+}
+
+function dClearSlot(s){
+  if(!dSlots[s])return;dReturnToPool(dSlots[s]);dMarkAssigned(dSlots[s].id,false);dSlots[s]=null;
+  document.getElementById('slot-'+s+'-empty').style.display='';
+  const el=document.getElementById('slot-'+s+'-filled');el.style.display='none';el.innerHTML='';
+  dUpdateHighlights();dRefresh();
+}
+
+function dReturnToPool(col){const c=document.getElementById('dcard-'+col.id);if(c){c.classList.remove('assigned-d');}}
+function dMarkAssigned(id,on){const c=document.getElementById('dcard-'+id);if(c){c.classList.toggle('assigned-d',on);}}
+function dIsCorrectXY(){return dSlots.y?.role==='y'&&(dSlots.x?.role==='x'||dSlots.x?.role==='z');}
+function dIsCorrectAll(){
+  if(!dSlots.x||!dSlots.y||!dSlots.z) return false;
+  if(dSlots.y.role!=='y') return false;
+  // accept either: x=estCost z=estGP, or x=estGP z=estCost, both satisfy y-x=z
+  return (dSlots.x.role==='x'&&dSlots.z.role==='z')||(dSlots.x.role==='z'&&dSlots.z.role==='x');
+}
+
+function dComputeScore(){
+  if(!dSlots.x||!dSlots.y||!dSlots.z)return null;
+  const x=dSlots.x.vals,y=dSlots.y.vals,z=dSlots.z.vals;
+  // identity: y - x = z for all jobs
+  let exactMatches=0;
+  for(let i=0;i<DN;i++){
+    const diff=y[i]-x[i];
+    const err=Math.abs(diff-z[i]);
+    if(err<=20) exactMatches++; // allow $20k rounding tolerance
+  }
+  const fitScore=exactMatches/DN;
+  // also: x < y for all jobs (cost less than contract)
+  const xLtY=x.filter((v,i)=>v<y[i]).length/DN;
+  return fitScore*0.7+xLtY*0.3;
+}
+
+function dUpdateScore(){
+  const s=dComputeScore();
+  const dot=document.getElementById('score-dot'),txt=document.getElementById('score-text'),row=document.getElementById('score-row');
+  if(s===null){dot.style.background='var(--border2)';txt.textContent='Assign all three columns to score';row.style.borderColor='var(--border)';return;}
+  if(dIsCorrectAll()){dot.style.background='#2e7d43';txt.textContent='Perfect: all three columns identified';row.style.borderColor='rgba(46,125,67,0.45)';}
+  else if(dIsCorrectXY()){dot.style.background='#92671E';txt.textContent='Contract correct, find the remaining column';row.style.borderColor='rgba(168,123,47,0.55)';}
+  else if(s>0.65){dot.style.background='#92671E';txt.textContent=`${Math.round(s*100)}% fit, close but ratios inconsistent`;row.style.borderColor='rgba(168,123,47,0.55)';}
+  else{dot.style.background='#A3402F';txt.textContent=`${Math.round(s*100)}% fit, ratios invalid`;row.style.borderColor='rgba(182,72,60,0.5)';}
+}
+
+function dReveal(){const r=document.getElementById('answer-row');r.style.display='block';r.textContent=`Contract = ${dAnswer.y}   then either: Est. Cost = ${dAnswer.x} and Est. GP = ${dAnswer.z}, or flip those two. Both satisfy the identity.`;}
+
+function dRegenerate(){
+  ['x','y','z'].forEach(s=>{dSlots[s]=null;document.getElementById('slot-'+s+'-empty').style.display='';const el=document.getElementById('slot-'+s+'-filled');el.style.display='none';el.innerHTML='';});
+  dGenerate();dBuildPool();dUpdateHighlights();dRefresh();
+}
+
+function dRefresh(){dUpdateScore();}
+
+dGenerate();dBuildPool();dRefresh();
+
+// ════════════════════════════════════════════════════════
+// WITNESS GRID
+// ════════════════════════════════════════════════════════
+(function(){
+  const ROWS = [
+    { id:'none', label:'None',                    sub:'' },
+    { id:'E',    label:'Earned Revenue',           sub:'% complete × contract' },
+    { id:'Q',    label:'Cost to Complete',         sub:'remaining cost budget' },
+    { id:'H',    label:'Earned Gross Profit',      sub:'earned rev − cost to date' },
+    { id:'R',    label:'Remaining Revenue',        sub:'contract − earned rev' },
+    { id:'P',    label:'Percent Complete',         sub:'cost to date ÷ est. cost' },
+  ];
+
+  const COLS = [
+    { id:'none', label:'None',                sub:'' },
+    { id:'PB',   label:'Percent Billed',      sub:'billings ÷ contract' },
+    { id:'RB',   label:'Remaining Billings',  sub:'contract − billings' },
+    { id:'N',    label:'Net Billing',         sub:'billings − earned rev' },
+    { id:'U',    label:'Underbillings',       sub:'earned rev − billings (if +)' },
+    { id:'O',    label:'Overbillings',        sub:'billings − earned rev (if +)' },
+    { id:'UO',   label:'Under + Overbillings',sub:'split billing position' },
+  ];
+
+  const DATA = {
+    'none-none': {s:'no',  d:''},
+    'none-PB':   {s:'no',  d:''},
+    'none-RB':   {s:'no',  d:''},
+    'none-N':    {s:'ok',  d:'billing position confirmed'},
+    'none-U':    {s:'ok',  d:'billing position confirmed'},
+    'none-O':    {s:'ok',  d:'billing position confirmed'},
+    'none-UO':   {s:'ok',  d:'billing position confirmed'},
+
+    'E-none':    {s:'no',  d:''},
+    'E-PB':      {s:'ok',  d:'earned rev + % billed confirmed'},
+    'E-RB':      {s:'amb', d:'billings ↔ remaining billings\ncan\'t be told apart'},
+    'E-N':       {s:'ok',  d:'billing position + earned rev'},
+    'E-U':       {s:'ok',  d:'billing position + earned rev'},
+    'E-O':       {s:'ok',  d:'billing position + earned rev'},
+    'E-UO':      {s:'ok',  d:'billing position + earned rev'},
+
+    'Q-none':    {s:'no',  d:''},
+    'Q-PB':      {s:'amb', d:'billings ↔ remaining billings\ncan\'t be told apart'},
+    'Q-RB':      {s:'amb', d:'billings ↔ remaining billings\ncan\'t be told apart'},
+    'Q-N':       {s:'ok',  d:'billing position + cost to complete'},
+    'Q-U':       {s:'ok',  d:'billing position + cost to complete'},
+    'Q-O':       {s:'ok',  d:'billing position + cost to complete'},
+    'Q-UO':      {s:'ok',  d:'billing position + cost to complete'},
+
+    'H-none':    {s:'no',  d:''},
+    'H-PB':      {s:'ok',  d:'earned profit + % billed confirmed'},
+    'H-RB':      {s:'amb', d:'billings ↔ remaining billings\ncan\'t be told apart'},
+    'H-N':       {s:'ok',  d:'billing position + earned profit'},
+    'H-U':       {s:'ok',  d:'billing position + earned profit'},
+    'H-O':       {s:'ok',  d:'billing position + earned profit'},
+    'H-UO':      {s:'ok',  d:'billing position + earned profit'},
+
+    'R-none':    {s:'no',  d:''},
+    'R-PB':      {s:'ok',  d:'backlog + % billed confirmed'},
+    'R-RB':      {s:'amb', d:'billings ↔ remaining billings\ncan\'t be told apart'},
+    'R-N':       {s:'ok',  d:'backlog + billing position'},
+    'R-U':       {s:'ok',  d:'backlog + billing position'},
+    'R-O':       {s:'ok',  d:'backlog + billing position'},
+    'R-UO':      {s:'ok',  d:'backlog + billing position'},
+
+    'P-none':    {s:'no',  d:''},
+    'P-PB':      {s:'ok',  d:'% billed + % complete confirmed'},
+    'P-RB':      {s:'amb', d:'billings ↔ remaining billings\ncan\'t be told apart'},
+    'P-N':       {s:'ok',  d:'billing position + % complete'},
+    'P-U':       {s:'ok',  d:'billing position + % complete'},
+    'P-O':       {s:'ok',  d:'billing position + % complete'},
+    'P-UO':      {s:'ok',  d:'billing position + % complete'},
+  };
+
+  const COLOR = { ok:'#dcead9', amb:'#f0e7cd', no:'#e7e8db' };
+  const BORDER = { ok:'rgba(46,125,67,0.45)', amb:'rgba(168,123,47,0.5)', no:'rgba(45,55,45,0.10)' };
+  const TEXT = { ok:'#1c6e45', amb:'#92671E', no:'#8a9286' };
+  const LABEL = { ok:'OK', amb:'AMB', no:'NO' };
+
+  const container = document.getElementById('witness-grid');
+
+  // Legend
+  const legend = document.createElement('div');
+  legend.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;';
+  [
+    {color:'#dcead9',border:'rgba(46,125,67,0.45)',text:'#1c6e45', label:'Algebraically validatable'},
+    {color:'#f0e7cd',border:'rgba(168,123,47,0.5)',text:'#92671E', label:'Symmetric · needs a tiebreaker'},
+    {color:'#e7e8db',border:'rgba(45,55,45,0.10)',text:'#8a9286',    label:'Insufficient'},
+  ].forEach(l=>{
+    const item = document.createElement('div');
+    item.style.cssText = 'display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);';
+    item.innerHTML = `<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${l.color};border:1px solid ${l.border};flex-shrink:0;"></span>${l.label}`;
+    legend.appendChild(item);
+  });
+  container.appendChild(legend);
+
+  // Grid wrapper
+  const gridWrap = document.createElement('div');
+  gridWrap.style.cssText = 'display:grid;grid-template-columns:190px repeat('+COLS.length+',1fr);gap:3px;min-width:720px;';
+  container.appendChild(gridWrap);
+
+  // Header row
+  const cornerCell = document.createElement('div');
+  cornerCell.style.cssText = 'padding:8px 10px;font-size:10px;color:var(--text3);font-family:var(--mono);display:flex;align-items:flex-end;line-height:1.5;';
+  cornerCell.innerHTML = 'Cost validator ↓ &nbsp;/&nbsp; Billing validator →';
+  gridWrap.appendChild(cornerCell);
+
+  COLS.forEach(col=>{
+    const th = document.createElement('div');
+    th.style.cssText = 'background:var(--bg3);border:0.5px solid var(--border);border-radius:6px;padding:8px 6px;text-align:center;';
+    th.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text);font-family:var(--mono);">${col.label}</div>${col.sub?`<div style="font-size:10px;color:var(--text3);margin-top:2px;">${col.sub}</div>`:''}`;
+    gridWrap.appendChild(th);
+  });
+
+  // Data rows
+  ROWS.forEach(row=>{
+    // Row header
+    const rh = document.createElement('div');
+    rh.style.cssText = 'background:var(--bg3);border:0.5px solid var(--border);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;justify-content:center;';
+    rh.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text);font-family:var(--mono);">${row.label}</div>${row.sub?`<div style="font-size:10px;color:var(--text3);margin-top:2px;">${row.sub}</div>`:''}`;
+    gridWrap.appendChild(rh);
+
+    COLS.forEach(col=>{
+      const key = row.id+'-'+col.id;
+      const cell = DATA[key] || {s:'no',d:''};
+      const s = cell.s;
+      const td = document.createElement('div');
+      td.style.cssText = `background:${COLOR[s]};border:1px solid ${BORDER[s]};border-radius:6px;padding:7px 5px;text-align:center;transition:filter .15s;cursor:default;`;
+      td.innerHTML = `<div style="font-size:12px;font-weight:700;color:${TEXT[s]};font-family:var(--mono);">${LABEL[s]}</div>${cell.d?`<div style="font-size:9px;color:${TEXT[s]};opacity:0.75;margin-top:3px;line-height:1.4;">${cell.d.replace(/,\s*/g,'<br>')}</div>`:''}`;
+      td.addEventListener('mouseenter',()=>td.style.filter='brightness(1.15)');
+      td.addEventListener('mouseleave',()=>td.style.filter='');
+      gridWrap.appendChild(td);
+    });
+  });
+
+  // Footnote
+  const fn = document.createElement('p');
+  fn.style.cssText = 'font-size:11px;color:var(--text3);margin-top:14px;line-height:1.6;font-family:var(--mono);';
+  fn.textContent = 'Underbillings, Overbillings, and Net Billing are one evidence family and they all confirm billing position differently. A single Underbillings or Overbillings column only works reliably when enough jobs have nonzero values; the split version is safer. Remaining Billings is the one column that can\'t stand alone as a billing validator because it\'s algebraically symmetric with Billings to Date and the system needs another billing-side column to break the tie.';
+  container.appendChild(fn);
+})();
+
+// ════════════════════════════════════════════════════════
+// PEELING CASCADE
+// ════════════════════════════════════════════════════════
+const PEEL_NODES={
+  V:{x:100,y:48, name:'Contract Value',  seed:true, col:3},
+  C:{x:100,y:128,name:'Est. Total Cost', seed:true, col:4},
+  D:{x:100,y:208,name:'Cost to Date',    seed:true, col:6},
+  B:{x:100,y:288,name:'Billings to Date',seed:true, col:8},
+  G:{x:400,y:48, name:'Est. Gross Profit'},
+  E:{x:400,y:148,name:'Earned Revenue'},
+  P:{x:400,y:268,name:'% Complete'},
+  Q:{x:692,y:38, name:'Cost to Complete'},
+  H:{x:692,y:104,name:'Earned GP'},
+  U:{x:692,y:170,name:'Underbillings'},
+  O:{x:692,y:236,name:'Overbillings'},
+  R:{x:692,y:302,name:'Backlog'},
+};
+const PEEL_STEPS=[
+  {rule:'G = V − C',          out:'G', ins:['V','C'],     res:'match', col:5, fam:'est',    w:1.0,
+   log:'G = V − C predicts a full column → matches col 5 on 10/10 jobs · <span style="color:#1c6e45">+1.0 evidence</span>'},
+  {rule:'E = V × D ÷ C',      out:'E', ins:['V','D','C'], res:'match', col:7, fam:'earned', w:1.0,
+   log:'E = V × D ÷ C → matches col 7 on 10/10 jobs · <span style="color:#1c6e45">+1.0 evidence</span>'},
+  {rule:'P = D ÷ C',          out:'P', ins:['D','C'],     res:'match', col:1, fam:'pct',    w:0.4,
+   log:'P = D ÷ C → matches col 1 · <span style="color:#1c6e45">+0.4</span> (percent vectors collide more easily, so they weigh less)'},
+  {rule:'Q = C − D',          out:'Q', ins:['C','D'],     res:'virtual',
+   log:'Q = C − D predicts a column nothing physical matches → constructed <span style="color:#5b6357">virtually</span> · +0'},
+  {rule:'U = max(E − B, 0)',  out:'U', ins:['E','B'],     res:'match', col:9, fam:'bill',   w:1.0,
+   log:'U = max(E − B, 0) → matches col 9 · <span style="color:#1c6e45">+1.0 evidence</span>'},
+  {rule:'O = max(B − E, 0)',  out:'O', ins:['B','E'],     res:'match', col:2, fam:'bill',   w:0,
+   log:'O = max(B − E, 0) → matches col 2 · <span style="color:#92671E">same family as U → merged, +0</span> (one fact, two spellings)'},
+  {rule:'H = E − D',          out:'H', ins:['E','D'],     res:'virtual',
+   log:'H = E − D → no physical match → virtual · +0'},
+  {rule:'R = V − E',          out:'R', ins:['V','E'],     res:'virtual',
+   log:'R = V − E → no physical match → virtual · +0'},
+];
+const PEEL_FAMS=[
+  {k:'est',   label:'Estimate complement'},
+  {k:'earned',label:'Earned revenue'},
+  {k:'pct',   label:'Percent complete'},
+  {k:'bill',  label:'Billing position (N · U · O)'},
+];
+let peelIdx=0,peelTimer=null;
+
+function peelNodeState(k){
+  if(PEEL_NODES[k].seed)return{s:'seed',col:PEEL_NODES[k].col};
+  for(let i=0;i<peelIdx;i++){const st=PEEL_STEPS[i];if(st.out===k)return{s:st.res,col:st.col};}
+  return{s:'unknown'};
+}
+function peelEdgePath(a,b){
+  const A=PEEL_NODES[a],B=PEEL_NODES[b];
+  const x1=A.x+68,y1=A.y,x2=B.x-68,y2=B.y,mx=(x1+x2)/2;
+  return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+}
+function peelRender(){
+  const svg=document.getElementById('peel-svg');let out='';
+  // edges for applied steps; latest step highlighted
+  for(let i=0;i<peelIdx;i++){
+    const st=PEEL_STEPS[i],active=(i===peelIdx-1);
+    const color=st.res==='match'?(active?'#3A4C3E':'rgba(46,125,67,0.55)'):(active?'#5b6357':'rgba(91,99,87,0.4)');
+    st.ins.forEach(inp=>{
+      out+=`<path d="${peelEdgePath(inp,st.out)}" fill="none" stroke="${color}" stroke-width="${active?2:1.2}" ${st.res==='virtual'?'stroke-dasharray="4,4"':''}/>`;
+    });
+  }
+  // nodes
+  Object.keys(PEEL_NODES).forEach(k=>{
+    const n=PEEL_NODES[k],st=peelNodeState(k);
+    let fill='var(--bg3)',stroke='rgba(45,55,45,0.16)',txt='#7e887c',sub='·',subC='#7e887c',dash='';
+    if(st.s==='seed'){fill='rgba(157,44,28,0.07)';stroke='#3A4C3E';txt='#232b26';sub='seed · col '+st.col;subC='#3A4C3E';}
+    if(st.s==='match'){fill='rgba(46,125,67,0.10)';stroke='#2e7d43';txt='#232b26';sub='col '+st.col+' ✓';subC='#1c6e45';}
+    if(st.s==='virtual'){fill='transparent';stroke='rgba(91,99,87,0.55)';txt='#5b6357';sub='virtual';subC='#5b6357';dash='stroke-dasharray="5,4"';}
+    out+=`<g><rect x="${n.x-68}" y="${n.y-22}" width="136" height="44" rx="8" fill="${fill}" stroke="${stroke}" ${dash}/>`;
+    out+=`<text x="${n.x}" y="${n.y-4}" text-anchor="middle" fill="${txt}" font-size="11" font-family=""Public Sans",system-ui,sans-serif" font-weight="600">${k} · ${n.name}</text>`;
+    out+=`<text x="${n.x}" y="${n.y+12}" text-anchor="middle" fill="${subC}" font-size="10" font-family="monospace">${sub}</text></g>`;
+  });
+  svg.innerHTML=out;
+  // evidence panel
+  const ev=document.getElementById('peel-evidence');let html='';let total=0;
+  PEEL_FAMS.forEach(f=>{
+    let w=0,hits=0;
+    for(let i=0;i<peelIdx;i++){const st=PEEL_STEPS[i];if(st.fam===f.k&&st.res==='match'){w+=st.w;hits++;}}
+    total+=w;
+    const on=hits>0;
+    html+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${on?'rgba(46,125,67,0.45)':'var(--border)'};border-radius:8px;padding:7px 10px;font-size:11px;">
+      <span style="width:8px;height:8px;border-radius:50%;background:${on?'#2e7d43':'var(--border2)'};flex-shrink:0;"></span>
+      <span style="flex:1;color:${on?'var(--text)':'var(--text3)'};">${f.label}</span>
+      <span style="font-family:var(--mono);color:${on?'#1c6e45':'var(--text3)'};">${on?'+'+w.toFixed(1)+(hits>1?' ('+hits+' merged)':''):'·'}</span></div>`;
+  });
+  html+=`<div style="display:flex;justify-content:space-between;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--text);border-top:0.5px solid var(--border);margin-top:3px;">
+    <span>Total independent evidence</span><span style="color:var(--accent);font-weight:600;">${total.toFixed(1)} units</span></div>`;
+  ev.innerHTML=html;
+  // status
+  const status=document.getElementById('peel-status'),dot=document.getElementById('peel-dot');
+  if(peelIdx===0){status.textContent='Four seed anchors hypothesized · press Step';dot.style.background='var(--accent)';}
+  else if(peelIdx<PEEL_STEPS.length){status.textContent=`Step ${peelIdx} of ${PEEL_STEPS.length} · ${PEEL_STEPS[peelIdx-1].rule}`;dot.style.background='var(--accent)';}
+  else{status.textContent='All 9 physical columns explained · cost and billing sides each independently confirmed';dot.style.background='#2e7d43';}
+}
+function peelLog(){
+  const el=document.getElementById('peel-log');let html='';
+  if(peelIdx===0)html='<span style="color:var(--text3)">Hypothesis: V→col 3, estimate→col 4 (read as C), D→col 6, B→col 8. Waiting…</span>';
+  for(let i=0;i<peelIdx;i++)html+=`<div><span style="color:var(--text3)">${String(i+1).padStart(2,'0')}</span> ${PEEL_STEPS[i].log}</div>`;
+  if(peelIdx>=PEEL_STEPS.length)html+=`<div style="color:var(--accent);margin-top:4px;">── cascade complete · evidence 3.4 units · proceed to strict certification ──</div>`;
+  el.innerHTML=html;el.scrollTop=el.scrollHeight;
+}
+function peelStep(){
+  if(peelIdx>=PEEL_STEPS.length){peelStopPlay();return;}
+  peelIdx++;peelRender();peelLog();
+  if(peelIdx>=PEEL_STEPS.length)peelStopPlay();
+}
+function peelStopPlay(){if(peelTimer){clearInterval(peelTimer);peelTimer=null;document.getElementById('peel-play').textContent='Auto-play';}}
+function peelPlay(){
+  if(peelTimer){peelStopPlay();return;}
+  if(peelIdx>=PEEL_STEPS.length)peelIdx=0;
+  document.getElementById('peel-play').textContent='Pause';
+  peelStep();peelTimer=setInterval(peelStep,1500);
+}
+function peelReset(){peelStopPlay();peelIdx=0;peelRender();peelLog();}
+peelReset();
+
+// ════════════════════════════════════════════════════════
+// ECONOMIC PRIORS, RATIO STRIPS
+// ════════════════════════════════════════════════════════
+function prGauss(mu,sd){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return mu+sd*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function prClamp(x,a,b){return Math.max(a,Math.min(b,x));}
+let prData=null;
+
+function prGenerate(){
+  const J=16,d={cv:[],gv:[],dv:[],bv:[]};
+  const baseM=prClamp(prGauss(0.17,0.04),0.07,0.30);
+  for(let i=0;i<J;i++){
+    const m=prClamp(baseM+prGauss(0,0.018),0.03,0.42);
+    d.cv.push(1-m);d.gv.push(m);
+    const P=prClamp(Math.random()*0.94+0.04,0.04,0.98);
+    d.dv.push(P*(1-m));
+    d.bv.push(prClamp(P+prGauss(0.02,0.09),0,1.12));
+  }
+  prData=d;prDraw();
+}
+function prIqrOf(a){const s=[...a].sort((x,y)=>x-y);const q=p=>s[Math.floor(p*(s.length-1))];return q(0.75)-q(0.25);}
+function prDraw(){
+  const cvs=document.getElementById('pr-cv'),c=cvs.getContext('2d');
+  const W=cvs.width,H=cvs.height;c.clearRect(0,0,W,H);
+  const padL=190,padR=120,padT=18,padB=34,pw=W-padL-padR;
+  const rows=[
+    {label:'Est. Cost ÷ Contract',  key:'cv',band:[0.55,0.98],tone:'#3A4C3E',tag:'estimate'},
+    {label:'Gross Margin ÷ Contract',key:'gv',band:[0.02,0.45],tone:'#3A4C3E',tag:'estimate'},
+    {label:'Cost to Date ÷ Contract',key:'dv',band:null,tone:'#2f5d8f',tag:'progress'},
+    {label:'Billings ÷ Contract',    key:'bv',band:null,tone:'#2f5d8f',tag:'progress'},
+  ];
+  const rowH=(H-padT-padB)/rows.length;
+  const X=v=>padL+prClamp(v,0,1.2)/1.2*pw;
+  // axis
+  c.save();c.strokeStyle='rgba(45,55,45,0.12)';c.fillStyle='rgba(60,70,60,0.65)';c.font='10px monospace';c.textAlign='center';
+  [0,0.25,0.5,0.75,1.0].forEach(t=>{
+    c.beginPath();c.moveTo(X(t),padT);c.lineTo(X(t),H-padB);c.stroke();
+    c.fillText(Math.round(t*100)+'%',X(t),H-padB+16);
+  });
+  c.restore();
+  rows.forEach((r,i)=>{
+    const cy=padT+rowH*i+rowH/2;
+    if(r.band){
+      c.save();c.fillStyle='rgba(157,44,28,0.05)';
+      c.fillRect(X(r.band[0]),cy-rowH*0.34,X(r.band[1])-X(r.band[0]),rowH*0.68);
+      c.strokeStyle='rgba(157,44,28,0.16)';c.setLineDash([3,3]);
+      c.strokeRect(X(r.band[0]),cy-rowH*0.34,X(r.band[1])-X(r.band[0]),rowH*0.68);c.restore();
+    }
+    c.save();c.strokeStyle='rgba(45,55,45,0.16)';c.beginPath();c.moveTo(padL,cy);c.lineTo(padL+pw,cy);c.stroke();c.restore();
+    c.save();c.fillStyle='#39423b';c.font='11px "Public Sans",system-ui,sans-serif';c.textAlign='right';
+    c.fillText(r.label,padL-14,cy+1);
+    c.fillStyle=r.tag==='estimate'?'rgba(157,44,28,0.55)':'rgba(47,93,143,0.65)';c.font='9px monospace';
+    c.fillText(r.tag.toUpperCase(),padL-14,cy+14);c.restore();
+    prData[r.key].forEach(v=>{
+      c.save();c.beginPath();c.arc(X(v),cy+prGauss(0,2.5),4.5,0,Math.PI*2);
+      c.fillStyle=r.tone;c.globalAlpha=0.65;c.fill();
+      c.globalAlpha=0.9;c.strokeStyle='rgba(35,43,38,0.35)';c.lineWidth=0.8;c.stroke();c.restore();
+    });
+    const iqr=prIqrOf(prData[r.key]),tight=iqr<0.12;
+    c.save();c.textAlign='left';c.font='10px monospace';
+    c.fillStyle=tight?'#1c6e45':'#2f5d8f';
+    c.fillText(tight?'TIGHT':'SPREAD',padL+pw+14,cy-2);
+    c.fillStyle='rgba(91,99,87,0.8)';
+    c.fillText('IQR '+(iqr*100).toFixed(0)+'pt',padL+pw+14,cy+12);c.restore();
+  });
+}
+prGenerate();
+
+// ════════════════════════════════════════════════════════
+// ERROR TRIANGULATION TABLE
+// ════════════════════════════════════════════════════════
+const XT_VARS=[
+  {k:'V', n:'Contract',     kind:'m'},
+  {k:'C', n:'Est. Cost',    kind:'m'},
+  {k:'G', n:'Est. GP',      kind:'m'},
+  {k:'D', n:'Cost to Date', kind:'m'},
+  {k:'E', n:'Earned Rev',   kind:'m'},
+  {k:'B', n:'Billings',     kind:'m'},
+  {k:'N', n:'Net Billing',  kind:'m'},
+  {k:'P', n:'% Complete',   kind:'p'},
+  {k:'PB',n:'% Billed',     kind:'p'},
+];
+const XT_IDS=[
+  {id:'I1',name:'Contract − Est. Cost = Est. GP',            cells:['V','C','G'],    res:r=>(r.V-r.C)-r.G,    tol:()=>1.5,                 kind:'m'},
+  {id:'I2',name:'Earned = Contract × Cost÷Est. Cost',        cells:['V','C','D','E'],res:r=>r.E-r.V*r.D/r.C,  tol:()=>2.5,                 kind:'m'},
+  {id:'I3',name:'Net Billing = Earned − Billings',           cells:['E','B','N'],    res:r=>r.N-(r.E-r.B),    tol:()=>1.5,                 kind:'m'},
+  {id:'I4',name:'% Complete = Cost to Date ÷ Est. Cost',     cells:['C','D','P'],    res:r=>r.P-r.D/r.C,      tol:r=>0.0006+0.55/r.C,      kind:'p'},
+  {id:'I5',name:'% Billed = Billings ÷ Contract',            cells:['V','B','PB'],   res:r=>r.PB-r.B/r.V,     tol:r=>0.0006+0.55/r.V,      kind:'p'},
+];
+const XT_SOLVE={
+  V:[{f:r=>r.C+r.G,      by:'Contract = Est. Cost + Est. GP'},
+     {f:r=>r.E*r.C/r.D,  by:'Contract = Earned × Est. Cost ÷ Cost to Date'},
+     {f:r=>r.B/r.PB,     by:'Contract = Billings ÷ % Billed'}],
+  C:[{f:r=>r.V-r.G,      by:'Est. Cost = Contract − Est. GP'},
+     {f:r=>r.V*r.D/r.E,  by:'Est. Cost = Contract × Cost to Date ÷ Earned'},
+     {f:r=>r.D/r.P,      by:'Est. Cost = Cost to Date ÷ % Complete'}],
+  G:[{f:r=>r.V-r.C,      by:'Est. GP = Contract − Est. Cost'}],
+  D:[{f:r=>r.E*r.C/r.V,  by:'Cost to Date = Earned × Est. Cost ÷ Contract'},
+     {f:r=>r.P*r.C,      by:'Cost to Date = % Complete × Est. Cost'}],
+  E:[{f:r=>r.V*r.D/r.C,  by:'Earned = Contract × Cost to Date ÷ Est. Cost'},
+     {f:r=>r.N+r.B,      by:'Earned = Net Billing + Billings'}],
+  B:[{f:r=>r.E-r.N,      by:'Billings = Earned − Net Billing'},
+     {f:r=>r.PB*r.V,     by:'Billings = % Billed × Contract'}],
+  N:[{f:r=>r.E-r.B,      by:'Net Billing = Earned − Billings'}],
+  P:[{f:r=>r.D/r.C,      by:'% Complete = Cost to Date ÷ Est. Cost'}],
+  PB:[{f:r=>r.B/r.V,     by:'% Billed = Billings ÷ Contract'}],
+};
+const XT_J=6;
+let xtRows=[],xtBad=null; // xtBad = {row, var, orig}
+
+function xtRnd(a,b){return Math.random()*(b-a)+a;}
+function xtNewPortfolio(){
+  xtRows=[];xtBad=null;
+  for(let i=0;i<XT_J;i++){
+    const V=Math.round(xtRnd(320,950));
+    const m=xtRnd(0.09,0.30),C=Math.round(V*(1-m)),G=V-C;
+    const P0=xtRnd(0.10,0.95),D=Math.round(C*P0);
+    const E=Math.round(V*D/C);
+    const B=Math.max(0,E+Math.round(xtRnd(-80,80)));
+    xtRows.push({V,C,G,D,E,B,N:E-B,P:Math.round(D/C*1000)/1000,PB:Math.round(B/V*1000)/1000});
+  }
+  xtRun();
+}
+function xtFmt(v,kind){
+  if(kind==='p')return (v*100).toFixed(1)+'%';
+  return v<0?'−$'+Math.abs(v)+'k':'$'+v+'k';
+}
+function xtDigitStr(v,kind){return kind==='p'?String(Math.round(Math.abs(v)*1000)):String(Math.abs(v));}
+
+function xtCorruptValue(v,kind){
+  // OCR-style: change one digit, by enough that no identity can absorb it
+  const sign=v<0?-1:1;
+  if(kind==='m'){
+    const s=String(Math.abs(v)),thresh=Math.max(30,0.15*Math.abs(v));
+    const idxs=[...Array(s.length).keys()].sort(()=>Math.random()-0.5);
+    for(const idx of idxs){
+      const place=Math.pow(10,s.length-1-idx),d=+s[idx];
+      const cands=[];
+      for(let d2=0;d2<=9;d2++){
+        if(d2===d)continue;
+        if(idx===0&&d2===0&&s.length>1)continue;
+        if(Math.abs(d2-d)*place>=thresh)cands.push(d2);
+      }
+      if(cands.length){
+        const d2=cands[Math.floor(Math.random()*cands.length)];
+        return{bad:sign*parseInt(s.slice(0,idx)+d2+s.slice(idx+1)),ocr:[d,d2]};
+      }
+    }
+    // value too small for a digit slip to matter, flatly wrong number instead
+    return{bad:v+(Math.random()<0.5?-1:1)*Math.round(xtRnd(40,130)),ocr:null};
+  }else{
+    const u=Math.round(Math.abs(v)*1000),s=String(u).padStart(3,'0');
+    const idxs=[...Array(s.length).keys()].sort(()=>Math.random()-0.5);
+    for(const idx of idxs){
+      const place=Math.pow(10,s.length-1-idx),d=+s[idx];
+      const cands=[];
+      for(let d2=0;d2<=9;d2++){if(d2!==d&&Math.abs(d2-d)*place>=8)cands.push(d2);}
+      if(cands.length){
+        const d2=cands[Math.floor(Math.random()*cands.length)];
+        return{bad:sign*parseInt(s.slice(0,idx)+d2+s.slice(idx+1))/1000,ocr:[d,d2]};
+      }
+    }
+    return{bad:Math.abs(v-0.2)>0.05?v-0.2:v+0.2,ocr:null};
+  }
+}
+function xtClickCell(row,k){
+  if(xtBad&&xtBad.row===row&&xtBad.v===k){xtRepair();return;}
+  if(xtBad)xtRows[xtBad.row][xtBad.v]=xtBad.orig;
+  const kind=XT_VARS.find(x=>x.k===k).kind;
+  const orig=xtRows[row][k],{bad}=xtCorruptValue(orig,kind);
+  xtBad={row,v:k,orig};xtRows[row][k]=bad;
+  xtRun();
+}
+function xtCorruptRandom(){
+  const row=Math.floor(Math.random()*XT_J);
+  const k=XT_VARS[Math.floor(Math.random()*XT_VARS.length)].k;
+  xtClickCell(row,k);
+}
+function xtRepair(){if(xtBad){xtRows[xtBad.row][xtBad.v]=xtBad.orig;xtBad=null;}xtRun();}
+
+function xtRun(){
+  // strict certification: every identity on every row
+  const fails=[];// {id, row, resid}
+  xtRows.forEach((r,ri)=>{
+    XT_IDS.forEach(I=>{
+      const resid=I.res(r),tol=I.tol(r);
+      if(Math.abs(resid)>tol)fails.push({I,row:ri,resid});
+    });
+  });
+  // diagnose (per failing row)
+  let diag=null;
+  const rowsWithFails=[...new Set(fails.map(f=>f.row))];
+  if(rowsWithFails.length){
+    const ri=rowsWithFails[0],r=xtRows[ri];
+    const failing=fails.filter(f=>f.row===ri).map(f=>f.I);
+    const passing=XT_IDS.filter(I=>!failing.includes(I));
+    let cand=failing.map(I=>I.cells).reduce((a,b)=>a.filter(x=>b.includes(x)));
+    const exon=new Set();passing.forEach(I=>I.cells.forEach(c=>exon.add(c)));
+    let culprit=cand.filter(c=>!exon.has(c));
+    if(!culprit.length)culprit=cand; // votes conflict, fall back to the intersection
+    diag={row:ri,failing,candidates:cand,culprit,exonerated:[...exon].filter(c=>cand.includes(c))};
+    if(culprit.length===1){
+      const k=culprit[0],kind=XT_VARS.find(x=>x.k===k).kind;
+      const others={...r};
+      const fixes=(XT_SOLVE[k]||[]).map(s=>({val:kind==='p'?Math.round(s.f(others)*1000)/1000:Math.round(s.f(others)),by:s.by}));
+      // all implications should agree
+      const prop=fixes[0]?fixes[0].val:null;
+      diag.proposed=prop;diag.basis=fixes.map(f=>f.by);
+      diag.confidence=fixes.length>=2?'high':'medium';
+      // classify
+      if(prop!==null){
+        const a=xtDigitStr(r[k],kind),b=xtDigitStr(prop,kind);
+        if(a.length===b.length){
+          const diffs=[...a].map((ch,i)=>ch!==b[i]?i:-1).filter(i=>i>=0);
+          if(diffs.length===1)diag.cls=`single-character misread (${b[diffs[0]]} ↔ ${a[diffs[0]]})`;
+        }
+        if(!diag.cls){
+          const ratio=Math.abs(r[k])>0&&Math.abs(prop)>0?Math.abs(r[k]/prop):0;
+          if(ratio>9&&ratio<11||ratio>0.09&&ratio<0.11)diag.cls='magnitude slip (dropped or extra digit)';
+          else diag.cls='flatly wrong number';
+        }
+      }
+    }
+  }
+  xtRenderTable(diag);xtRenderChecks(fails);xtRenderDiag(diag,fails);
+}
+function xtRenderTable(diag){
+  const t=document.getElementById('xt-table');
+  const implicated=new Set(),culpritSet=new Set();
+  if(diag){
+    diag.failing.forEach(I=>I.cells.forEach(c=>implicated.add(diag.row+'|'+c)));
+    diag.culprit.forEach(c=>culpritSet.add(diag.row+'|'+c));
+  }
+  let h='<tr><th style="font-family:var(--mono);font-size:10px;color:var(--text3);font-weight:500;text-align:left;padding:6px 8px;">Job</th>';
+  XT_VARS.forEach(v=>{
+    h+=`<th style="background:var(--bg3);border:0.5px solid var(--border);border-radius:6px;padding:6px 4px;text-align:center;">
+      <div style="font-size:11px;font-weight:700;color:var(--text);font-family:var(--mono);">${v.k}</div>
+      <div style="font-size:9px;color:var(--text3);font-weight:400;">${v.n}</div></th>`;
+  });
+  h+='</tr>';
+  xtRows.forEach((r,ri)=>{
+    h+=`<tr><td style="font-family:var(--mono);font-size:10px;color:var(--text3);padding:4px 8px;">Job ${ri+1}</td>`;
+    XT_VARS.forEach(v=>{
+      const key=ri+'|'+v.k;
+      const isCulprit=culpritSet.has(key),isImpl=implicated.has(key);
+      let bg='var(--bg3)',border='0.5px solid var(--border)',color='#39423b';
+      if(isImpl){bg='rgba(168,123,47,0.12)';border='0.5px solid rgba(168,123,47,0.5)';color='#8a6322';}
+      if(isCulprit){bg='rgba(182,72,60,0.12)';border='1.5px solid #A3402F';color='#A3402F';}
+      h+=`<td onclick="xtClickCell(${ri},'${v.k}')" title="Click to corrupt one digit" style="background:${bg};border:${border};border-radius:6px;padding:5px 4px;text-align:center;font-family:var(--mono);font-size:11px;color:${color};cursor:pointer;">${xtFmt(r[v.k],v.kind)}</td>`;
+    });
+    h+='</tr>';
+  });
+  t.innerHTML=h;
+}
+function xtRenderChecks(fails){
+  const el=document.getElementById('xt-checks');let h='';
+  XT_IDS.forEach(I=>{
+    const f=fails.filter(x=>x.I===I);
+    const bad=f.length>0;
+    let worst=0;f.forEach(x=>{if(Math.abs(x.resid)>Math.abs(worst))worst=x.resid;});
+    const delta=bad?(I.kind==='p'?'Δ '+(Math.abs(worst)*100).toFixed(1)+'pt':'Δ $'+Math.round(Math.abs(worst))+'k'):'≤ tol';
+    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${bad?'rgba(182,72,60,0.5)':'rgba(46,125,67,0.4)'};border-radius:8px;padding:7px 10px;font-size:11px;">
+      <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${bad?'#8B3527':'#1c6e45'};min-width:34px;">${bad?'FAIL':'PASS'}</span>
+      <span style="flex:1;color:var(--text2);">${I.name}</span>
+      <span style="font-family:var(--mono);font-size:10px;color:${bad?'#8B3527':'var(--text3)'};">${delta}${bad?' · Job '+(f[0].row+1):''}</span></div>`;
+  });
+  el.innerHTML=h;
+}
+function xtRenderDiag(diag,fails){
+  const el=document.getElementById('xt-diag'),dot=document.getElementById('xt-dot'),status=document.getElementById('xt-status');
+  if(!diag){
+    dot.style.background='#2e7d43';status.textContent='All identities hold · table certifies clean';
+    el.innerHTML='<span style="color:#1c6e45">status: CERTIFIED</span><br><span style="color:var(--text3)">5 identities × 6 jobs = 30 strict checks, all within tolerance.<br>Click any cell to corrupt a digit and watch the triangulation.</span>';
+    return;
+  }
+  dot.style.background='#A3402F';
+  status.textContent=`Discrepancy caught · ${fails.length} identity check(s) tripped on Job ${diag.row+1}`;
+  const vmeta=k=>XT_VARS.find(x=>x.k===k);
+  let h=`<div><span style="color:var(--text3)">failing identities implicate:</span> {${diag.candidates.map(c=>vmeta(c).n).join(', ')}}</div>`;
+  if(diag.exonerated.length)h+=`<div><span style="color:var(--text3)">exonerated by passing identities:</span> ${diag.exonerated.map(c=>vmeta(c).n).join(', ')}</div>`;
+  if(diag.culprit.length===1){
+    const k=diag.culprit[0],m=vmeta(k);
+    h+=`<div style="margin-top:6px;color:#A3402F;">culprit → Job ${diag.row+1}, <strong>${m.n}</strong></div>`;
+    if(diag.proposed!==null&&diag.proposed!==undefined){
+      h+=`<div>observed <span style="color:#A3402F">${xtFmt(xtRows[diag.row][k],m.kind)}</span> → identities imply <span style="color:#1c6e45">${xtFmt(diag.proposed,m.kind)}</span> <span style="color:var(--text3)">(confidence ${diag.confidence})</span></div>`;
+      h+=`<div style="color:var(--text3);margin-top:4px;">implied independently by:<br>${diag.basis.map(b=>'&nbsp;&nbsp;· '+b).join('<br>')}</div>`;
+      if(diag.cls)h+=`<div style="margin-top:4px;color:#92671E;">looks like: ${diag.cls}</div>`;
+    }
+  }else{
+    h+=`<div style="margin-top:6px;color:#92671E;">votes narrow it to {${diag.culprit.map(c=>vmeta(c).n).join(', ')}} · another witness column would split them</div>`;
+  }
+  el.innerHTML=h;
+}
+xtNewPortfolio();
+</script>
+</body>
+</html>

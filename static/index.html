@@ -26,7 +26,7 @@ input[type=checkbox]{accent-color:var(--sage-deep);width:15px;height:15px;cursor
 :focus-visible{outline:2px solid var(--sage-deep);outline-offset:2px}
 .hidden{display:none!important}
 
-header{padding:26px 0;display:flex;align-items:baseline;justify-content:space-between}
+header{padding:22px 32px;margin:0 calc(50% - 50vw);display:flex;align-items:baseline;justify-content:space-between}
 .mark{font:600 24px Fraunces,serif;color:var(--sage-deep);letter-spacing:-.01em}
 .mark span{color:var(--sage)}
 .tag{font-size:13px;color:var(--muted)}
@@ -103,7 +103,7 @@ details.more li{margin:3px 0}
   border-radius:10px;padding:12px 18px;font-size:14px;margin-bottom:22px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:26px}
 .kpi{background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:15px 17px}
-.kpi .lab{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpi .lab{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block;min-height:29px}
 .kpi .val{font:500 23px/1.2 Inter;margin-top:5px}
 .kpi .val.neg{color:var(--brick)}
 .cols{display:flex;flex-direction:column;gap:14px;margin-bottom:18px}
@@ -149,7 +149,8 @@ table{border-collapse:collapse;font-size:12.5px;white-space:nowrap;width:100%}
 th{font-weight:500;text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);
   color:var(--muted);font-size:11.5px}
 th .vn{display:block;color:var(--sage-deep);font-size:10.5px;font-weight:600;letter-spacing:.04em}
-th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface)}
+th:first-child,td:first-child{text-align:left}
+.receipt th:first-child,.receipt td:first-child{position:sticky;left:0;background:var(--surface)}
 td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line-soft)}
 td.flag{color:var(--brick);text-decoration:underline dotted;cursor:help}
 tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
@@ -200,7 +201,7 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
       </select>
     </div>
   </div>
-  <p class="quiet">The sample is a 12-job schedule with one planted transcription error.</p>
+  <p class="quiet">The sample is a 12-job schedule with one planted transcription error. <a href="/how" style="color:var(--sage-deep)">How the math works</a></p>
   <input type="file" id="file" accept=".pdf,.xlsx,.xlsm,.csv,.tsv,.png,.jpg,.jpeg,.webp" class="hidden">
 </section>
 
@@ -318,7 +319,7 @@ function totalsDetail(rep){
 let REPORT=null;
 let ACCEPTED=new Set();   /* correction indices the reviewer has applied */
 function render(rep){
-  REPORT=rep;
+  REPORT=rep;ACCEPTED=new Set((((rep||{}).analysis||{}).corrections||[]).map((_,i)=>i));
   if(rep.overall_status==="pipeline_error"){
     $("#errmsg").textContent="The pipeline hit an unexpected error: "+(rep.validator_reason||"unknown")+". Try again, or try the sample schedule.";
     show("err");return;
@@ -392,14 +393,11 @@ function renderCertificate(rep){
   };
   const excHTML=findings.length?`<div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
-      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th><th>Use</th>
+      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th>
+      <th><label style="display:flex;gap:5px;align-items:center;cursor:pointer">Use <input type="checkbox" id="useAll"></label></th>
     </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
   </div>
-  ${corrsC.length?`<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin:12px 0 0">
-    <button class="btn" id="certApplyAll">Apply all suggestions</button>
-    <button class="btn" id="certReset">Reset to as printed</button>
-  </div>
-  <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Checked rows are used in the schedule figures and the CSV.</p>`:""}`:"";
+  ${corrsC.length?`<p style="font-size:12px;color:var(--muted);margin:10px 0 0">Checked rows are corrected in the schedule figures and the CSV. Uncheck a row to keep the printed value.</p>`:""}`:"";
   function corrStatus(rep,f){
     const c=((rep.analysis||{}).corrections||[]).find(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
     if(!c)return f.proposed_correction!=null?". Needs manual review":"";
@@ -421,14 +419,15 @@ function renderCertificate(rep){
       return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
     }).join("")}</div>
     ${excHTML}
-    <div class="go"><button class="btn primary" onclick="renderDash(REPORT);show('dash');window.scrollTo(0,0)">View the schedule</button></div>
+    <div class="go"><button class="btn primary" onclick="renderDash(REPORT);show('dash');window.scrollTo(0,0)">${corrsC.length?"Apply and view the schedule":"View the schedule"}</button></div>
     ${detail}
   </div></div>`;
+  const ua=$("#useAll");
+  const syncUA=()=>{if(ua)ua.checked=!document.querySelector(".certbox:not(:checked)")};
   document.querySelectorAll(".certbox").forEach(b=>b.onchange=()=>{
-    const ci=+b.dataset.ci;b.checked?ACCEPTED.add(ci):ACCEPTED.delete(ci);});
-  const ca=$("#certApplyAll"),cr=$("#certReset");
-  if(ca)ca.onclick=()=>{document.querySelectorAll(".certbox").forEach(b=>{b.checked=true;ACCEPTED.add(+b.dataset.ci)})};
-  if(cr)cr.onclick=()=>{document.querySelectorAll(".certbox").forEach(b=>b.checked=false);ACCEPTED.clear()};
+    const ci=+b.dataset.ci;b.checked?ACCEPTED.add(ci):ACCEPTED.delete(ci);syncUA();});
+  if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox").forEach(b=>{
+    b.checked=ua.checked;const ci=+b.dataset.ci;ua.checked?ACCEPTED.add(ci):ACCEPTED.delete(ci);});};}
 }
 
 function renderDash(rep){
