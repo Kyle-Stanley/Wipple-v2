@@ -22,6 +22,7 @@ body{background:var(--paper);color:var(--ink);
 .wrap{max-width:1040px;margin:0 auto;padding:0 28px}
 .num{font-variant-numeric:tabular-nums}
 button{font:inherit;cursor:pointer}
+input[type=checkbox]{accent-color:var(--sage-deep);width:15px;height:15px;cursor:pointer}
 :focus-visible{outline:2px solid var(--sage-deep);outline-offset:2px}
 .hidden{display:none!important}
 
@@ -315,6 +316,7 @@ function totalsDetail(rep){
     allExplained:out.length>0&&out.every(m=>m.explained)};
 }
 let REPORT=null;
+let ACCEPTED=new Set();   /* correction indices the reviewer has applied */
 function render(rep){
   REPORT=rep;
   if(rep.overall_status==="pipeline_error"){
@@ -371,20 +373,33 @@ function renderCertificate(rep){
   }
 
   const nExc=findings.length+((td&&!td.allMatch&&!td.allExplained)?1:0);
-  const head=nExc?`${nExc} exception${nExc>1?"s":""} found`:"All checks passed";
-  const SHOWN=5;
+  const passed=checks.filter(c=>c.st==="ok").length;
+  const head=nExc?`${passed} of ${checks.length} checks passed`:"All checks passed";
+  const SHOWN=6;
+  const corrsC=(rep.analysis||{}).corrections||[];
   const excRow=f=>{
-    const cls=CLASS_EN[f.classification]||f.classification;
     const col=(rep.table&&rep.table.columns[f.culprit_column]&&rep.table.columns[f.culprit_column].header)||"";
-    const c=((rep.analysis||{}).corrections||[]).find(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
-    return `<div class="row"><b>${f.row_label}</b>${col?` · ${col}`:""}<br>
-      ${f.observed!=null?`flagged <span class="num">$${fmt$(f.observed)}</span>`:""}${f.proposed_correction!=null?`, suggested <span class="num" style="color:var(--brick)">$${fmt$(f.proposed_correction)}</span>`:""}${f.observed!=null?"<br>":""}
-      <span style="color:var(--muted)">${causeText(f.classification,f.observed,f.proposed_correction)}${corrStatus(rep,f)}</span></div>`;
+    const ci=corrsC.findIndex(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
+    const c=ci>=0?corrsC[ci]:null;
+    const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""} aria-label="apply suggested value for ${f.row_label}">`
+               :`<span style="color:var(--muted);font-size:12px">review</span>`;
+    return `<tr><td>${f.row_label}<small>${col}</small></td>
+      <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
+      <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
+      <td>${causeText(f.classification,f.observed,f.proposed_correction)}</td>
+      <td>${c?`${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}`:"\u2014"}</td>
+      <td>${use}</td></tr>`;
   };
-  const excHTML=findings.length?`<div class="exc">
-    ${findings.slice(0,SHOWN).map(excRow).join("")}
-    ${findings.length>SHOWN?`<details><summary style="cursor:pointer;color:var(--sage-deep);font-size:12px">${findings.length-SHOWN} more</summary>${findings.slice(SHOWN).map(excRow).join("")}</details>`:""}
-  </div>`:"";
+  const excHTML=findings.length?`<div class="cgroup" style="text-align:left">
+    <table class="ctab"><thead><tr>
+      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th><th>Use</th>
+    </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
+  </div>
+  ${corrsC.length?`<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin:12px 0 0">
+    <button class="btn" id="certApplyAll">Apply all suggestions</button>
+    <button class="btn" id="certReset">Reset to as printed</button>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Checked rows are used in the schedule figures and the CSV.</p>`:""}`:"";
   function corrStatus(rep,f){
     const c=((rep.analysis||{}).corrections||[]).find(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
     if(!c)return f.proposed_correction!=null?". Needs manual review":"";
@@ -399,7 +414,7 @@ function renderCertificate(rep){
     </ul></details>`:"";
   $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
     <div class="kicker">validation results</div>
-    <h2 class="${nExc?"flag":""}">${head}</h2>
+    <h2 style="font-size:22px">${head}</h2>
     <div style="margin-top:16px">${checks.map(c=>{
       const ic=c.st==="ok"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
       const col=c.st==="ok"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
@@ -409,10 +424,15 @@ function renderCertificate(rep){
     <div class="go"><button class="btn primary" onclick="renderDash(REPORT);show('dash');window.scrollTo(0,0)">View the schedule</button></div>
     ${detail}
   </div></div>`;
+  document.querySelectorAll(".certbox").forEach(b=>b.onchange=()=>{
+    const ci=+b.dataset.ci;b.checked?ACCEPTED.add(ci):ACCEPTED.delete(ci);});
+  const ca=$("#certApplyAll"),cr=$("#certReset");
+  if(ca)ca.onclick=()=>{document.querySelectorAll(".certbox").forEach(b=>{b.checked=true;ACCEPTED.add(+b.dataset.ci)})};
+  if(cr)cr.onclick=()=>{document.querySelectorAll(".certbox").forEach(b=>b.checked=false);ACCEPTED.clear()};
 }
 
 function renderDash(rep){
-  const a=rep.analysis||{},k=a.kpis||{},prov=a.kpi_provenance||{};
+  const a=rep.analysis||{},k=computeKpis(rep),prov=a.kpi_provenance||{};
   const degraded=rep.overall_status==="llm_mapped_unverified"||rep.overall_status==="unmapped";
   const kpis=[
     ["Contract value",fmtM(k.total_contract_value)],
@@ -434,7 +454,7 @@ function renderDash(rep){
       <td class="mny">$${fmt$(c.implied)}</td>
       <td>${causeText(c.classification,c.printed,c.implied)}</td>
       <td>${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}</td>
-      <td><input type="checkbox" class="corrbox" data-ci="${ci}" aria-label="use suggested value for ${c.label}"></td></tr>`),
+      <td style="font-size:12px;color:${ACCEPTED.has(ci)?"var(--sage-deep)":"var(--muted)"}">${ACCEPTED.has(ci)?"applied":"as printed"}</td></tr>`),
     ...flagged.map(f=>`<tr>
       <td>${f.row_label}<small>${colName(f.culprit_column)}</small></td>
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
@@ -445,14 +465,10 @@ function renderDash(rep){
   ];
   const ledger=ledgerRows.length?`<div class="cgroup">
     <table class="ctab"><thead><tr>
-      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th><th>Use</th>
+      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th><th>Status</th>
     </tr></thead><tbody>${ledgerRows.join("")}</tbody></table>
   </div>
-  ${corrs.length?`<div style="display:flex;align-items:center;gap:12px;margin:9px 2px 0">
-    <button class="btn" id="repairAll">Apply all suggestions</button>
-    <button class="btn" id="repairNone">Reset to as printed</button>
-    <p style="font-size:12px;color:var(--muted);margin:0">Nothing is applied until you check it. Checked rows update the figures on this page and the CSV download.</p>
-  </div>`:""}`:"";
+  ${corrs.length?`<p style="font-size:12px;color:var(--muted);margin:8px 2px 0">Decided on the validation page. <a href="#" id="editDecisions" style="color:var(--sage-deep)">Edit decisions</a></p>`:""}`:"";
   const unexplained=td?td.mismatches.filter(m=>!m.explained):[];
   const tcRow=unexplained.length?`<div class="item finding">
       <p class="hl">Stated totals disagree with column sums</p>
@@ -470,12 +486,12 @@ function renderDash(rep){
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     <div class="cols">
-      <div class="card"><h3>Errors and corrections</h3>
-        ${errBody||`<p class="empty">No errors. Every job satisfies the identities.</p>`}</div>
       <div class="card"><h3>Underwriting signals <small>What stands out for underwriting?</small></h3>
         ${sigs||`<p class="empty">Nothing above threshold in this book.</p>`}</div>
     </div>
     ${bookShape(rep)}
+    <div class="card" style="margin-bottom:14px"><h3>Errors and corrections <small>Record of what was flagged and decided</small></h3>
+      ${errBody||`<p class="empty">No errors. Every job satisfies the identities.</p>`}</div>
     <div class="receipt">
       <div class="bar">
         <p>Validated schedule · ${rep.table?.values?.length??0} jobs</p>
@@ -490,20 +506,18 @@ function renderDash(rep){
     $("#toggleT").textContent=on?"Show table":"Hide table";if(!on&&!w.innerHTML)w.innerHTML=tableHTML(rep)};
   $("#csv").onclick=()=>downloadCSV(rep);
   $("#prnt").onclick=()=>window.print();
-  document.querySelectorAll(".corrbox").forEach(b=>b.onchange=()=>recompute(rep));
-  const ra=$("#repairAll"),rn=$("#repairNone");
-  if(ra)ra.onclick=()=>{document.querySelectorAll(".corrbox").forEach(b=>b.checked=true);recompute(rep)};
-  if(rn)rn.onclick=()=>{document.querySelectorAll(".corrbox").forEach(b=>b.checked=false);recompute(rep)};
+  const ed=$("#editDecisions");
+  if(ed)ed.onclick=e=>{e.preventDefault();renderCertificate(rep);show("certificate");window.scrollTo(0,0)};
 }
 
 function currentJobs(rep){
   const a=rep.analysis||{};
   const jobs=(a.jobs||[]).map(j=>({...j}));
   const corrs=a.corrections||[];
-  document.querySelectorAll(".corrbox").forEach(b=>{
-    const c=corrs[+b.dataset.ci];if(!c||!c.variable)return;
+  corrs.forEach((c,ci)=>{
+    if(!c.variable)return;
     const j=jobs[c.row];if(!j)return;
-    j[c.variable]=b.checked?c.implied:c.printed;
+    j[c.variable]=ACCEPTED.has(ci)?c.implied:c.printed;
   });
   for(const j of jobs){
     if(j.C>0)j.P=j.D/j.C;
@@ -512,24 +526,18 @@ function currentJobs(rep){
   }
   return jobs;
 }
-function recompute(rep){
+function computeKpis(rep){
   const jobs=currentJobs(rep);
+  if(!jobs.length)return (rep.analysis||{}).kpis||{};
   const sum=k=>jobs.reduce((s,j)=>s+(j[k]??0),0);
   const tcv=sum("V"),estgp=sum("V")-sum("C");
   const hasE=jobs.every(j=>j.E!=null),hasB=jobs.every(j=>j.B!=null);
-  const k={total_contract_value:tcv,
+  return {total_contract_value:tcv,
     uegp:hasE?estgp-(sum("E")-sum("D")):null,
     cost_to_complete:sum("C")-sum("D"),
     earned_revenue:hasE?sum("E"):null,
     gp_pct:tcv?estgp/tcv:null,
     net_billing_position:hasE&&hasB?sum("B")-sum("E"):null};
-  const vals=[fmtM(k.total_contract_value),fmtM(k.uegp),fmtM(k.cost_to_complete),
-    fmtM(k.earned_revenue),k.gp_pct==null?"—":(100*k.gp_pct).toFixed(1)+"%",
-    fmtM(k.net_billing_position)];
-  document.querySelectorAll(".kpi .val").forEach((el,i)=>{
-    el.textContent=vals[i];el.classList.toggle("neg",String(vals[i]).startsWith("("));});
-  const card=document.getElementById("bookshape");
-  if(card)card.outerHTML=bookShape(rep);
 }
 function bookShape(rep){
   const jobs=currentJobs(rep).filter(j=>j.net!=null&&j.V>0);
@@ -586,9 +594,8 @@ function downloadCSV(rep){
   const corrs=(rep.analysis||{}).corrections||[];
   const vals=t.values.map(r=>[...r]);
   const applied=[];
-  document.querySelectorAll(".corrbox").forEach(b=>{
-    if(!b.checked)return;
-    const c=corrs[+b.dataset.ci];if(!c)return;
+  corrs.forEach((c,ci)=>{
+    if(!ACCEPTED.has(ci))return;
     vals[c.row][c.col]=c.implied;applied.push(c);
   });
   const lines=[["Job",...t.columns.map(c=>c.header)].map(esc).join(","),
