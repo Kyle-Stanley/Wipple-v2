@@ -22,7 +22,7 @@
     --accent:    #3A4C3E;
     --accent2:   rgba(58,76,62,0.09);
     --red:       #A3402F;
-    --green:     #2e7d43;
+    --green:     #4A6B50;
     --blue:      #2f5d8f;
     --amber:     #92671E;
     --mono:      'IBM Plex Mono', 'JetBrains Mono', 'Courier New', monospace;
@@ -35,9 +35,7 @@
   html { scroll-behavior: smooth; }
 
   body {
-    background:
-      repeating-linear-gradient(to bottom, transparent 0px, transparent 31px, rgba(47,93,143,0.05) 31px, rgba(47,93,143,0.05) 32px),
-      var(--bg);
+    background: var(--bg);
     color: var(--text);
     font-family: var(--sans);
     font-size: 15.5px;
@@ -210,18 +208,18 @@
   .col-card-d { background: #fffefa; border: 1.5px solid var(--border); border-radius: var(--radius); padding: 8px 10px; cursor: grab; user-select: none; transition: border-color .2s, background .2s, opacity .2s; position: relative; }
   .col-card-d:hover { border-color: var(--border2); }
   .col-card-d.assigned-d { opacity: 0.45; }
-  .col-card-d.hint-contract-d { border-color: var(--green); background: rgba(46,125,67,0.06); }
+  .col-card-d.hint-contract-d { border-color: var(--green); background: rgba(74,107,80,0.06); }
   .col-card-d.hint-costs-d { border-color: rgba(182,72,60,0.6); background: rgba(182,72,60,0.05); }
   .col-card-d.hint-billings-d { border-color: rgba(47,93,143,0.55); background: rgba(47,93,143,0.05); }
   .col-card-d.hint-invalid-d { opacity: 0.4; }
   .col-name-d { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; font-family: var(--mono); letter-spacing: 0.04em; }
   .col-tag-d { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 2px; font-family: var(--mono); }
-  .tag-contract-d { background: rgba(46,125,67,0.14); color: var(--green); }
+  .tag-contract-d { background: rgba(74,107,80,0.14); color: var(--green); }
   .tag-costs-d    { background: rgba(182,72,60,0.12); color: #8B3527; }
   .tag-billings-d { background: rgba(47,93,143,0.12); color: var(--blue); }
   .col-vals-d { display: flex; flex-direction: column; gap: 1px; }
   .val-row-d { font-family: var(--mono); font-size: 10px; color: #39423b; padding: 1px 3px; border-radius: 2px; transition: background .2s, color .2s; line-height: 1.7; }
-  .val-row-d.match-d { background: rgba(46,125,67,0.14); color: #1c6e45; }
+  .val-row-d.match-d { background: rgba(74,107,80,0.14); color: #3A4C3E; }
   .val-row-d.match-cost-d { background: rgba(182,72,60,0.12); color: #8B3527; }
   .val-row-d.match-billing-d { background: rgba(47,93,143,0.12); color: var(--blue); }
   .biggest-badge-d { position: absolute; top: 6px; right: 7px; font-size: 9px; font-weight: 600; background: var(--green); color: #fff; border-radius: 2px; padding: 1px 5px; font-family: var(--mono); }
@@ -260,16 +258,13 @@
   <header class="hero">
     <div class="hero-eyebrow">Wipple · Foundations</div>
     <h1>WIP Schedules viewed as <em>geometry</em>,<br>not spreadsheets</h1>
-    <p>A work-in-progress schedule isn't a pile of labeled columns. It's a single mathematical object whose parts can only fit together one way. That's why an engine that never reads a header can name every column, prove the table is internally consistent, and point at the exact cell that's wrong. This page builds that idea from scratch, one intuition at a time.</p>
+    <p>Because of the mathematical relationships between its columns, a WIP can only fit together <strong>one way</strong>. That's why a system that totally ignores column headers can properly map every column, detect every issue, and tell you how to correct it, instantly.</p>
+    <p style="margin-top:14px">The AI in the loop does one simple job: <strong>it gives us the table.</strong> No matter how big the table is, we can do the rest ourselves, in a fraction of a second, for free.</p>
+    <p style="margin-top:14px;color:var(--text3)">This page explains how we make that happen, one intuition at a time.</p>
   </header>
 
   <!-- Section 1: The cube -->
   
-  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px 26px;margin:34px 0 10px">
-    <div style="font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--accent);text-transform:uppercase;margin-bottom:12px">The short version</div>
-    <p style="color:var(--text2);margin-bottom:14px">The economics of the pipeline come from one division of labor. The only AI in the loop does <strong>perception</strong>: turning pixels into a grid of numbers, once. Everything after that is plain arithmetic on arrays: deterministic, identical on every run, finished in microseconds, costing effectively nothing. No tokens are ever spent asking a language model to double-check math, because <strong>the model is trusted to read, and never trusted to calculate</strong>. Verification, the part you'd otherwise pay a careful human or a frontier model to do, is the free part.</p>
-    <p style="color:var(--text2);margin:0">It's also the auditable part. The output isn't a confidence score; it's a certificate that lists every identity witnessed and every cell that failed. Anyone with a calculator can re-derive it. The rest of this page is the geometry that makes that possible.</p>
-  </div>
 
   <section class="section">
     <div class="section-num">01</div>
@@ -296,7 +291,7 @@
         <div id="wip-vals" style="display:none;flex-direction:column;gap:10px;flex-shrink:0;width:160px;padding-top:8px;">
           <div style="font-size:10px;font-weight:600;color:var(--text3);font-family:var(--mono);letter-spacing:0.08em;margin-bottom:2px;">DERIVED VALUES</div>
           <div style="background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;">
-            <div style="font-size:10px;color:#2e7d43;font-family:var(--mono);margin-bottom:3px;">Earned Revenue</div>
+            <div style="font-size:10px;color:#4A6B50;font-family:var(--mono);margin-bottom:3px;">Earned Revenue</div>
             <div style="font-size:15px;font-weight:600;color:var(--text);font-family:var(--mono);" id="wv-earned">$0k</div>
             <div style="font-size:10px;color:var(--text3);margin-top:2px;">% complete x contract</div>
           </div>
@@ -324,7 +319,7 @@
           </div>
           <div class="axis-row-c">
             <div class="axis-head-c">
-              <div class="axis-lbl-c"><span class="axis-dot-c" style="background:#2e7d43"></span><span id="lbl-g">Green</span></div>
+              <div class="axis-lbl-c"><span class="axis-dot-c" style="background:#4A6B50"></span><span id="lbl-g">Green</span></div>
               <div style="display:flex;align-items:center;gap:4px;"><span class="axis-val-c" id="vg">200</span><button class="link-btn-c" id="lnk-g" onclick="toggleLink('g')" aria-label="Link G">⇔</button></div>
             </div>
             <div class="sl-row-c"><input type="range" min="0" max="255" value="200" step="1" id="sl-g" oninput="slideAxis('g',+this.value)"></div>
@@ -404,7 +399,7 @@
         <div style="font-size:11px;font-weight:500;color:var(--text2);margin-bottom:8px;font-family:var(--mono);">Assign columns · the identity: Contract Value − Est. Cost = Est. Gross Profit</div>
         <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:0;align-items:center;">
           <div class="slot-d" id="slot-y" ondragover="dOnOver(event,'y')" ondragleave="dOnLeave('y')" ondrop="dOnDrop(event,'y')">
-            <div class="slot-label-d"><span class="slot-dot-d" style="background:#2e7d43"></span>Contract Value</div>
+            <div class="slot-label-d"><span class="slot-dot-d" style="background:#4A6B50"></span>Contract Value</div>
             <div class="slot-hint-d">Biggest numbers</div>
             <div class="slot-empty-d" id="slot-y-empty">Drop here</div>
             <div id="slot-y-filled" style="display:none;flex-direction:column;gap:3px;"></div>
@@ -550,7 +545,7 @@
         <button class="action-btn-d" onclick="xtRepair()">Repair table</button>
         <button class="action-btn-d" onclick="xtNewPortfolio()">New portfolio</button>
         <div class="score-row-d" style="flex:1;min-width:200px;">
-          <span class="score-dot-d" id="xt-dot" style="background:#2e7d43"></span>
+          <span class="score-dot-d" id="xt-dot" style="background:#4A6B50"></span>
           <span id="xt-status">All identities hold · table certifies clean</span>
         </div>
       </div>
@@ -816,8 +811,8 @@ function cDraw(){
 
   const O=CP(0,0,0);const axisLen=1.18;
   const axesDef=isWip?
-    [{dir:[axisLen,0,0],color:'#A3402F',label:'Cost'},{dir:[0,axisLen,0],color:'#2e7d43',label:'Contract'},{dir:[0,0,axisLen],color:'#2f5d8f',label:'Billing'}]:
-    [{dir:[axisLen,0,0],color:'#A3402F',label:'R'},{dir:[0,axisLen,0],color:'#2e7d43',label:'G'},{dir:[0,0,axisLen],color:'#2f5d8f',label:'B'}];
+    [{dir:[axisLen,0,0],color:'#A3402F',label:'Cost'},{dir:[0,axisLen,0],color:'#4A6B50',label:'Contract'},{dir:[0,0,axisLen],color:'#2f5d8f',label:'Billing'}]:
+    [{dir:[axisLen,0,0],color:'#A3402F',label:'R'},{dir:[0,axisLen,0],color:'#4A6B50',label:'G'},{dir:[0,0,axisLen],color:'#2f5d8f',label:'B'}];
 
   axesDef.forEach(ax=>{
     const tip=CP(...ax.dir);
@@ -876,16 +871,16 @@ function cDraw(){
   function dropLine(from,to,color){ctx.save();ctx.strokeStyle=color;ctx.lineWidth=1.2;ctx.setLineDash([4,4]);ctx.globalAlpha=0.55;ctx.beginPath();ctx.moveTo(from.sx,from.sy);ctx.lineTo(to.sx,to.sy);ctx.stroke();ctx.restore();}
   function cdot(pt,color,alpha=0.5,r=4){ctx.save();ctx.beginPath();ctx.arc(pt.sx,pt.sy,r,0,Math.PI*2);ctx.fillStyle=color;ctx.globalAlpha=alpha;ctx.fill();ctx.restore();}
 
-  dropLine(PP,floorPt,'#2e7d43');dropLine(PP,backPt,'#2f5d8f');dropLine(PP,leftPt,'#A3402F');
-  cdot(floorPt,'#2e7d43');cdot(backPt,'#2f5d8f');cdot(leftPt,'#A3402F');
+  dropLine(PP,floorPt,'#4A6B50');dropLine(PP,backPt,'#2f5d8f');dropLine(PP,leftPt,'#A3402F');
+  cdot(floorPt,'#4A6B50');cdot(backPt,'#2f5d8f');cdot(leftPt,'#A3402F');
   dropLine(floorPt,rAxisPt,'#A3402F');dropLine(floorPt,bAxisPt,'#2f5d8f');
-  dropLine(backPt,rAxisPt,'#A3402F');dropLine(backPt,gAxisPt,'#2e7d43');
-  dropLine(leftPt,gAxisPt,'#2e7d43');dropLine(leftPt,bAxisPt,'#2f5d8f');
-  cdot(rAxisPt,'#A3402F',0.75);cdot(gAxisPt,'#2e7d43',0.75);cdot(bAxisPt,'#2f5d8f',0.75);
+  dropLine(backPt,rAxisPt,'#A3402F');dropLine(backPt,gAxisPt,'#4A6B50');
+  dropLine(leftPt,gAxisPt,'#4A6B50');dropLine(leftPt,bAxisPt,'#2f5d8f');
+  cdot(rAxisPt,'#A3402F',0.75);cdot(gAxisPt,'#4A6B50',0.75);cdot(bAxisPt,'#2f5d8f',0.75);
 
   ctx.save();ctx.font='bold 11px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.globalAlpha=0.85;
   ctx.fillStyle='#A3402F';ctx.fillText(isWip?fmt$(cRgb.r):Math.round(cRgb.r),CP(px,-0.09,0).sx,CP(px,-0.09,0).sy);
-  ctx.fillStyle='#2e7d43';ctx.fillText(isWip?fmt$(cRgb.g):Math.round(cRgb.g),CP(-0.1,py,0).sx,CP(-0.1,py,0).sy);
+  ctx.fillStyle='#4A6B50';ctx.fillText(isWip?fmt$(cRgb.g):Math.round(cRgb.g),CP(-0.1,py,0).sx,CP(-0.1,py,0).sy);
   ctx.fillStyle='#2f5d8f';ctx.fillText(isWip?fmt$(cRgb.b):Math.round(cRgb.b),CP(0,-0.09,pz).sx,CP(0,-0.09,pz).sy);
   ctx.restore();
 
@@ -1062,7 +1057,7 @@ function dUpdateScore(){
   const s=dComputeScore();
   const dot=document.getElementById('score-dot'),txt=document.getElementById('score-text'),row=document.getElementById('score-row');
   if(s===null){dot.style.background='var(--border2)';txt.textContent='Assign all three columns to score';row.style.borderColor='var(--border)';return;}
-  if(dIsCorrectAll()){dot.style.background='#2e7d43';txt.textContent='Perfect: all three columns identified';row.style.borderColor='rgba(46,125,67,0.45)';}
+  if(dIsCorrectAll()){dot.style.background='#4A6B50';txt.textContent='Perfect: all three columns identified';row.style.borderColor='rgba(74,107,80,0.45)';}
   else if(dIsCorrectXY()){dot.style.background='#92671E';txt.textContent='Contract correct, find the remaining column';row.style.borderColor='rgba(168,123,47,0.55)';}
   else if(s>0.65){dot.style.background='#92671E';txt.textContent=`${Math.round(s*100)}% fit, close but ratios inconsistent`;row.style.borderColor='rgba(168,123,47,0.55)';}
   else{dot.style.background='#A3402F';txt.textContent=`${Math.round(s*100)}% fit, ratios invalid`;row.style.borderColor='rgba(182,72,60,0.5)';}
@@ -1152,9 +1147,9 @@ dGenerate();dBuildPool();dRefresh();
     'P-UO':      {s:'ok',  d:'billing position + % complete'},
   };
 
-  const COLOR = { ok:'#dcead9', amb:'#f0e7cd', no:'#e7e8db' };
-  const BORDER = { ok:'rgba(46,125,67,0.45)', amb:'rgba(168,123,47,0.5)', no:'rgba(45,55,45,0.10)' };
-  const TEXT = { ok:'#1c6e45', amb:'#92671E', no:'#8a9286' };
+  const COLOR = { ok:'#E4EAE2', amb:'#f0e7cd', no:'#ECE9DE' };
+  const BORDER = { ok:'rgba(74,107,80,0.45)', amb:'rgba(168,123,47,0.5)', no:'rgba(45,55,45,0.10)' };
+  const TEXT = { ok:'#3A4C3E', amb:'#92671E', no:'#9A988C' };
   const LABEL = { ok:'OK', amb:'AMB', no:'NO' };
 
   const container = document.getElementById('witness-grid');
@@ -1163,9 +1158,9 @@ dGenerate();dBuildPool();dRefresh();
   const legend = document.createElement('div');
   legend.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;';
   [
-    {color:'#dcead9',border:'rgba(46,125,67,0.45)',text:'#1c6e45', label:'Algebraically validatable'},
+    {color:'#E4EAE2',border:'rgba(74,107,80,0.45)',text:'#3A4C3E', label:'Algebraically validatable'},
     {color:'#f0e7cd',border:'rgba(168,123,47,0.5)',text:'#92671E', label:'Symmetric · needs a tiebreaker'},
-    {color:'#e7e8db',border:'rgba(45,55,45,0.10)',text:'#8a9286',    label:'Insufficient'},
+    {color:'#ECE9DE',border:'rgba(45,55,45,0.10)',text:'#9A988C',    label:'Insufficient'},
   ].forEach(l=>{
     const item = document.createElement('div');
     item.style.cssText = 'display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);';
@@ -1239,15 +1234,15 @@ const PEEL_NODES={
 };
 const PEEL_STEPS=[
   {rule:'G = V − C',          out:'G', ins:['V','C'],     res:'match', col:5, fam:'est',    w:1.0,
-   log:'G = V − C predicts a full column → matches col 5 on 10/10 jobs · <span style="color:#1c6e45">+1.0 evidence</span>'},
+   log:'G = V − C predicts a full column → matches col 5 on 10/10 jobs · <span style="color:#3A4C3E">+1.0 evidence</span>'},
   {rule:'E = V × D ÷ C',      out:'E', ins:['V','D','C'], res:'match', col:7, fam:'earned', w:1.0,
-   log:'E = V × D ÷ C → matches col 7 on 10/10 jobs · <span style="color:#1c6e45">+1.0 evidence</span>'},
+   log:'E = V × D ÷ C → matches col 7 on 10/10 jobs · <span style="color:#3A4C3E">+1.0 evidence</span>'},
   {rule:'P = D ÷ C',          out:'P', ins:['D','C'],     res:'match', col:1, fam:'pct',    w:0.4,
-   log:'P = D ÷ C → matches col 1 · <span style="color:#1c6e45">+0.4</span> (percent vectors collide more easily, so they weigh less)'},
+   log:'P = D ÷ C → matches col 1 · <span style="color:#3A4C3E">+0.4</span> (percent vectors collide more easily, so they weigh less)'},
   {rule:'Q = C − D',          out:'Q', ins:['C','D'],     res:'virtual',
    log:'Q = C − D predicts a column nothing physical matches → constructed <span style="color:#5b6357">virtually</span> · +0'},
   {rule:'U = max(E − B, 0)',  out:'U', ins:['E','B'],     res:'match', col:9, fam:'bill',   w:1.0,
-   log:'U = max(E − B, 0) → matches col 9 · <span style="color:#1c6e45">+1.0 evidence</span>'},
+   log:'U = max(E − B, 0) → matches col 9 · <span style="color:#3A4C3E">+1.0 evidence</span>'},
   {rule:'O = max(B − E, 0)',  out:'O', ins:['B','E'],     res:'match', col:2, fam:'bill',   w:0,
    log:'O = max(B − E, 0) → matches col 2 · <span style="color:#92671E">same family as U → merged, +0</span> (one fact, two spellings)'},
   {rule:'H = E − D',          out:'H', ins:['E','D'],     res:'virtual',
@@ -1278,7 +1273,7 @@ function peelRender(){
   // edges for applied steps; latest step highlighted
   for(let i=0;i<peelIdx;i++){
     const st=PEEL_STEPS[i],active=(i===peelIdx-1);
-    const color=st.res==='match'?(active?'#3A4C3E':'rgba(46,125,67,0.55)'):(active?'#5b6357':'rgba(91,99,87,0.4)');
+    const color=st.res==='match'?(active?'#3A4C3E':'rgba(74,107,80,0.55)'):(active?'#5b6357':'rgba(91,99,87,0.4)');
     st.ins.forEach(inp=>{
       out+=`<path d="${peelEdgePath(inp,st.out)}" fill="none" stroke="${color}" stroke-width="${active?2:1.2}" ${st.res==='virtual'?'stroke-dasharray="4,4"':''}/>`;
     });
@@ -1288,7 +1283,7 @@ function peelRender(){
     const n=PEEL_NODES[k],st=peelNodeState(k);
     let fill='var(--bg3)',stroke='rgba(45,55,45,0.16)',txt='#7e887c',sub='·',subC='#7e887c',dash='';
     if(st.s==='seed'){fill='rgba(157,44,28,0.07)';stroke='#3A4C3E';txt='#232b26';sub='seed · col '+st.col;subC='#3A4C3E';}
-    if(st.s==='match'){fill='rgba(46,125,67,0.10)';stroke='#2e7d43';txt='#232b26';sub='col '+st.col+' ✓';subC='#1c6e45';}
+    if(st.s==='match'){fill='rgba(74,107,80,0.10)';stroke='#4A6B50';txt='#232b26';sub='col '+st.col+' ✓';subC='#3A4C3E';}
     if(st.s==='virtual'){fill='transparent';stroke='rgba(91,99,87,0.55)';txt='#5b6357';sub='virtual';subC='#5b6357';dash='stroke-dasharray="5,4"';}
     out+=`<g><rect x="${n.x-68}" y="${n.y-22}" width="136" height="44" rx="8" fill="${fill}" stroke="${stroke}" ${dash}/>`;
     out+=`<text x="${n.x}" y="${n.y-4}" text-anchor="middle" fill="${txt}" font-size="11" font-family=""Public Sans",system-ui,sans-serif" font-weight="600">${k} · ${n.name}</text>`;
@@ -1302,10 +1297,10 @@ function peelRender(){
     for(let i=0;i<peelIdx;i++){const st=PEEL_STEPS[i];if(st.fam===f.k&&st.res==='match'){w+=st.w;hits++;}}
     total+=w;
     const on=hits>0;
-    html+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${on?'rgba(46,125,67,0.45)':'var(--border)'};border-radius:8px;padding:7px 10px;font-size:11px;">
-      <span style="width:8px;height:8px;border-radius:50%;background:${on?'#2e7d43':'var(--border2)'};flex-shrink:0;"></span>
+    html+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${on?'rgba(74,107,80,0.45)':'var(--border)'};border-radius:8px;padding:7px 10px;font-size:11px;">
+      <span style="width:8px;height:8px;border-radius:50%;background:${on?'#4A6B50':'var(--border2)'};flex-shrink:0;"></span>
       <span style="flex:1;color:${on?'var(--text)':'var(--text3)'};">${f.label}</span>
-      <span style="font-family:var(--mono);color:${on?'#1c6e45':'var(--text3)'};">${on?'+'+w.toFixed(1)+(hits>1?' ('+hits+' merged)':''):'·'}</span></div>`;
+      <span style="font-family:var(--mono);color:${on?'#3A4C3E':'var(--text3)'};">${on?'+'+w.toFixed(1)+(hits>1?' ('+hits+' merged)':''):'·'}</span></div>`;
   });
   html+=`<div style="display:flex;justify-content:space-between;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--text);border-top:0.5px solid var(--border);margin-top:3px;">
     <span>Total independent evidence</span><span style="color:var(--accent);font-weight:600;">${total.toFixed(1)} units</span></div>`;
@@ -1314,7 +1309,7 @@ function peelRender(){
   const status=document.getElementById('peel-status'),dot=document.getElementById('peel-dot');
   if(peelIdx===0){status.textContent='Four seed anchors hypothesized · press Step';dot.style.background='var(--accent)';}
   else if(peelIdx<PEEL_STEPS.length){status.textContent=`Step ${peelIdx} of ${PEEL_STEPS.length} · ${PEEL_STEPS[peelIdx-1].rule}`;dot.style.background='var(--accent)';}
-  else{status.textContent='All 9 physical columns explained · cost and billing sides each independently confirmed';dot.style.background='#2e7d43';}
+  else{status.textContent='All 9 physical columns explained · cost and billing sides each independently confirmed';dot.style.background='#4A6B50';}
 }
 function peelLog(){
   const el=document.getElementById('peel-log');let html='';
@@ -1397,7 +1392,7 @@ function prDraw(){
     });
     const iqr=prIqrOf(prData[r.key]),tight=iqr<0.12;
     c.save();c.textAlign='left';c.font='10px monospace';
-    c.fillStyle=tight?'#1c6e45':'#2f5d8f';
+    c.fillStyle=tight?'#3A4C3E':'#2f5d8f';
     c.fillText(tight?'TIGHT':'SPREAD',padL+pw+14,cy-2);
     c.fillStyle='rgba(91,99,87,0.8)';
     c.fillText('IQR '+(iqr*100).toFixed(0)+'pt',padL+pw+14,cy+12);c.restore();
@@ -1598,8 +1593,8 @@ function xtRenderChecks(fails){
     const bad=f.length>0;
     let worst=0;f.forEach(x=>{if(Math.abs(x.resid)>Math.abs(worst))worst=x.resid;});
     const delta=bad?(I.kind==='p'?'Δ '+(Math.abs(worst)*100).toFixed(1)+'pt':'Δ $'+Math.round(Math.abs(worst))+'k'):'≤ tol';
-    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${bad?'rgba(182,72,60,0.5)':'rgba(46,125,67,0.4)'};border-radius:8px;padding:7px 10px;font-size:11px;">
-      <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${bad?'#8B3527':'#1c6e45'};min-width:34px;">${bad?'FAIL':'PASS'}</span>
+    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${bad?'rgba(182,72,60,0.5)':'rgba(74,107,80,0.4)'};border-radius:8px;padding:7px 10px;font-size:11px;">
+      <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${bad?'#8B3527':'#3A4C3E'};min-width:34px;">${bad?'FAIL':'PASS'}</span>
       <span style="flex:1;color:var(--text2);">${I.name}</span>
       <span style="font-family:var(--mono);font-size:10px;color:${bad?'#8B3527':'var(--text3)'};">${delta}${bad?' · Job '+(f[0].row+1):''}</span></div>`;
   });
@@ -1608,8 +1603,8 @@ function xtRenderChecks(fails){
 function xtRenderDiag(diag,fails){
   const el=document.getElementById('xt-diag'),dot=document.getElementById('xt-dot'),status=document.getElementById('xt-status');
   if(!diag){
-    dot.style.background='#2e7d43';status.textContent='All identities hold · table certifies clean';
-    el.innerHTML='<span style="color:#1c6e45">status: CERTIFIED</span><br><span style="color:var(--text3)">5 identities × 6 jobs = 30 strict checks, all within tolerance.<br>Click any cell to corrupt a digit and watch the triangulation.</span>';
+    dot.style.background='#4A6B50';status.textContent='All identities hold · table certifies clean';
+    el.innerHTML='<span style="color:#3A4C3E">status: CERTIFIED</span><br><span style="color:var(--text3)">5 identities × 6 jobs = 30 strict checks, all within tolerance.<br>Click any cell to corrupt a digit and watch the triangulation.</span>';
     return;
   }
   dot.style.background='#A3402F';
@@ -1621,7 +1616,7 @@ function xtRenderDiag(diag,fails){
     const k=diag.culprit[0],m=vmeta(k);
     h+=`<div style="margin-top:6px;color:#A3402F;">culprit → Job ${diag.row+1}, <strong>${m.n}</strong></div>`;
     if(diag.proposed!==null&&diag.proposed!==undefined){
-      h+=`<div>observed <span style="color:#A3402F">${xtFmt(xtRows[diag.row][k],m.kind)}</span> → identities imply <span style="color:#1c6e45">${xtFmt(diag.proposed,m.kind)}</span> <span style="color:var(--text3)">(confidence ${diag.confidence})</span></div>`;
+      h+=`<div>observed <span style="color:#A3402F">${xtFmt(xtRows[diag.row][k],m.kind)}</span> → identities imply <span style="color:#3A4C3E">${xtFmt(diag.proposed,m.kind)}</span> <span style="color:var(--text3)">(confidence ${diag.confidence})</span></div>`;
       h+=`<div style="color:var(--text3);margin-top:4px;">implied independently by:<br>${diag.basis.map(b=>'&nbsp;&nbsp;· '+b).join('<br>')}</div>`;
       if(diag.cls)h+=`<div style="margin-top:4px;color:#92671E;">looks like: ${diag.cls}</div>`;
     }
