@@ -1,0 +1,8 @@
+langgraph
+numpy
+fastapi
+uvicorn
+python-multipart
+openpyxl
+google-genai
+anthropic

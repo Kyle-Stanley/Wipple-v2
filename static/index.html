@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wipple · verified WIP extraction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2EFE6; --surface:#FBFAF7; --ink:#20251F; --muted:#6C7165;
+  --sage:#5C7160; --sage-deep:#3A4C3E; --brick:#A3402F; --amber:#92671E;
+  --line:#DDD8C9; --line-soft:#E8E4D7;
+}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}}
+body{background:var(--paper);color:var(--ink);
+  font:400 15.5px/1.6 Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+.num{font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--sage-deep);outline-offset:2px}
+.hidden{display:none!important}
+
+header{padding:26px 0;display:flex;align-items:baseline;justify-content:space-between}
+.mark{font:600 24px Fraunces,serif;color:var(--sage-deep);letter-spacing:-.01em}
+.mark span{color:var(--sage)}
+.tag{font-size:13px;color:var(--muted)}
+
+/* landing */
+#landing{padding:9vh 0 12vh}
+h1{font:500 44px/1.15 Fraunces,serif;letter-spacing:-.015em;max-width:17ch}
+h1 em{font-style:normal;color:var(--sage-deep)}
+.sub{margin:18px 0 40px;color:var(--muted);max-width:52ch}
+.drop{border:1.5px dashed var(--line);border-radius:14px;background:var(--surface);
+  padding:46px 32px;text-align:center;transition:border-color .15s}
+.drop.on{border-color:var(--sage)}
+.drop p{color:var(--muted);font-size:14px}
+.drop strong{display:block;font-weight:500;color:var(--ink);font-size:16px;margin-bottom:6px}
+.actions{display:flex;gap:14px;justify-content:center;margin-top:20px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:9px;
+  padding:9px 18px;font-weight:500;font-size:14px;color:var(--ink)}
+.btn:hover{border-color:var(--sage)}
+.btn.primary{background:var(--sage-deep);border-color:var(--sage-deep);color:#FBFAF7}
+.btn.primary:hover{background:#2E3D31}
+.quiet{font-size:12.5px;color:var(--muted);text-align:center;margin-top:14px}
+
+/* processing */
+#processing{padding:10vh 0}
+.logoanim{position:relative;width:150px;height:60px;margin:0 auto 36px;animation:lgpulse 3.6s ease-in-out infinite}
+.logoanim .lg{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.logoanim .cyc{opacity:0;animation:lgfade 3.6s ease-in-out infinite}
+.logoanim .c2{animation-delay:1.2s}
+.logoanim .c3{animation-delay:2.4s}
+.logoanim .lgfall{display:none;text-align:center;line-height:60px;font-size:30px}
+.logoanim.noimg .lg{display:none}
+.logoanim.noimg .lgfall{display:block}
+@keyframes lgfade{0%,100%{opacity:0}35%{opacity:1}70%{opacity:0}}
+@keyframes lgpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+.log{max-width:560px;margin:0 auto}
+.log .ln{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);
+  font-size:14.5px;color:var(--muted);animation:rise .35s ease both}
+.log .ln:last-child{color:var(--ink)}
+.log .dot{color:var(--sage);font-weight:600}
+@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+
+/* certificate */
+#certificate{padding:9vh 0 12vh}
+.cert{max-width:620px;margin:0 auto;background:var(--surface);
+  border:1px solid var(--line);border-radius:4px;padding:8px}
+.cert-inner{border:1px solid var(--line);padding:44px 48px;text-align:center}
+.cert .kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.cert h2{font:500 30px/1.25 Fraunces,serif;margin:14px 0 10px}
+.cert h2.flag{color:var(--brick)}
+.cert .body{color:var(--muted);font-size:14.5px;max-width:46ch;margin:0 auto}
+.cert .caught{margin:22px auto 0;text-align:left;max-width:46ch;
+  border-top:1px solid var(--line-soft);padding-top:18px;font-size:14px}
+.cert .caught .row{margin-bottom:10px}
+.cert .caught b{font-weight:500}
+.cert .caught .num{color:var(--brick)}
+.cert .go{margin-top:30px}
+.chk{display:flex;gap:11px;text-align:left;padding:9px 0;border-top:1px solid var(--line-soft);font-size:13.5px}
+.chk:first-of-type{border-top:none}
+.chk .ic{font-weight:600;flex:none;width:16px}
+.chk .cl{font-weight:500;margin:0}
+.chk .cn{color:var(--muted);font-size:12.5px;margin:2px 0 0}
+.exc{text-align:left;background:var(--paper);border:1px solid var(--line-soft);border-radius:8px;padding:11px 14px;margin-top:14px;font-size:13px}
+.exc .row{margin:6px 0}
+.exc b{font-weight:500}
+details.more{margin-top:22px;font-size:13px;color:var(--muted);text-align:left}
+details.more summary{cursor:pointer;text-align:center;list-style:none;color:var(--sage-deep)}
+details.more summary::-webkit-details-marker{display:none}
+details.more ul{margin:12px 0 0 18px}
+details.more li{margin:3px 0}
+
+/* dashboard */
+#dash{padding:30px 0 70px}
+.banner{background:#F4E9D8;border:1px solid #E2CFA9;color:var(--amber);
+  border-radius:10px;padding:12px 18px;font-size:14px;margin-bottom:22px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:26px}
+.kpi{background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:15px 17px}
+.kpi .lab{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpi .val{font:500 23px/1.2 Inter;margin-top:5px}
+.kpi .val.neg{color:var(--brick)}
+.cols{display:flex;flex-direction:column;gap:14px;margin-bottom:18px}
+.card{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:18px 20px}
+.card h3{font:500 16px Inter;display:flex;align-items:baseline;gap:8px}
+.card h3 small{font-weight:400;font-size:12.5px;color:var(--muted)}
+.item{border-top:1px solid var(--line-soft);padding:13px 0}
+.item:first-of-type{margin-top:12px}
+.item .head{display:flex;gap:10px;align-items:baseline}
+.sevr{font-size:11px;font-weight:600;letter-spacing:.05em;border-radius:6px;padding:2px 8px;flex:none}
+.sevr.high{background:#F2DDD6;color:var(--brick)}
+.sevr.med{background:#F2E7CF;color:var(--amber)}
+.sevr.low{background:#E4E9E1;color:var(--sage-deep)}
+.item .hl{font-weight:500;font-size:14.5px}
+.item .sub2{font-size:13px;color:var(--muted);margin-top:4px}
+.item .jobs{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;border:1px solid var(--line);border-radius:7px;padding:3px 9px;color:var(--muted)}
+.why{font-size:12.5px;margin-top:8px}
+.why summary{cursor:pointer;color:var(--sage-deep);list-style:none}
+.why summary::-webkit-details-marker{display:none}
+.why p{color:var(--muted);margin-top:6px}
+.empty{color:var(--muted);font-size:14px;padding:18px 0 6px}
+.finding .hl .num{color:var(--brick)}
+
+.cgroup{background:var(--paper);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-top:10px}
+.cgroup .gl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.ctab{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
+.ctab th{font-weight:500;font-size:11px;color:var(--muted);text-align:left;padding:4px 14px 6px 0;border-bottom:1px solid var(--line)}
+.ctab td{padding:8px 14px 8px 0;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.ctab tr:last-child td{border-bottom:none}
+.ctab .mny{text-align:right;font-variant-numeric:tabular-nums}
+.ctab .bad{color:var(--brick)}
+.ctab small{color:var(--muted);font-size:10.5px;display:block}
+/* receipt */
+.receipt{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:14px 20px}
+.receipt .bar{display:flex;align-items:center;gap:14px}
+.receipt .bar p{flex:1;font-size:14px;color:var(--muted)}
+.tablewrap{overflow-x:auto;margin-top:16px}
+table{border-collapse:collapse;font-size:12.5px;white-space:nowrap;width:100%}
+th{font-weight:500;text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);
+  color:var(--muted);font-size:11.5px}
+th .vn{display:block;color:var(--sage-deep);font-size:10.5px;font-weight:600;letter-spacing:.04em}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface)}
+td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line-soft)}
+td.flag{color:var(--brick);text-decoration:underline dotted;cursor:help}
+tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
+.foot{margin-top:26px;font-size:12px;color:var(--muted);text-align:center}
+@media print{
+  header,.receipt .bar button,#dash .banner{display:none}
+  body{background:#fff}
+  .card,.kpi,.receipt{border-color:#ccc}
+}
+#err{max-width:560px;margin:14vh auto;text-align:center}
+#err h2{font:500 26px Fraunces,serif;margin-bottom:10px}
+#err p{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="mark"><img src="/static/logo/logo2_bw.png" alt="wipple" style="height:30px;display:block" onerror="this.outerHTML='w<span>i</span>pple'"></div>
+  <div class="tag">verified WIP extraction</div>
+</header>
+
+<section id="landing">
+  <h1>WIP schedules, extracted and <em>verified</em>.</h1>
+  <p class="sub">Wipple reads a work-in-progress schedule, checks every job against the accounting identities that should hold between its columns, flags and corrects transcription errors, and scores what matters for underwriting. Anything it cannot verify is labeled unverified.</p>
+  <div class="drop" id="drop">
+    <strong>Drop a WIP schedule</strong>
+    <p>PDF, Excel, CSV, or a photo of the schedule · nothing is stored</p>
+    <div class="actions">
+      <button class="btn primary" id="pick">Choose a file</button>
+      <button class="btn" id="sample">Run the sample schedule</button>
+    </div>
+  </div>
+  <p class="quiet">The sample is a 12-job schedule with one planted transcription error.</p>
+  <input type="file" id="file" accept=".pdf,.xlsx,.xlsm,.csv,.tsv,.png,.jpg,.jpeg,.webp" class="hidden">
+</section>
+
+<section id="processing" class="hidden">
+  <div class="logoanim" aria-hidden="true">
+    <img class="lg base" src="/static/logo/wipple_logo_light.png" alt="" onerror="this.closest('.logoanim').classList.add('noimg')">
+    <img class="lg cyc c1" src="/static/logo/wipple-blue.png" alt="">
+    <img class="lg cyc c2" src="/static/logo/wipple-green.png" alt="">
+    <img class="lg cyc c3" src="/static/logo/wipple-red.png" alt="">
+    <span class="lgfall mark">w<span>i</span>pple</span>
+  </div>
+  <div class="log" id="log"></div>
+</section>
+
+<section id="certificate" class="hidden"></section>
+
+<section id="dash" class="hidden"></section>
+
+<section id="err" class="hidden">
+  <h2>Couldn't read that document</h2>
+  <p id="errmsg"></p>
+  <div class="actions" style="margin-top:22px">
+    <button class="btn" onclick="location.reload()">Start over</button>
+  </div>
+</section>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const show=id=>{for(const s of["landing","processing","certificate","dash","err"])
+  $("#"+s).classList.toggle("hidden",s!==id)};
+const fmtM=x=>{if(x==null)return"—";const a=Math.abs(x),
+  s=a>=1e6?(a/1e6).toFixed(a>=1e7?1:2)+"M":a>=1e3?(a/1e3).toFixed(0)+"k":a.toFixed(0);
+  return x<0?`($${s})`:`$${s}`};
+const fmt$=x=>x==null?"—":(x<0?`(${Math.abs(x).toLocaleString(undefined,{maximumFractionDigits:0})})`
+  :x.toLocaleString(undefined,{maximumFractionDigits:0}));
+const causeText=(cls,printed,implied)=>{
+  if(cls==="separator_or_magnitude_error"&&printed&&implied){
+    const dp=String(Math.round(Math.abs(printed))),di=String(Math.round(Math.abs(implied)));
+    for(const k of[1,2,3]){
+      const z="0".repeat(k);
+      if(dp===di+z)return k>1?`${k} extra digits`:"extra digit";
+      if(di===dp+z)return k>1?`${k} missing digits`:"missing digit";
+    }
+    if(dp===di)return"misread separator";
+    return"extra or missing digit";
+  }
+  return CLASS_SHORT[cls]||cls;
+};
+const CLASS_SHORT={separator_or_magnitude_error:"extra or missing digit",
+  ocr_character_misread:"misread character",digit_transposition:"digits swapped",
+  extra_character:"extra digit",dropped_character:"missing digit",
+  formatting_only:"formatting",unexplained_substitution:"unknown",
+  ambiguous_multi_cell:"multiple cells"};
+const checksText=c=>`${c.checks} identit${c.checks===1?"y":"ies"}${c.corroborated?" + totals row":""}`;
+const CLASS_EN={separator_or_magnitude_error:"decimal or thousands-separator slip",
+  ocr_character_misread:"character misread",digit_transposition:"digits transposed",
+  extra_character:"stray extra digit",dropped_character:"missing digit",
+  formatting_only:"formatting discrepancy",
+  ambiguous_multi_cell:"multiple errors in this row, no single cell isolated",
+  unexplained_substitution:"no transcription pattern, the value appears genuinely wrong"};
+
+$("#pick").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{if(e.target.files[0])scanFile(e.target.files[0])};
+$("#sample").onclick=()=>stream("/api/sample");
+const dz=$("#drop");
+["dragover","dragenter"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add("on")}));
+["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("on")}));
+dz.addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)scanFile(f)});
+
+function scanFile(f){const fd=new FormData();fd.append("file",f);stream("/api/scan",{method:"POST",body:fd})}
+
+async function stream(url,opts){
+  show("processing");$("#log").innerHTML="";
+  try{
+    const r=await fetch(url,opts);
+    const rd=r.body.getReader(),dec=new TextDecoder();let buf="";
+    while(true){
+      const{done,value}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let i;while((i=buf.indexOf("\n\n"))>=0){
+        const block=buf.slice(0,i);buf=buf.slice(i+2);
+        const ev=(block.match(/^event: (.+)$/m)||[])[1];
+        const data=(block.match(/^data: (.+)$/m)||[])[1];
+        if(!ev||!data)continue;
+        if(ev==="progress")addLine(JSON.parse(data).message);
+        if(ev==="report")setTimeout(()=>render(JSON.parse(data)),650);
+      }
+    }
+  }catch(e){$("#errmsg").textContent=String(e);show("err")}
+}
+function addLine(m){const d=document.createElement("div");d.className="ln";
+  d.innerHTML=`<span class="dot">·</span><span>${m}</span>`;$("#log").appendChild(d)}
+
+function totalsDetail(rep){
+  const tc=rep.totals_check;if(!tc)return null;
+  const map=(rep.parse&&rep.parse.numeric_col_map)||[];
+  const out=[];
+  for(const[j,c]of Object.entries(tc.columns||{})){
+    if(c.matches)continue;
+    const mcol=map.indexOf(+j);
+    const header=(rep.table&&rep.table.columns[mcol]&&rep.table.columns[mcol].header)||("column "+j);
+    const explained=(rep.findings||[]).some(f=>f.culprit_column===mcol
+      &&f.proposed_correction!=null
+      &&Math.abs(Math.abs(f.observed-f.proposed_correction)-Math.abs(c.difference))
+        <=Math.max(2,.01*Math.abs(c.difference)));
+    out.push({header,stated:c.stated,computed:c.computed,diff:c.difference,explained});
+  }
+  return{present:true,allMatch:tc.all_match,mismatches:out,
+    allExplained:out.length>0&&out.every(m=>m.explained)};
+}
+let REPORT=null;
+function render(rep){
+  REPORT=rep;
+  if(rep.overall_status==="extraction_failed"){
+    $("#errmsg").textContent="The document could not be transcribed. If you're running without a model API key, try the sample schedule instead.";
+    show("err");return;
+  }
+  renderCertificate(rep);show("certificate");
+}
+
+function renderCertificate(rep){
+  const v=rep.validator_status,o=rep.overall_status;
+  const findings=rep.findings||[];
+  const witnesses=rep.witnesses||[];
+  const pr=rep.parse||{};
+  const td=totalsDetail(rep);
+  const repairs=(pr.cell_flags||[]).filter(f=>f.flag==="confusable_repair").length;
+  const nrows=(rep.table&&rep.table.values.length)||pr.n_rows||0;
+  const checks=[];
+  const C=(st,label,note)=>checks.push({st,label,note});
+
+  C("ok",`Parsed ${nrows} jobs, ${pr.n_numeric_cols??"?"} numeric columns`,
+    repairs?`${repairs} OCR-damaged cell${repairs>1?"s":""} repaired, originals kept`:"");
+  if(o==="verified"||o==="verified_mapping_with_findings"){
+    const cov=(rep.analysis||{}).coverage||{};
+    const partial=cov.numeric_cols&&cov.mapped_cols<cov.numeric_cols;
+    C(partial?"warn":"ok","Column identification certified",
+      `${partial?`${cov.mapped_cols} of ${cov.numeric_cols} numeric columns identified. `:""}${witnesses.length} accounting identit${witnesses.length===1?"y":"ies"} verified across the rows. Headers were not used.`);
+  }else if(o==="disambiguated"){
+    C("warn","Column identification certified, with one tie",
+      "The numbers allowed two readings. Column headers decided between them.");
+  }else{
+    C("warn","Column identification not certifiable",
+      "Too little numeric structure to verify. Columns were mapped from header text and are marked unverified.");
+  }
+  if(v==="success"||v==="validation_failed"){
+    C(findings.length?"bad":"ok",
+      findings.length?`${findings.length} cell${findings.length>1?"s":""} fail the row identities`
+        :"Every job satisfies the row identities",
+      findings.length?"Detailed below.":"");
+  }
+  if(td&&td.present){
+    if(td.allMatch)C("ok","Stated totals match the column sums","");
+    else if(td.allExplained)C("ok","Stated totals match once the exception is corrected",
+      "The document's own totals row agrees with the implied value, not the printed one.");
+    else C("bad","Stated totals disagree with the column sums",
+      td.mismatches.map(m=>`${m.header}: stated $${fmt$(m.stated)}, rows sum to $${fmt$(m.computed)}`).join(" · "));
+  }
+
+  const nExc=findings.length+((td&&!td.allMatch&&!td.allExplained)?1:0);
+  const head=nExc?`${nExc} exception${nExc>1?"s":""} found`:"All checks passed";
+  const SHOWN=5;
+  const excRow=f=>{
+    const cls=CLASS_EN[f.classification]||f.classification;
+    const col=(rep.table&&rep.table.columns[f.culprit_column]&&rep.table.columns[f.culprit_column].header)||"";
+    const c=((rep.analysis||{}).corrections||[]).find(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
+    return `<div class="row"><b>${f.row_label}</b>${col?` · ${col}`:""}<br>
+      ${f.observed!=null?`flagged <span class="num">$${fmt$(f.observed)}</span>`:""}${f.proposed_correction!=null?`, suggested <span class="num" style="color:var(--brick)">$${fmt$(f.proposed_correction)}</span>`:""}${f.observed!=null?"<br>":""}
+      <span style="color:var(--muted)">${causeText(f.classification,f.observed,f.proposed_correction)}${corrStatus(rep,f)}</span></div>`;
+  };
+  const excHTML=findings.length?`<div class="exc">
+    ${findings.slice(0,SHOWN).map(excRow).join("")}
+    ${findings.length>SHOWN?`<details><summary style="cursor:pointer;color:var(--sage-deep);font-size:12px">${findings.length-SHOWN} more</summary>${findings.slice(SHOWN).map(excRow).join("")}</details>`:""}
+  </div>`:"";
+  function corrStatus(rep,f){
+    const c=((rep.analysis||{}).corrections||[]).find(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
+    if(!c)return f.proposed_correction!=null?". Needs manual review":"";
+    return c.corroborated?". Confirmed "+(c.checks+1)+" ways including the totals row; apply it on the next page"
+                         :". Apply it on the next page if it looks right";
+  }
+  const m=rep.metrics||{};
+  const detail=witnesses.length?`
+    <details class="more"><summary>Identities verified</summary><ul>
+      ${witnesses.map(w=>`<li><span class="num">${w.business_form}</span> (${w.n_rows} rows, max residual ${(+w.max_abs_residual).toFixed(2)})</li>`).join("")}
+      ${m.api_calls?`<li>${m.api_calls} model call(s), $${(+m.cost_usd).toFixed(4)}</li>`:""}
+    </ul></details>`:"";
+  $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
+    <div class="kicker">validation results</div>
+    <h2 class="${nExc?"flag":""}">${head}</h2>
+    <div style="margin-top:16px">${checks.map(c=>{
+      const ic=c.st==="ok"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
+      const col=c.st==="ok"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
+      return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
+    }).join("")}</div>
+    ${excHTML}
+    <div class="go"><button class="btn primary" onclick="renderDash(REPORT);show('dash');window.scrollTo(0,0)">View the schedule</button></div>
+    ${detail}
+  </div></div>`;
+}
+
+function renderDash(rep){
+  const a=rep.analysis||{},k=a.kpis||{},prov=a.kpi_provenance||{};
+  const degraded=rep.overall_status==="llm_mapped_unverified"||rep.overall_status==="unmapped";
+  const kpis=[
+    ["Contract value",fmtM(k.total_contract_value)],
+    ["UEGP",fmtM(k.uegp)],
+    ["Cost to complete",fmtM(k.cost_to_complete)],
+    ["Earned revenue",fmtM(k.earned_revenue)],
+    ["GP %",k.gp_pct==null?"—":(100*k.gp_pct).toFixed(1)+"%"],
+    ["Net over/(under)",fmtM(k.net_billing_position)],
+  ];
+  const td=totalsDetail(rep);
+  const corrs=a.corrections||[];
+  const matched=new Set(corrs.map(c=>c.label+"|"+c.implied));
+  const flagged=(rep.findings||[]).filter(f=>!matched.has(f.row_label+"|"+f.proposed_correction));
+  const colName=i=>(rep.table&&rep.table.columns[i]&&rep.table.columns[i].header)||"";
+  const ledgerRows=[
+    ...corrs.map((c,ci)=>`<tr>
+      <td>${c.label}<small>${colName(c.col)}</small></td>
+      <td class="mny bad">$${fmt$(c.printed)}</td>
+      <td class="mny">$${fmt$(c.implied)}</td>
+      <td>${causeText(c.classification,c.printed,c.implied)}</td>
+      <td>${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}</td>
+      <td><input type="checkbox" class="corrbox" data-ci="${ci}" aria-label="use suggested value for ${c.label}"></td></tr>`),
+    ...flagged.map(f=>`<tr>
+      <td>${f.row_label}<small>${colName(f.culprit_column)}</small></td>
+      <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
+      <td class="mny">\u2014</td>
+      <td title="${CLASS_EN[f.classification]||""}">${CLASS_SHORT[f.classification]||f.classification}</td>
+      <td>\u2014</td>
+      <td style="color:var(--muted);font-size:12px">review</td></tr>`)
+  ];
+  const ledger=ledgerRows.length?`<div class="cgroup">
+    <table class="ctab"><thead><tr>
+      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th><th>Use</th>
+    </tr></thead><tbody>${ledgerRows.join("")}</tbody></table>
+  </div>
+  ${corrs.length?`<div style="display:flex;align-items:center;gap:12px;margin:9px 2px 0">
+    <button class="btn" id="repairAll">Apply all suggestions</button>
+    <button class="btn" id="repairNone">Reset to as printed</button>
+    <p style="font-size:12px;color:var(--muted);margin:0">Nothing is applied until you check it. Checked rows update the figures on this page and the CSV download.</p>
+  </div>`:""}`:"";
+  const unexplained=td?td.mismatches.filter(m=>!m.explained):[];
+  const tcRow=unexplained.length?`<div class="item finding">
+      <p class="hl">Stated totals disagree with column sums</p>
+      <p class="sub2">${unexplained.map(m=>`${m.header}: stated $${fmt$(m.stated)}, rows sum to $${fmt$(m.computed)} (off by $${fmt$(Math.abs(m.diff))})`).join("<br>")}</p>
+    </div>`:"";
+  const errBody=ledger+tcRow;
+  const sigs=(a.signals||[]).map(s=>{
+    const tier=s.severity>=.66?"high":s.severity>=.33?"med":"low";
+    return `<div class="item">
+      <div class="head"><span class="sevr ${tier}">${tier}</span><p class="hl">${s.headline}</p></div>
+      <div class="jobs">${(s.jobs||[]).map(j=>`<span class="chip">${j.label} · ${j.detail}</span>`).join("")}</div>
+      <details class="why"><summary>Why this matters</summary><p>${s.why}</p></details>
+    </div>`}).join("");
+  $("#dash").innerHTML=`
+    ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
+    <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
+    <div class="cols">
+      <div class="card"><h3>Errors and corrections</h3>
+        ${errBody||`<p class="empty">No errors. Every job satisfies the identities.</p>`}</div>
+      <div class="card"><h3>Underwriting signals <small>What stands out for underwriting?</small></h3>
+        ${sigs||`<p class="empty">Nothing above threshold in this book.</p>`}</div>
+    </div>
+    ${bookShape(rep)}
+    <div class="receipt">
+      <div class="bar">
+        <p>Validated schedule · ${rep.table?.values?.length??0} jobs</p>
+        <button class="btn" id="toggleT">Show table</button>
+        <button class="btn" id="csv">Download CSV</button>
+        <button class="btn" id="prnt">Print summary</button>
+      </div>
+      <div class="tablewrap hidden" id="twrap"></div>
+    </div>
+    <p class="foot">${(rep.metrics&&rep.metrics.api_calls)?`${rep.metrics.api_calls} model call(s) · $${(+rep.metrics.cost_usd).toFixed(4)} · `:""}wipple does not store documents</p>`;
+  $("#toggleT").onclick=()=>{const w=$("#twrap");const on=w.classList.toggle("hidden");
+    $("#toggleT").textContent=on?"Show table":"Hide table";if(!on&&!w.innerHTML)w.innerHTML=tableHTML(rep)};
+  $("#csv").onclick=()=>downloadCSV(rep);
+  $("#prnt").onclick=()=>window.print();
+  document.querySelectorAll(".corrbox").forEach(b=>b.onchange=()=>recompute(rep));
+  const ra=$("#repairAll"),rn=$("#repairNone");
+  if(ra)ra.onclick=()=>{document.querySelectorAll(".corrbox").forEach(b=>b.checked=true);recompute(rep)};
+  if(rn)rn.onclick=()=>{document.querySelectorAll(".corrbox").forEach(b=>b.checked=false);recompute(rep)};
+}
+
+function currentJobs(rep){
+  const a=rep.analysis||{};
+  const jobs=(a.jobs||[]).map(j=>({...j}));
+  const corrs=a.corrections||[];
+  document.querySelectorAll(".corrbox").forEach(b=>{
+    const c=corrs[+b.dataset.ci];if(!c||!c.variable)return;
+    const j=jobs[c.row];if(!j)return;
+    j[c.variable]=b.checked?c.implied:c.printed;
+  });
+  for(const j of jobs){
+    if(j.C>0)j.P=j.D/j.C;
+    if(j.V>0)j.margin=(j.V-j.C)/j.V;
+    if(j.E!=null&&j.B!=null)j.net=j.B-j.E;
+  }
+  return jobs;
+}
+function recompute(rep){
+  const jobs=currentJobs(rep);
+  const sum=k=>jobs.reduce((s,j)=>s+(j[k]??0),0);
+  const tcv=sum("V"),estgp=sum("V")-sum("C");
+  const hasE=jobs.every(j=>j.E!=null),hasB=jobs.every(j=>j.B!=null);
+  const k={total_contract_value:tcv,
+    uegp:hasE?estgp-(sum("E")-sum("D")):null,
+    cost_to_complete:sum("C")-sum("D"),
+    earned_revenue:hasE?sum("E"):null,
+    gp_pct:tcv?estgp/tcv:null,
+    net_billing_position:hasE&&hasB?sum("B")-sum("E"):null};
+  const vals=[fmtM(k.total_contract_value),fmtM(k.uegp),fmtM(k.cost_to_complete),
+    fmtM(k.earned_revenue),k.gp_pct==null?"—":(100*k.gp_pct).toFixed(1)+"%",
+    fmtM(k.net_billing_position)];
+  document.querySelectorAll(".kpi .val").forEach((el,i)=>{
+    el.textContent=vals[i];el.classList.toggle("neg",String(vals[i]).startsWith("("));});
+  const card=document.getElementById("bookshape");
+  if(card)card.outerHTML=bookShape(rep);
+}
+function bookShape(rep){
+  const jobs=currentJobs(rep).filter(j=>j.net!=null&&j.V>0);
+  if(jobs.length<4)return"";
+  const W=960,H=210,L=46,R=14,T=18,Bm=34;
+  const ymax=Math.max(.06,...jobs.map(j=>Math.abs(j.net/j.V)))*1.15;
+  const x=p=>L+(W-L-R)*Math.min(Math.max(p,0),1.02), y=v=>T+(H-T-Bm)*(1-(v+ymax)/(2*ymax));
+  const dots=jobs.map(j=>{
+    const f=j.net/j.V, r=4+9*Math.sqrt(j.V/Math.max(...jobs.map(q=>q.V)));
+    const col=f<-.02?"var(--brick)":f>.06?"var(--amber)":"var(--sage)";
+    return `<circle cx="${x(j.P).toFixed(1)}" cy="${y(f).toFixed(1)}" r="${r.toFixed(1)}" fill="${col}" fill-opacity=".55" stroke="${col}"><title>${j.label}: ${(100*j.P).toFixed(0)}% complete, ${j.net<0?"under":"over"}billed $${fmt$(Math.abs(j.net))} (${(100*f).toFixed(1)}% of contract)</title></circle>`;
+  }).join("");
+  const ticks=[0,.25,.5,.75,1].map(p=>`<text x="${x(p)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--muted)">${100*p}%</text>`).join("");
+  return `<div class="card" id="bookshape" style="margin-bottom:18px">
+    <h3>Billing position by completion <small>Each dot is a job, sized by contract value</small></h3>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:8px" role="img" aria-label="Scatter of billing position against completion for each job">
+      <line x1="${L}" y1="${y(0)}" x2="${W-R}" y2="${y(0)}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${L}" y="${T+2}" font-size="10" fill="var(--muted)">overbilled</text>
+      <text x="${L}" y="${H-Bm-4}" font-size="10" fill="var(--muted)">underbilled</text>
+      ${ticks}${dots}
+    </svg>
+    <p style="font-size:12px;color:var(--muted);margin:6px 0 0">A healthy book sits slightly above the line early and converges to it near completion. Dots far below the line late are earned revenue that hasn't been billed; far above early is billing ahead of the work.</p>
+  </div>`;
+}
+
+function tableHTML(rep){
+  const t=rep.table;if(!t)return"";
+  const corr={};(rep.analysis?.corrections_applied||[]).forEach(c=>corr[c.row+"_"+c.col]=c);
+  const pct=t.columns.map(c=>["P","PB","M"].includes(c.variable));
+  const head=`<tr><th>Job</th>${t.columns.map(c=>`<th>${c.header}${c.variable_name?`<span class="vn">${c.variable_name}</span>`:""}</th>`).join("")}</tr>`;
+  const body=t.values.map((row,i)=>`<tr><td>${t.job_labels[i]??""}</td>${row.map((x,j)=>{
+    const c=corr[i+"_"+j];
+    const txt=x==null?"—":pct[j]?(100*x).toFixed(1)+"%":fmt$(x);
+    return c?`<td class="flag num" title="document shows ${fmt$(c.observed)}; identities imply ${fmt$(c.used)}">${fmt$(c.observed)}</td>`
+            :`<td class="num">${txt}</td>`}).join("")}</tr>`).join("");
+  const sums=t.columns.map((c,j)=>pct[j]?"":fmt$(t.values.reduce((s,r)=>s+(r[j]??0),0)));
+  const foot=`<tr><td>Total</td>${sums.map(s=>`<td class="num">${s}</td>`).join("")}</tr>`;
+  return `<table><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>`;
+}
+
+function downloadCSV(rep){
+  const t=rep.table;if(!t)return;
+  const esc=s=>`"${String(s).replace(/"/g,'""')}"`;
+  const corrs=(rep.analysis||{}).corrections||[];
+  const vals=t.values.map(r=>[...r]);
+  const applied=[];
+  document.querySelectorAll(".corrbox").forEach(b=>{
+    if(!b.checked)return;
+    const c=corrs[+b.dataset.ci];if(!c)return;
+    vals[c.row][c.col]=c.implied;applied.push(c);
+  });
+  const lines=[["Job",...t.columns.map(c=>c.header)].map(esc).join(","),
+    ...vals.map((r,i)=>[t.job_labels[i]??"",...r.map(x=>x==null?"":x)].map(esc).join(","))];
+  if(applied.length){
+    lines.push("");
+    lines.push(esc("Corrections applied by reviewer:"));
+    for(const c of applied)lines.push([c.label,(t.columns[c.col]||{}).header||"",
+      "printed "+c.printed,"corrected to "+c.implied].map(esc).join(","));
+  }
+  const blob=new Blob([lines.join("\n")],{type:"text/csv"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=(rep.source||"wip")+".validated.csv";a.click();URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>
