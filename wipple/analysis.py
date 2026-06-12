@@ -331,6 +331,7 @@ def analyze_node(state: WippleState) -> dict:
             "confidence": f.get("confidence"),
             "corroborated": _totals_corroborates(c, float(matrix[r, c]),
                                                  float(p)),
+            "basis": list(f.get("correction_basis") or []),
             "checks": len(f.get("correction_basis") or []) or 1,
         })
 

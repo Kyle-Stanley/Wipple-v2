@@ -70,9 +70,9 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 
 /* certificate */
 #certificate{padding:9vh 0 12vh}
-.cert{max-width:620px;margin:0 auto;background:var(--surface);
+.cert{max-width:780px;margin:0 auto;background:var(--surface);
   border:1px solid var(--line);border-radius:4px;padding:8px}
-.cert-inner{border:1px solid var(--line);padding:44px 48px;text-align:center}
+.cert-inner{border:1px solid var(--line);padding:44px 40px;text-align:center}
 .cert .kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
 .cert h2{font:500 30px/1.25 Fraunces,serif;margin:14px 0 10px}
 .cert h2.flag{color:var(--brick)}
@@ -103,7 +103,7 @@ details.more li{margin:3px 0}
   border-radius:10px;padding:12px 18px;font-size:14px;margin-bottom:22px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:26px}
 .kpi{background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:15px 17px}
-.kpi .lab{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block;min-height:29px}
+.kpi .lab{font-size:11.5px;line-height:1.35;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block;min-height:32px}
 .kpi .val{font:500 23px/1.2 Inter;margin-top:5px}
 .kpi .val.neg{color:var(--brick)}
 .cols{display:flex;flex-direction:column;gap:14px;margin-bottom:18px}
@@ -133,7 +133,11 @@ details.more li{margin:3px 0}
 
 .cgroup{background:var(--paper);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-top:10px}
 .cgroup .gl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
-.ctab{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
+.ctab{width:100%;border-collapse:collapse;font-size:13px}
+.ctab .mny,.ctab th{white-space:nowrap}
+.evrow td{background:var(--surface);font-size:12.5px;color:var(--ink);padding:10px 14px;border-radius:6px}
+.evrow .eq{font-variant-numeric:tabular-nums;display:block;margin:3px 0}
+.evtoggle{cursor:pointer;border:none;background:none;color:var(--sage-deep);font-size:11px;padding:0 6px 0 0}
 .ctab th{font-weight:500;font-size:11px;color:var(--muted);text-align:left;padding:4px 14px 6px 0;border-bottom:1px solid var(--line)}
 .ctab td{padding:8px 14px 8px 0;border-bottom:1px solid var(--line-soft);vertical-align:top}
 .ctab tr:last-child td{border-bottom:none}
@@ -385,12 +389,17 @@ function renderCertificate(rep){
     const c=ci>=0?corrsC[ci]:null;
     const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""} aria-label="apply suggested value for ${f.row_label}">`
                :`<span style="color:var(--muted);font-size:12px">review</span>`;
-    return `<tr><td>${f.row_label}<small>${col}</small></td>
+    const ev=c?`<tr class="evrow hidden" data-ev="${ci}"><td colspan="6">
+        ${(c.basis||[]).map(b=>`<span class="eq">${b} \u2192 solves this cell to <b>$${fmt$(c.implied)}</b></span>`).join("")}
+        ${c.corroborated?`<span class="eq">stated column total \u2212 the other rows \u2192 <b>$${fmt$(c.implied)}</b></span>`:""}
+        <span class="eq" style="color:var(--muted)">every check lands on the same number; the printed $${fmt$(c.printed)} satisfies none of them</span>
+      </td></tr>`:"";
+    return `<tr>${c?`<td><button class="evtoggle" data-ev="${ci}" aria-label="show the math">\u25B8</button>${f.row_label}<small style="margin-left:14px">${col}</small></td>`:`<td>${f.row_label}<small>${col}</small></td>`}
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
       <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
       <td>${causeText(f.classification,f.observed,f.proposed_correction)}</td>
       <td>${c?`${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}`:"\u2014"}</td>
-      <td>${use}</td></tr>`;
+      <td>${use}</td></tr>${ev}`;
   };
   const excHTML=findings.length?`<div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
@@ -398,7 +407,10 @@ function renderCertificate(rep){
       <th><label style="display:flex;gap:5px;align-items:center;cursor:pointer">Use <input type="checkbox" id="useAll"></label></th>
     </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
   </div>
-  ${corrsC.length?`<p style="font-size:12px;color:var(--muted);margin:10px 0 0">Checked rows are corrected in the schedule figures and the CSV. Uncheck a row to keep the printed value.</p>`:""}`:"";
+  ${corrsC.length?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0">
+    <button class="btn" id="applySel">Apply selected corrections</button>
+    <span id="applyStatus" style="font-size:12.5px;color:var(--muted)"></span>
+  </div>`:""}`:"";
   function corrStatus(rep,f){
     const c=((rep.analysis||{}).corrections||[]).find(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
     if(!c)return f.proposed_correction!=null?". Needs manual review":"";
@@ -420,15 +432,26 @@ function renderCertificate(rep){
       return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
     }).join("")}</div>
     ${excHTML}
-    <div class="go"><button class="btn primary" onclick="renderDash(REPORT);show('dash');window.scrollTo(0,0)">${corrsC.length?"Apply and view the schedule":"View the schedule"}</button></div>
+    <div class="go"><button class="btn primary" onclick="renderDash(REPORT);show('dash');window.scrollTo(0,0)">View the schedule</button></div>
     ${detail}
   </div></div>`;
-  const ua=$("#useAll");
+  const ua=$("#useAll"),st=$("#applyStatus"),ap=$("#applySel");
+  const selection=()=>new Set([...document.querySelectorAll(".certbox:checked")].map(b=>+b.dataset.ci));
   const syncUA=()=>{if(ua)ua.checked=!document.querySelector(".certbox:not(:checked)")};
-  document.querySelectorAll(".certbox").forEach(b=>b.onchange=()=>{
-    const ci=+b.dataset.ci;b.checked?ACCEPTED.add(ci):ACCEPTED.delete(ci);syncUA();});
-  if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox").forEach(b=>{
-    b.checked=ua.checked;const ci=+b.dataset.ci;ua.checked?ACCEPTED.add(ci):ACCEPTED.delete(ci);});};}
+  const syncStatus=()=>{if(!st)return;
+    const sel=selection();
+    const same=sel.size===ACCEPTED.size&&[...sel].every(i=>ACCEPTED.has(i));
+    st.textContent=same?`${ACCEPTED.size} of ${corrsC.length} in use`:"selection changed, apply to update the figures";
+    st.style.color=same?"var(--muted)":"var(--brick)";};
+  document.querySelectorAll(".certbox").forEach(b=>b.onchange=()=>{syncUA();syncStatus();});
+  if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox").forEach(b=>{b.checked=ua.checked;});syncStatus();};}
+  if(ap)ap.onclick=()=>{ACCEPTED=selection();syncStatus();
+    st.textContent=`\u2713 ${ACCEPTED.size?ACCEPTED.size+" correction"+(ACCEPTED.size>1?"s":"")+" applied to the figures and the CSV":"document kept as printed"}`;
+    st.style.color="var(--sage-deep)";};
+  syncStatus();
+  document.querySelectorAll(".evtoggle").forEach(t=>t.onclick=()=>{
+    const r=document.querySelector(`.evrow[data-ev="${t.dataset.ev}"]`);
+    if(r){r.classList.toggle("hidden");t.textContent=r.classList.contains("hidden")?"\u25B8":"\u25BE";}});
 }
 
 function renderDash(rep){
