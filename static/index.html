@@ -135,9 +135,13 @@ details.more li{margin:3px 0}
 .cgroup .gl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
 .ctab{width:100%;border-collapse:collapse;font-size:13px}
 .ctab .mny,.ctab th{white-space:nowrap}
-.evrow td{background:var(--surface);font-size:12.5px;color:var(--ink);padding:10px 14px;border-radius:6px}
-.evrow .eq{font-variant-numeric:tabular-nums;display:block;margin:3px 0}
-.evtoggle{cursor:pointer;border:none;background:none;color:var(--sage-deep);font-size:11px;padding:0 6px 0 0}
+.evrow td{background:transparent;padding:2px 4px 12px}
+.evgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 8px}
+.evgrid .eq{display:flex;justify-content:space-between;gap:12px;align-items:baseline;background:var(--surface);border:1px solid var(--line-soft);border-radius:7px;padding:9px 13px;font-size:12.5px;text-align:left}
+.evgrid .eq:last-child:nth-child(odd){grid-column:1/-1}
+.evgrid .fr{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500}
+.evnote{font-size:12px;color:var(--muted);margin:0;padding:0 4px;text-align:left}
+.evtoggle{cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--sage-deep);font-size:12px;width:20px;height:20px;border-radius:6px;margin-right:8px;line-height:1;vertical-align:middle}
 .ctab th{font-weight:500;font-size:11px;color:var(--muted);text-align:left;padding:4px 14px 6px 0;border-bottom:1px solid var(--line)}
 .ctab td{padding:8px 14px 8px 0;border-bottom:1px solid var(--line-soft);vertical-align:top}
 .ctab tr:last-child td{border-bottom:none}
@@ -206,7 +210,7 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
       </select>
     </div>
   </div>
-  <p class="quiet">The sample is a 12-job schedule with one planted transcription error. <a href="/how" style="color:var(--sage-deep)">How the math works</a></p>
+  <p class="quiet">The sample generates a fresh 60-job schedule with five planted transcription errors, different every run. <a href="/how" style="color:var(--sage-deep)">How the math works</a></p>
   <input type="file" id="file" accept=".pdf,.xlsx,.xlsm,.csv,.tsv,.png,.jpg,.jpeg,.webp" class="hidden">
 </section>
 
@@ -390,21 +394,23 @@ function renderCertificate(rep){
     const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""} aria-label="apply suggested value for ${f.row_label}">`
                :`<span style="color:var(--muted);font-size:12px">review</span>`;
     const ev=c?`<tr class="evrow hidden" data-ev="${ci}"><td colspan="6">
-        ${(c.basis||[]).map(b=>`<span class="eq">${b} \u2192 solves this cell to <b>$${fmt$(c.implied)}</b></span>`).join("")}
-        ${c.corroborated?`<span class="eq">stated column total \u2212 the other rows \u2192 <b>$${fmt$(c.implied)}</b></span>`:""}
-        <span class="eq" style="color:var(--muted)">every check lands on the same number; the printed $${fmt$(c.printed)} satisfies none of them</span>
+        <div class="evgrid">
+          ${(c.basis||[]).map(b=>`<div class="eq"><span>${b}</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div>`).join("")}
+          ${c.corroborated?`<div class="eq"><span>stated total \u2212 the other rows</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div>`:""}
+        </div>
+        <p class="evnote">every check lands on the same number; the printed $${fmt$(c.printed)} satisfies none of them</p>
       </td></tr>`:"";
     return `<tr>${c?`<td><button class="evtoggle" data-ev="${ci}" aria-label="show the math">\u25B8</button>${f.row_label}<small style="margin-left:14px">${col}</small></td>`:`<td>${f.row_label}<small>${col}</small></td>`}
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
       <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
       <td>${causeText(f.classification,f.observed,f.proposed_correction)}</td>
       <td>${c?`${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}`:"\u2014"}</td>
-      <td>${use}</td></tr>${ev}`;
+      <td style="text-align:right">${use}</td></tr>${ev}`;
   };
   const excHTML=findings.length?`<div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
       <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th>
-      <th><label style="display:flex;gap:5px;align-items:center;cursor:pointer">Use <input type="checkbox" id="useAll"></label></th>
+      <th style="text-align:right"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">Use <input type="checkbox" id="useAll"></label></th>
     </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
   </div>
   ${corrsC.length?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0">

@@ -215,12 +215,12 @@
   .col-name-d { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; font-family: var(--mono); letter-spacing: 0.04em; }
   .col-tag-d { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 2px; font-family: var(--mono); }
   .tag-contract-d { background: rgba(74,107,80,0.14); color: var(--green); }
-  .tag-costs-d    { background: rgba(182,72,60,0.12); color: #8B3527; }
+  .tag-costs-d    { background: rgba(163,64,47,0.25); color: #8B3527; }
   .tag-billings-d { background: rgba(47,93,143,0.12); color: var(--blue); }
   .col-vals-d { display: flex; flex-direction: column; gap: 1px; }
   .val-row-d { font-family: var(--mono); font-size: 10px; color: #39423b; padding: 1px 3px; border-radius: 2px; transition: background .2s, color .2s; line-height: 1.7; }
   .val-row-d.match-d { background: rgba(74,107,80,0.14); color: #3A4C3E; }
-  .val-row-d.match-cost-d { background: rgba(182,72,60,0.12); color: #8B3527; }
+  .val-row-d.match-cost-d { background: rgba(163,64,47,0.25); color: #8B3527; }
   .val-row-d.match-billing-d { background: rgba(47,93,143,0.12); color: var(--blue); }
   .biggest-badge-d { position: absolute; top: 6px; right: 7px; font-size: 9px; font-weight: 600; background: var(--green); color: #fff; border-radius: 2px; padding: 1px 5px; font-family: var(--mono); }
   .slots-row-d { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
@@ -540,20 +540,8 @@
     <p>Try it. <strong>Click any number</strong> to corrupt one of its digits, the way an OCR misread would, and watch the identities triangulate.</p>
 
     
+
 <div class="widget-wrap">
-  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-    <button id="edNew" style="font:600 12px var(--sans);padding:8px 14px;border:1px solid var(--border);border-radius:7px;background:var(--bg3);color:var(--text);cursor:pointer">New 60-job portfolio</button>
-    <button id="edPlant" style="font:600 12px var(--sans);padding:8px 14px;border:1px solid #3A4C3E;border-radius:7px;background:#3A4C3E;color:#FBFAF7;cursor:pointer">Plant 5 errors</button>
-    <button id="edFix" style="font:600 12px var(--sans);padding:8px 14px;border:1px solid var(--border);border-radius:7px;background:var(--bg3);color:var(--text);cursor:pointer">Repair</button>
-    <span id="edStatus" style="font:500 12.5px var(--sans);color:var(--text2)"></span>
-  </div>
-  <div style="max-height:540px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
-    <table id="edTable" style="width:100%;border-collapse:collapse;font:11px var(--sans);font-variant-numeric:tabular-nums"></table>
-  </div>
-  <div id="edDetail" style="margin-top:12px"></div>
-  <div class="widget-caption">Fig · 60 jobs × 15 columns, regenerated on demand. Plant five random errors anywhere; each is isolated and re-derived from the identities the rest of its row still satisfies. Flagged cells in brick; the cells used to convict them in sage.</div>
-</div>
-<div class="widget-wrap" style="display:none">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
         <button class="action-btn-d" onclick="xtCorruptRandom()">Corrupt a random cell</button>
         <button class="action-btn-d" onclick="xtRepair()">Repair table</button>
@@ -1074,7 +1062,7 @@ function dUpdateScore(){
   if(dIsCorrectAll()){dot.style.background='#4A6B50';txt.textContent='Perfect: all three columns identified';row.style.borderColor='rgba(58,76,62,0.75)';}
   else if(dIsCorrectXY()){dot.style.background='#92671E';txt.textContent='Contract correct, find the remaining column';row.style.borderColor='rgba(168,123,47,0.55)';}
   else if(s>0.65){dot.style.background='#92671E';txt.textContent=`${Math.round(s*100)}% fit, close but ratios inconsistent`;row.style.borderColor='rgba(168,123,47,0.55)';}
-  else{dot.style.background='#A3402F';txt.textContent=`${Math.round(s*100)}% fit, ratios invalid`;row.style.borderColor='rgba(182,72,60,0.5)';}
+  else{dot.style.background='#A3402F';txt.textContent=`${Math.round(s*100)}% fit, ratios invalid`;row.style.borderColor='#A3402F';}
 }
 
 function dReveal(){const r=document.getElementById('answer-row');r.style.display='block';r.textContent=`Contract = ${dAnswer.y}   then either: Est. Cost = ${dAnswer.x} and Est. GP = ${dAnswer.z}, or flip those two. Both satisfy the identity.`;}
@@ -1592,8 +1580,8 @@ function xtRenderTable(diag){
       const key=ri+'|'+v.k;
       const isCulprit=culpritSet.has(key),isImpl=implicated.has(key);
       let bg='var(--bg3)',border='0.5px solid var(--border)',color='#39423b';
-      if(isImpl){bg='rgba(168,123,47,0.12)';border='0.5px solid rgba(146,103,30,0.75)';color='#8a6322';}
-      if(isCulprit){bg='rgba(182,72,60,0.12)';border='1.5px solid #A3402F';color='#A3402F';}
+      if(isImpl){bg='rgba(146,103,30,0.30)';border='0.5px solid rgba(146,103,30,0.75)';color='#8a6322';}
+      if(isCulprit){bg='rgba(163,64,47,0.25)';border='1.5px solid #A3402F';color='#A3402F';}
       h+=`<td onclick="xtClickCell(${ri},'${v.k}')" title="Click to corrupt one digit" style="background:${bg};border:${border};border-radius:6px;padding:5px 4px;text-align:center;font-family:var(--mono);font-size:11px;color:${color};cursor:pointer;">${xtFmt(r[v.k],v.kind)}</td>`;
     });
     h+='</tr>';
@@ -1607,7 +1595,7 @@ function xtRenderChecks(fails){
     const bad=f.length>0;
     let worst=0;f.forEach(x=>{if(Math.abs(x.resid)>Math.abs(worst))worst=x.resid;});
     const delta=bad?(I.kind==='p'?'Δ '+(Math.abs(worst)*100).toFixed(1)+'pt':'Δ $'+Math.round(Math.abs(worst))+'k'):'≤ tol';
-    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${bad?'rgba(182,72,60,0.5)':'rgba(74,107,80,0.4)'};border-radius:8px;padding:7px 10px;font-size:11px;">
+    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${bad?'#A3402F':'rgba(58,76,62,0.85)'};border-radius:8px;padding:7px 10px;font-size:11px;">
       <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${bad?'#8B3527':'#3A4C3E'};min-width:34px;">${bad?'FAIL':'PASS'}</span>
       <span style="flex:1;color:var(--text2);">${I.name}</span>
       <span style="font-family:var(--mono);font-size:10px;color:${bad?'#8B3527':'var(--text3)'};">${delta}${bad?' · Job '+(f[0].row+1):''}</span></div>`;
@@ -2053,7 +2041,7 @@ function dUpdateScore(){
   if(dIsCorrectAll()){dot.style.background='#4A6B50';txt.textContent='Perfect: all three columns identified';row.style.borderColor='rgba(58,76,62,0.75)';}
   else if(dIsCorrectXY()){dot.style.background='#92671E';txt.textContent='Contract correct, find the remaining column';row.style.borderColor='rgba(168,123,47,0.55)';}
   else if(s>0.65){dot.style.background='#92671E';txt.textContent=`${Math.round(s*100)}% fit, close but ratios inconsistent`;row.style.borderColor='rgba(168,123,47,0.55)';}
-  else{dot.style.background='#A3402F';txt.textContent=`${Math.round(s*100)}% fit, ratios invalid`;row.style.borderColor='rgba(182,72,60,0.5)';}
+  else{dot.style.background='#A3402F';txt.textContent=`${Math.round(s*100)}% fit, ratios invalid`;row.style.borderColor='#A3402F';}
 }
 
 function dReveal(){const r=document.getElementById('answer-row');r.style.display='block';r.textContent=`Contract = ${dAnswer.y}   then either: Est. Cost = ${dAnswer.x} and Est. GP = ${dAnswer.z}, or flip those two. Both satisfy the identity.`;}
@@ -2571,8 +2559,8 @@ function xtRenderTable(diag){
       const key=ri+'|'+v.k;
       const isCulprit=culpritSet.has(key),isImpl=implicated.has(key);
       let bg='var(--bg3)',border='0.5px solid var(--border)',color='#39423b';
-      if(isImpl){bg='rgba(168,123,47,0.12)';border='0.5px solid rgba(146,103,30,0.75)';color='#8a6322';}
-      if(isCulprit){bg='rgba(182,72,60,0.12)';border='1.5px solid #A3402F';color='#A3402F';}
+      if(isImpl){bg='rgba(146,103,30,0.30)';border='0.5px solid rgba(146,103,30,0.75)';color='#8a6322';}
+      if(isCulprit){bg='rgba(163,64,47,0.25)';border='1.5px solid #A3402F';color='#A3402F';}
       h+=`<td onclick="xtClickCell(${ri},'${v.k}')" title="Click to corrupt one digit" style="background:${bg};border:${border};border-radius:6px;padding:5px 4px;text-align:center;font-family:var(--mono);font-size:11px;color:${color};cursor:pointer;">${xtFmt(r[v.k],v.kind)}</td>`;
     });
     h+='</tr>';
@@ -2586,7 +2574,7 @@ function xtRenderChecks(fails){
     const bad=f.length>0;
     let worst=0;f.forEach(x=>{if(Math.abs(x.resid)>Math.abs(worst))worst=x.resid;});
     const delta=bad?(I.kind==='p'?'Δ '+(Math.abs(worst)*100).toFixed(1)+'pt':'Δ $'+Math.round(Math.abs(worst))+'k'):'≤ tol';
-    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${bad?'rgba(182,72,60,0.5)':'rgba(74,107,80,0.4)'};border-radius:8px;padding:7px 10px;font-size:11px;">
+    h+=`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:0.5px solid ${bad?'#A3402F':'rgba(58,76,62,0.85)'};border-radius:8px;padding:7px 10px;font-size:11px;">
       <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${bad?'#8B3527':'#3A4C3E'};min-width:34px;">${bad?'FAIL':'PASS'}</span>
       <span style="flex:1;color:var(--text2);">${I.name}</span>
       <span style="font-family:var(--mono);font-size:10px;color:${bad?'#8B3527':'var(--text3)'};">${delta}${bad?' · Job '+(f[0].row+1):''}</span></div>`;
@@ -2620,120 +2608,7 @@ function xtRenderDiag(diag,fails){
 }
 xtNewPortfolio();
 </script>
-<script>
-(function(){
-const $=id=>document.getElementById(id);
-const COLS=[["V","Contract"],["C","Est Cost"],["G","Est GP"],["D","Cost to Date"],["Q","Cost to Compl"],["P","% Compl"],["E","Earned Rev"],["EG","Earned GP"],["B","Billed"],["N","Net Billing"],["U","Underbill"],["O","Overbill"],["RR","Rem Revenue"],["RB","Rem Billings"],["PB","% Billed"]];
-const PCT={P:1,PB:1};
-const IDS=[
- {n:"G = V \u2212 C",v:["G","V","C"],f:j=>j.G-(j.V-j.C),s:{G:j=>j.V-j.C,V:j=>j.G+j.C,C:j=>j.V-j.G}},
- {n:"Q = C \u2212 D",v:["Q","C","D"],f:j=>j.Q-(j.C-j.D),s:{Q:j=>j.C-j.D,C:j=>j.Q+j.D,D:j=>j.C-j.Q}},
- {n:"P = D \u00f7 C",v:["P","D","C"],f:j=>j.P-j.D/j.C,s:{P:j=>j.D/j.C,D:j=>j.P*j.C,C:j=>j.D/j.P}},
- {n:"E = V \u00d7 D \u00f7 C",v:["E","V","D","C"],f:j=>j.E-j.V*j.D/j.C,s:{E:j=>j.V*j.D/j.C,V:j=>j.E*j.C/j.D,D:j=>j.E*j.C/j.V,C:j=>j.V*j.D/j.E}},
- {n:"EG = E \u2212 D",v:["EG","E","D"],f:j=>j.EG-(j.E-j.D),s:{EG:j=>j.E-j.D,E:j=>j.EG+j.D,D:j=>j.E-j.EG}},
- {n:"N = B \u2212 E",v:["N","B","E"],f:j=>j.N-(j.B-j.E),s:{N:j=>j.B-j.E,B:j=>j.N+j.E,E:j=>j.B-j.N}},
- {n:"B \u2212 E = O \u2212 U",v:["B","E","O","U"],f:j=>(j.B-j.E)-(j.O-j.U),s:{B:j=>j.E+j.O-j.U,E:j=>j.B-j.O+j.U,O:j=>j.B-j.E+j.U,U:j=>j.E-j.B+j.O}},
- {n:"RR = V \u2212 E",v:["RR","V","E"],f:j=>j.RR-(j.V-j.E),s:{RR:j=>j.V-j.E,V:j=>j.RR+j.E,E:j=>j.V-j.RR}},
- {n:"RB = V \u2212 B",v:["RB","V","B"],f:j=>j.RB-(j.V-j.B),s:{RB:j=>j.V-j.B,V:j=>j.RB+j.B,B:j=>j.V-j.RB}},
- {n:"PB = B \u00f7 V",v:["PB","B","V"],f:j=>j.PB-j.B/j.V,s:{PB:j=>j.B/j.V,B:j=>j.PB*j.V,V:j=>j.B/j.PB}},
- {n:"EG = G \u00d7 P",v:["EG","G","P"],f:j=>j.EG-j.G*j.P,s:{EG:j=>j.G*j.P,G:j=>j.EG/j.P,P:j=>j.EG/j.G}},
- {n:"Q = C \u00d7 (1 \u2212 P)",v:["Q","C","P"],f:j=>j.Q-j.C*(1-j.P),s:{Q:j=>j.C*(1-j.P),C:j=>j.Q/(1-j.P),P:j=>1-j.Q/j.C}},
- {n:"RR = V \u00d7 (1 \u2212 P)",v:["RR","V","P"],f:j=>j.RR-j.V*(1-j.P),s:{RR:j=>j.V*(1-j.P),V:j=>j.RR/(1-j.P),P:j=>1-j.RR/j.V}},
- {n:"N = O \u2212 U",v:["N","O","U"],f:j=>j.N-(j.O-j.U),s:{N:j=>j.O-j.U,O:j=>j.N+j.U,U:j=>j.O-j.N}},
- {n:"RB = RR \u2212 N",v:["RB","RR","N"],f:j=>j.RB-(j.RR-j.N),s:{RB:j=>j.RR-j.N,RR:j=>j.RB+j.N,N:j=>j.RR-j.RB}},
-];
-let JOBS=[],TRUE=[];
-const money=x=>"$"+Math.round(x).toLocaleString();
-const cell=(c,x)=>PCT[c]?(100*x).toFixed(1)+"%":money(x);
-function gen(){
-  JOBS=[];
-  for(let i=0;i<60;i++){
-    const V=Math.round((150+Math.random()*3850))*1000;
-    const m=.06+Math.random()*.10, P=.02+Math.random()*.96;
-    const C=Math.round(V*(1-m)), D=Math.round(C*P), E=Math.round(V*P);
-    const B=E+Math.round((Math.random()-.5)*.08*V);
-    const N=B-E;
-    JOBS.push({V,C,G:V-C,D,Q:C-D,P:D/C,E,EG:E-D,B,N,U:Math.max(-N,0),O:Math.max(N,0),RR:V-E,RB:V-B,PB:B/V});
-  }
-  TRUE=JOBS.map(j=>({...j}));
-  render();status("Clean 60-job book generated. Every row satisfies every identity.");detail("");
-}
-function plant(){
-  JOBS=TRUE.map(j=>({...j}));
-  const moneyCols=COLS.map(c=>c[0]).filter(c=>!PCT[c]);
-  const rows=[...Array(60).keys()].sort(()=>Math.random()-.5).slice(0,5);
-  rows.forEach(r=>{
-    const c=moneyCols[Math.floor(Math.random()*moneyCols.length)];
-    const orig=JOBS[r][c];const kind=Math.floor(Math.random()*3);let bad;
-    if(kind===0)bad=orig*10;
-    else if(kind===1){const d=String(Math.abs(Math.round(orig)));bad=(orig<0?-1:1)*(+(d.length>1?d[1]+d[0]+d.slice(2):d+"0"));}
-    else bad=TRUE[(r+7)%60][c];
-    if(Math.abs(bad-orig)<2)bad=orig*10;
-    JOBS[r][c]=bad;
-  });
-  diagnose();
-}
-function diagnose(){
-  const found=[];
-  JOBS.forEach((j,r)=>{
-    const tripped=IDS.filter(id=>{
-      const res=id.f(j);const scale=Math.max.apply(null,id.v.map(v=>Math.abs(j[v])||1).concat([1]));
-      return Math.abs(res)>(PCT[id.v[0]]?1e-4:Math.max(2,1e-6*scale));
-    });
-    if(!tripped.length)return;
-    const vars={};tripped.forEach(id=>id.v.forEach(v=>vars[v]=(vars[v]||0)+1));
-    let iso=Object.keys(vars).filter(v=>vars[v]===tripped.length);
-    // exoneration: a variable that sits in any PASSING relation can't be the culprit
-    const exonerated={};IDS.forEach(id=>{if(tripped.indexOf(id)<0)id.v.forEach(v=>exonerated[v]=1);});
-    const after=iso.filter(v=>!exonerated[v]);
-    if(after.length)iso=after;
-    // underbilling/overbilling tie: the repair must leave one of them at zero
-    if(iso.length===2&&iso.indexOf("U")>=0&&iso.indexOf("O")>=0){
-      iso=iso.filter(v=>{const solver=tripped.find(id=>id.s[v]);if(!solver)return false;
-        const imp=solver.s[v](j);const other=v==="U"?j.O:j.U;
-        return imp>=-2&&Math.min(Math.abs(imp),Math.abs(other))<=2;});
-    }
-    if(iso.length===1){
-      const v=iso[0];const solver=tripped.find(id=>id.s[v]);
-      found.push({r,c:v,implied:solver?solver.s[v](j):null,ids:tripped,printed:j[v]});
-    }else found.push({r,c:null,ids:tripped});
-  });
-  render(found);
-  const isoN=found.filter(f=>f.c).length;
-  status("5 planted \u00b7 "+isoN+" isolated to a single cell"+(found.length>isoN?" \u00b7 "+(found.length-isoN)+" row(s) ambiguous":""));
-  detail(found.filter(f=>f.c).map(f=>
-    '<div style="font:12px var(--sans);color:var(--text2);margin:4px 0"><b style="color:var(--text)">Job '+(f.r+1)+' \u00b7 '+COLS.filter(c=>c[0]===f.c)[0][1]+
-    '</b> \u2014 printed <span style="color:#A3402F">'+cell(f.c,f.printed)+'</span>, identities imply <b>'+cell(f.c,f.implied)+'</b> ('+f.ids.map(i=>i.n).join(" \u00b7 ")+')</div>').join(""));
-}
-function render(found){
-  const flag={},wit={};
-  (found||[]).forEach(f=>{
-    if(f.c)flag[f.r+"-"+f.c]=1;
-    f.ids.forEach(id=>id.v.forEach(v=>{if(!f.c||v!==f.c)wit[f.r+"-"+v]=1;}));
-  });
-  let h='<thead><tr><th style="position:sticky;top:0;background:var(--bg3);padding:7px 8px;text-align:left;font-weight:600">Job</th>';
-  COLS.forEach(c=>h+='<th style="position:sticky;top:0;background:var(--bg3);padding:7px 8px;text-align:right;font-weight:600">'+c[1]+'</th>');
-  h+="</tr></thead><tbody>";
-  JOBS.forEach((j,r)=>{
-    h+='<tr><td style="padding:4px 8px;color:var(--text2);border-top:1px solid var(--border)">Job '+(r+1)+'</td>';
-    COLS.forEach(cc=>{
-      const c=cc[0],k=r+"-"+c;
-      let st="padding:4px 8px;text-align:right;border-top:1px solid var(--border);";
-      if(flag[k])st+="background:#A3402F;color:#FBFAF7;font-weight:700;border-radius:4px;";
-      else if(wit[k])st+="background:#DCE7D8;box-shadow:inset 0 0 0 1.5px rgba(58,76,62,.65);border-radius:4px;";
-      h+='<td style="'+st+'">'+cell(c,j[c])+'</td>';
-    });
-    h+="</tr>";
-  });
-  $("edTable").innerHTML=h+"</tbody>";
-}
-const status=t=>$("edStatus").textContent=t;
-const detail=t=>$("edDetail").innerHTML=t;
-$("edNew").onclick=gen;$("edPlant").onclick=plant;
-$("edFix").onclick=function(){JOBS=TRUE.map(j=>({...j}));render();status("Repaired to the true book.");detail("");};
-gen();
-})();
-</script>
+
 
 </body>
 </html>

@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 
 def make_xlsx():
     sys.path.insert(0, ".")
-    from wipple.demo import demo_raw_table
-    rt = demo_raw_table()
+    from wipple.demo import demo_raw_table_12
+    rt = demo_raw_table_12()
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "WIP"
     ws.append(["Anytown Builders, Inc."]); ws.append([])
     ws.append(rt["headers"])
