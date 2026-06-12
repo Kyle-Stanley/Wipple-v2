@@ -77,18 +77,25 @@ def demo_raw_table() -> dict:
 
     rows_true, rows = [], []
     for k in range(60):
-        V = rng.randrange(15, 420) * 10_000
-        m = rng.randrange(6, 17) / 100
+        V = round(10 ** rng.uniform(5.18, 6.66) / 1000) * 1000
+        m = rng.randrange(5, 21) / 100
         P = rng.randrange(4, 197) / 2 / 100          # 2.0% .. 98.0% in .5 steps
         # planted underwriting stories on fixed slots
         if k == 7:  m = -0.04                         # loss job
         if k == 19: m = 0.28                          # margin outlier
         if k == 31: P = 0.90                          # trapped cash (late, underbilled)
         if k == 44: P = 0.20                          # job borrow (early, overbilled)
+        if k == 12: P = 0.45                          # mid-stage heavy overbilling
+        if k == 51: P = 0.68                          # mid-stage straggler
         C = round(V * (1 - m)); D = round(C * P); E = round(V * P)
-        jit = rng.randrange(-35, 36) * 1000
+        # billing position varies with stage: bigger spread early,
+        # converging toward zero near completion, with an overbilling bias
+        mag = V * (0.012 + 0.05 * rng.random()) * (1 - 0.75 * P)
+        jit = round(mag * (1 if rng.random() < 0.72 else -1))
         if k == 31: jit = -max(120_000, round(0.12 * V))
         if k == 44: jit = max(150_000, round(0.18 * V))
+        if k == 12: jit = max(180_000, round(0.10 * V))
+        if k == 51: jit = -max(140_000, round(0.09 * V))
         B = E + jit
         N = B - E; U = max(-N, 0); O = max(N, 0)
         vals = [V, C, V - C, D, C - D, P, E, E - D, B, N, U, O,

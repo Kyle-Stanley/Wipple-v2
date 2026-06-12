@@ -131,7 +131,8 @@ details.more li{margin:3px 0}
 .empty{color:var(--muted);font-size:14px;padding:18px 0 6px}
 .finding .hl .num{color:var(--brick)}
 
-.cgroup{background:var(--paper);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-top:10px}
+.cgroup{background:var(--paper);border:1px solid var(--line-soft);border-radius:8px;padding:12px 16px;margin-top:10px}
+.ctab th:last-child,.ctab td:last-child{padding-right:6px}
 .cgroup .gl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
 .ctab{width:100%;border-collapse:collapse;font-size:13px}
 .ctab .mny,.ctab th{white-space:nowrap}
@@ -504,7 +505,7 @@ function renderDash(rep){
       <p class="sub2">${unexplained.map(m=>`${m.header}: stated $${fmt$(m.stated)}, rows sum to $${fmt$(m.computed)} (off by $${fmt$(Math.abs(m.diff))})`).join("<br>")}</p>
     </div>`:"";
   const errBody=ledger+tcRow;
-  const sigs=(a.signals||[]).map(s=>{
+  const sigs=computeSignals(rep).map(s=>{
     const tier=s.severity>=.66?"high":s.severity>=.33?"med":"low";
     return `<div class="item">
       <div class="head"><span class="sevr ${tier}">${tier}</span><p class="hl">${s.headline}</p></div>
@@ -543,16 +544,23 @@ function currentJobs(rep){
   const a=rep.analysis||{};
   const jobs=(a.jobs||[]).map(j=>({...j}));
   const corrs=a.corrections||[];
+  const touched=new Set();
   corrs.forEach((c,ci)=>{
     if(!c.variable)return;
     const j=jobs[c.row];if(!j)return;
     j[c.variable]=ACCEPTED.has(ci)?c.implied:c.printed;
+    if(ACCEPTED.has(ci)&&(c.variable==="E"||c.variable==="B"))touched.add(c.row);
   });
-  for(const j of jobs){
+  jobs.forEach((j,r)=>{
     if(j.C>0)j.P=j.D/j.C;
     if(j.V>0)j.margin=(j.V-j.C)/j.V;
-    if(j.E!=null&&j.B!=null)j.net=j.B-j.E;
-  }
+    if(j.E!=null&&j.B!=null){
+      j.net=j.B-j.E;
+      /* printed Under/Over columns are authoritative for the as-printed
+         document; re-derive only where an applied correction changed E or B */
+      if(touched.has(r)||j.U==null){j.U=Math.max(j.E-j.B,0);j.O=Math.max(j.B-j.E,0);}
+    }
+  });
   return jobs;
 }
 function computeKpis(rep){
@@ -568,12 +576,75 @@ function computeKpis(rep){
     gp_pct:tcv?estgp/tcv:null,
     net_billing_position:hasE&&hasB?sum("B")-sum("E"):null};
 }
+/*SIGSTART*/
+const SIG_T={late_stage_p:.55,ub_frac_full:.10,ob_frac_full:.15,loss_margin_full:.05,overrun_full:.10,early_p:.15,early_share_floor:.25,early_share_full:.70,outlier_z_floor:2.0,outlier_z_full:5.0,min_signal_severity:.12};
+const sMoney=x=>"$"+Math.round(x).toLocaleString("en-US");
+const pct0=x=>Math.round(100*x)+"%";
+const pct1=x=>(100*x).toFixed(1)+"%";
+const clamp01=x=>Math.max(0,Math.min(1,x));
+const median=a=>{const b=[...a].sort((x,y)=>x-y),m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2};
+const pctile=(a,q)=>{const b=[...a].sort((x,y)=>x-y),i=(b.length-1)*q,lo=Math.floor(i),hi=Math.ceil(i);return b[lo]+(b[hi]-b[lo])*(i-lo)};
+function computeSignals(rep){
+  const jobs=currentJobs(rep);
+  if(!jobs.length||!jobs.every(j=>j.C!=null&&j.D!=null&&j.V!=null))return (rep.analysis||{}).signals||[];
+  const T=SIG_T,n=jobs.length;
+  const V=jobs.map(j=>j.V),C=jobs.map(j=>j.C),D=jobs.map(j=>j.D);
+  const hasEB=jobs.every(j=>j.E!=null&&j.B!=null);
+  const E=hasEB?jobs.map(j=>j.E):null,B=hasEB?jobs.map(j=>j.B):null;
+  const P=jobs.map(j=>j.C>0?j.D/j.C:0),m=jobs.map(j=>j.V>0?(j.V-j.C)/j.V:0);
+  const U=hasEB?jobs.map((j,i)=>j.U!=null?j.U:Math.max(E[i]-B[i],0)):null;
+  const O=hasEB?jobs.map((j,i)=>j.O!=null?j.O:Math.max(B[i]-E[i],0)):null;
+  const lab=i=>jobs[i].label,out=[];
+  if(U){const rows=[];for(let i=0;i<n;i++){const w=clamp01((P[i]-T.late_stage_p)/(0.95-T.late_stage_p));const sev=w*clamp01((U[i]/Math.max(V[i],1))/T.ub_frac_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
+   if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+U[r[1]],0),k=rows.length;
+    out.push({id:"trapped_cash",severity:rows[0][0],dollars,
+     headline:`${k} late-stage job${k>1?"s":""} carrying ${sMoney(dollars)} in unbilled earned revenue`,
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(U[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled`})),
+     why:"Earned revenue the contractor has not billed. On nearly-finished work this usually means unapproved change orders or receivables that may never collect; in a default the surety inherits the gap."});}}
+  if(O){const rows=[];for(let i=0;i<n;i++){const sev=clamp01((O[i]/Math.max(V[i],1))/T.ob_frac_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
+   if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+O[r[1]],0);
+    out.push({id:"job_borrow",severity:rows[0][0],dollars,
+     headline:`${sMoney(dollars)} billed ahead of earnings across ${rows.length} job${rows.length>1?"s":""}`,
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(O[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(O[r[1]])} overbilled`})),
+     why:"Cash collected for work not yet performed is typically already spent on other jobs. The remaining work must be financed from elsewhere, a quiet dependency on everything finishing clean."});}}
+  {const rows=[];for(let i=0;i<n;i++)if(m[i]<0){const sev=clamp01(-m[i]/T.loss_margin_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
+   if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(C[r[1]]-V[r[1]]),0);
+    out.push({id:"loss_jobs",severity:rows[0][0],dollars,
+     headline:`${rows.length} job${rows.length>1?"s":""} estimated to lose ${sMoney(dollars)}`,
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(C[r[1]]-V[r[1]]),detail:`estimated margin ${pct1(m[r[1]])}`})),
+     why:"GAAP requires the full expected loss to be recognized immediately, not as the work progresses. A loss job on the schedule is a direct hit to the indemnitor's net worth."});}}
+  {const rows=[];for(let i=0;i<n;i++)if(D[i]>C[i]){const sev=clamp01(((D[i]-C[i])/Math.max(C[i],1))/T.overrun_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
+   if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(D[r[1]]-C[r[1]]),0);
+    out.push({id:"cost_overrun",severity:rows[0][0],dollars,
+     headline:`${rows.length} job${rows.length>1?"s":""} already ${sMoney(dollars)} past estimated cost`,
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(D[r[1]]-C[r[1]]),detail:`costs at ${pct0(D[r[1]]/Math.max(C[r[1]],1))} of estimate`})),
+     why:"Cost to date exceeding the total estimate means the estimate is stale and the stated gross profit is fiction until re-estimated."});}}
+  {const tcv=V.reduce((a,b)=>a+b,0),eIdx=[];for(let i=0;i<n;i++)if(P[i]<T.early_p)eIdx.push(i);
+   if(tcv>0&&eIdx.length){const eV=eIdx.reduce((s,i)=>s+V[i],0),share=eV/tcv;
+    const sev=clamp01((share-T.early_share_floor)/(T.early_share_full-T.early_share_floor));
+    if(sev>T.min_signal_severity)out.push({id:"early_concentration",severity:sev,dollars:Math.round(eV),
+     headline:`${pct0(share)} of contract value is on jobs under ${pct0(T.early_p)} complete`,
+     jobs:eIdx.slice(0,5).map(i=>({label:lab(i),dollars:Math.round(V[i]),detail:`${pct0(P[i])} complete`})),
+     why:"Early-stage estimates are unproven. A book concentrated at the front of the lifecycle has margins that exist mostly on paper."});}}
+  if(n>=6){const med=median(m),iqr=(pctile(m,.75)-pctile(m,.25))||0.01,rows=[];
+   for(let i=0;i<n;i++){const z=Math.abs(m[i]-med)/iqr;const sev=clamp01((z-T.outlier_z_floor)/(T.outlier_z_full-T.outlier_z_floor));
+    if(sev>T.min_signal_severity&&m[i]>med)rows.push([sev,i]);}
+   if(rows.length){rows.sort((a,b)=>b[0]-a[0]);
+    out.push({id:"margin_outlier",severity:rows[0][0],dollars:Math.round(rows.reduce((s,r)=>s+(V[r[1]]-C[r[1]]),0)),
+     headline:`${rows.length} job${rows.length>1?"s":""} claiming margin far above this contractor's own norm`,
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(V[r[1]]-C[r[1]]),detail:`${pct1(m[r[1]])} margin vs book median ${pct1(med)}`})),
+     why:"Judged against this contractor's own bidding history on this schedule, not an industry benchmark. An outlier margin at mid-completion is the classic shape of profit fade that has not been recognized yet."});}}
+  out.forEach(x=>x.severity=Math.round(x.severity*1000)/1000);
+  out.sort((a,b)=>(b.severity-a.severity)||(b.dollars-a.dollars));
+  return out;
+}
+/*SIGEND*/
 function bookShape(rep){
   const jobs=currentJobs(rep).filter(j=>j.net!=null&&j.V>0);
   if(jobs.length<4)return"";
   const W=960,H=210,L=46,R=14,T=18,Bm=34;
-  const ymax=Math.max(.06,...jobs.map(j=>Math.abs(j.net/j.V)))*1.15;
-  const x=p=>L+(W-L-R)*Math.min(Math.max(p,0),1.02), y=v=>T+(H-T-Bm)*(1-(v+ymax)/(2*ymax));
+  const ymax=Math.min(.28,Math.max(.06,...jobs.map(j=>Math.abs(j.net/j.V))))*1.15;
+  const x=p=>L+(W-L-R)*Math.min(Math.max(p,0),1.02), y=v=>{v=Math.max(-ymax,Math.min(ymax,v));return T+(H-T-Bm)*(1-(v+ymax)/(2*ymax))};
   const dots=jobs.map(j=>{
     const f=j.net/j.V, r=4+9*Math.sqrt(j.V/Math.max(...jobs.map(q=>q.V)));
     const col=f<-.02?"var(--brick)":f>.06?"var(--amber)":"var(--sage)";

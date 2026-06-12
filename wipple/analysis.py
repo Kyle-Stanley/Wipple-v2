@@ -409,6 +409,10 @@ def _job_rows(core, labels):
             row["B"] = float(B[i])
         if E is not None and B is not None:
             row["net"] = round(float(B[i] - E[i]))
+            if core.get("U") is not None:
+                row["U"] = float(core["U"][i])
+            if core.get("O") is not None:
+                row["O"] = float(core["O"][i])
         out.append(row)
     return out
 
