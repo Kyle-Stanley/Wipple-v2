@@ -258,8 +258,9 @@
   <header class="hero">
     <div class="hero-eyebrow">Wipple · Foundations</div>
     <h1>WIP Schedules viewed as <em>geometry</em>,<br>not spreadsheets</h1>
-    <p>Because of the mathematical relationships between its columns, a WIP can only fit together <strong>one way</strong>. That's why a system that totally ignores column headers can properly map every column, detect every issue, and tell you how to correct it, instantly.</p>
-    <p style="margin-top:14px">The AI in the loop does one simple job: <strong>it gives us the table.</strong> No matter how big the table is, we can do the rest ourselves, in a fraction of a second, for free.</p>
+    <p>A WIP table is not a collection of independent numbers. They all share mathematical relationships, and we can use those relationships to our advantage.</p>
+    <p>That's why a system that totally ignores column headers can properly map every column, detect every issue, and tell you how to correct it, instantly and deterministically.</p>
+    <p style="margin-top:14px">The AI in the loop does one simple job: <strong>it gives us the table.</strong> No matter how big the table is, we can do all of the rest of that stuff, in a thousandth of a second, for free.</p>
     <p style="margin-top:14px;color:var(--text3)">This page explains how we make that happen, one intuition at a time.</p>
   </header>
 
@@ -269,10 +270,11 @@
   <section class="section">
     <div class="section-num">01</div>
     <h2>A job is a point in space</h2>
-    <p>Start with something intuitive: color. Every color is three numbers (Red, Green, Blue) plotted as a point in a cube. The <strong>direction</strong> of that vector from the origin is the hue. The <strong>magnitude</strong> is brightness. Link all three axes, then drag any slider: the point moves along the same ray, getting brighter or darker without ever changing color.</p>
-    <p>Toggle to <strong>Job mode</strong>. The axes become Costs Incurred, Contract Value, and Billings to Date. The math is identical. A contractor who doubles the size of a job, keeping the same margin and the same billing pace, produces a point twice as far from the origin in exactly the same direction. The direction of the vector is the financial fingerprint of the job. The magnitude is the job size.</p>
+    <p>Start with something intuitive: color. We know from the pixels on our computers that every color can be represented as three numbers (Red, Green, Blue).</p>
+    <p>Below, we represent those values in 3d space. You can move independently in the "blue dimension", or the "red dimension", or the "green dimension". The <strong>direction</strong> of that vector(the combination of all 3 moves) from the origin is the hue. The <strong>magnitude</strong> is brightness.</p>
+    <p>We can use similar logic with the values of a job, visualized by switching to <strong>Job mode</strong>. The directions we can move in become Costs Incurred, Contract Value, and Billings to Date. The math is identical. The direction from the origin now represents all of the characteristics of the job, fused together into one simple coordinate. The magnitude now represents job size.</p>
     <p>A real WIP actually lives in four dimensions, with Estimated Total Cost as the fourth axis. Since we can't draw that, this demo collapses one dimension by treating Estimated Cost as equal to Contract Value (a zero-margin job), so % Complete reads directly as cost ÷ contract. The geometry is unchanged; production just carries one more axis of it.</p>
-    <p>The gray diagonal plane in Job mode is where <strong>Billings = Costs</strong>: the perfectly billed position for any job at any size. The dashed line from the real dot to its ghost on that plane is the over/under billing gap, readable directly from the geometry.</p>
+    <p>The gray diagonal plane in Job mode is where <strong>Billings = Costs</strong>: the situation where a job is going perfectly on schedule. The distance a job is from that plane measures over/under billings, readable directly from the geometry.</p>
 
     <div class="widget-wrap">
       <!-- Mode toggle -->
@@ -370,15 +372,123 @@
   <!-- Section 2: The bridge -->
   <section class="section">
     <div class="section-num">02</div>
-    <h2>Now flip the perspective</h2>
-    <p>The cube shows one job as a point. But a WIP schedule has dozens of jobs, and that's where the real power is.</p>
-    <p>Instead of thinking about a job as a point in column-space, think about a <strong>column as a vector in job-space</strong>. The "Contract Value" column isn't a label on an axis. It's a vector with one component per job, maybe 200 numbers long. "Estimated Cost" is another 200-dimensional vector. GAAP says these vectors have to satisfy exact identities across every single job simultaneously, for example:</p>
-    <p style="font-family:var(--mono);font-size:13px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--accent);">Contract[i] − Est. Cost[i] = Est. Gross Profit[i] &nbsp; for every job i</p>
-    <p>This is what makes a WIP a <em>system</em> rather than a row-by-row check. You're not validating job 1, then job 2. You're asking: do these 200-dimensional vectors satisfy this exact relationship across their entire length? If yes, you've identified all three columns at once, with mathematical certainty, without reading a single header.</p>
-    <p>And more jobs means <em>more</em> confidence, not less. Two random columns might accidentally satisfy an identity on one or two jobs. Satisfying it on 200 jobs simultaneously is essentially impossible unless the columns genuinely are what the identity says they are.</p>
+    <h2>Dimensions sound scarier than they actually are</h2>
+    <p>
+      Dimensions aren't that complex: They're just numbers that go up or down independently.
+    </p>
+  
+    <p>
+      On that cube, you could move as much as you'd like in the red direction,
+      and it would never affect how blue something is. Red has its own direction.
+      Blue has its own direction. They can change independently.
+    </p>
+  
+    <p>
+      We extended that idea to a job's finances by making each
+      <strong>column</strong> a direction you can move in. Contract Value was one
+      direction. Estimated Cost was another. Billings to Date was another.
+    </p>
+  
+    <p>
+      But now let's look at what we can do if we make each
+      <strong>row</strong> a dimension instead.
+    </p>
+  
+    <p>
+      Jobs don't interact with each other. Changing the Contract Value of Job 1
+      doesn't mess with Job 2 at all, just like adjusting red does not affect
+      blue. Each job is a number that can go up or down independently, which sounds
+      exactly like a dimension
+    </p>
+  
+    <p>
+      So instead of one job living inside a cube made out of financial columns,
+      let's flip the whole picture around. Now each job gets its own little
+      number line.
+    </p>
+  
+    <p>
+      If we only had three jobs, it would look something like this:
+    </p>
+  
+    <div class="mini-lines">
+      <div class="mini-line">
+        <span class="mini-label">Job 1</span>
+        <span class="line-track">
+          <span class="dot red" style="left:78%;"></span>
+          <span class="dot blue" style="left:59%;"></span>
+          <span class="dot green" style="left:19%;"></span>
+        </span>
+      </div>
+  
+      <div class="mini-line">
+        <span class="mini-label">Job 2</span>
+        <span class="line-track">
+          <span class="dot red" style="left:68%;"></span>
+          <span class="dot blue" style="left:51%;"></span>
+          <span class="dot green" style="left:17%;"></span>
+        </span>
+      </div>
+  
+      <div class="mini-line">
+        <span class="mini-label">Job 3</span>
+        <span class="line-track">
+          <span class="dot red" style="left:86%;"></span>
+          <span class="dot blue" style="left:63%;"></span>
+          <span class="dot green" style="left:23%;"></span>
+        </span>
+      </div>
+    </div>
+  
+    <p>
+      Each row has three labeled points. The red point came from one column, the
+      blue point came from another column, and the green point came from a third.
+    </p>
+  
+    <p
+      style="font-family:var(--mono);font-size:13px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--accent);"
+    >
+      red − blue = green &nbsp;&nbsp; for every job
+    </p>
+  
+    <p>
+      That's the relationship we're looking for. On every job, Contract Value
+      minus Estimated Cost should equal Estimated Gross Profit.
+    </p>
+  
+    <p
+      style="font-family:var(--mono);font-size:13px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--accent);"
+    >
+      Contract[i] − Est. Cost[i] = Est. Gross Profit[i] &nbsp;&nbsp; for every job i
+    </p>
+  
+    <p>
+      This is what makes a WIP a <em>system</em> rather than a row-by-row check.
+      You're not validating Job 1, then Job 2, then Job 3. You're asking whether
+      the same relationship holds across every job at once.
+    </p>
+  
+    <p>
+      With three jobs, we can cube it again. Job 1 becomes one direction, Job 2
+      becomes another, and Job 3 becomes another. A column is now a point inside
+      that job-space.
+    </p>
+  
+    <p>
+      The red column is one point. The blue column is another point. The green
+      column is another point. And the valid answers all sit on the same plane:
+      the plane where red minus blue equals green.
+    </p>
+  
+    <p>
+      And more jobs means <em>more</em> confidence, not less. Two random columns
+      might accidentally satisfy an identity on one or two jobs. Satisfying it
+      across 50, 100, or 200 jobs is essentially impossible unless the columns
+      genuinely are what the identity says they are.
+    </p>
   </section>
-
-  <hr class="rule">
+  
+    <hr class="rule">
 
   <!-- Section 3: Column identifier -->
   <section class="section">
