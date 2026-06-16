@@ -53,6 +53,28 @@ def _np_to_py(x):
     return x
 
 
+def _safe_float(x) -> float | None:
+    """Convert to a JSON-safe float, or None if NaN/Inf/unconvertible.
+
+    Plain float() happily returns NaN/Inf as-is, and Python's default
+    json.dumps (allow_nan=True) then writes the literal tokens NaN/Infinity
+    into the JSON string -- which is invalid per the JSON spec and breaks
+    any standards-compliant JSON.parse() on the frontend (e.g. browsers).
+
+    This is the float-side counterpart to _np_to_py: _np_to_py already
+    guards numpy arrays/scalars passed through diagnostics, but the
+    witnesses/failures/findings blocks below call float(...) directly on
+    dataclass fields, so a NaN already present on r.witnesses[i].* or
+    r.failures[i].* (e.g. from a 0/0 division upstream in wip_validator)
+    was passing through untouched. Route every such field through here.
+    """
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if np.isfinite(v) else None
+
+
 def serialize_validation(r: ValidationResult) -> dict:
     return {
         "status": r.status,
@@ -66,17 +88,24 @@ def serialize_validation(r: ValidationResult) -> dict:
         "witnesses": [
             {"relation": w.relation, "business_form": w.business_form,
              "column": w.column, "n_rows": w.n_rows,
-             "max_abs_residual": float(w.max_abs_residual),
-             "weight": float(w.weight)}
+             "max_abs_residual": _safe_float(w.max_abs_residual),
+             "weight": _safe_float(w.weight)}
             for w in r.witnesses
         ],
         "failures": [
             {"row_index": f.row_index, "row_label": f.row_label,
              "column": f.column, "variable": f.variable,
-             "relation": f.relation, "observed": float(f.observed),
-             "expected": float(f.expected),
-             "difference": float(f.difference),
-             "tolerance": float(f.tolerance)}
+             "relation": f.relation, "observed": _safe_float(f.observed),
+             "expected": _safe_float(f.expected),
+             "difference": _safe_float(f.difference),
+             "tolerance": _safe_float(f.tolerance),
+             # Surfaces *why* a value is null instead of silently dropping
+             # the signal -- a 0/0 division is a real finding (the row's
+             # math is undefined), not the same as "no data here."
+             "undefined_relation": not (
+                 np.isfinite(f.observed) and np.isfinite(f.expected)
+                 and np.isfinite(f.difference)
+             )}
             for f in r.failures
         ],
         "findings": [
@@ -85,9 +114,9 @@ def serialize_validation(r: ValidationResult) -> dict:
              "culprit_variable": g.culprit_variable,
              "candidate_variables": list(g.candidate_variables),
              "exonerated_variables": list(g.exonerated_variables),
-             "observed": None if g.observed is None else float(g.observed),
+             "observed": _safe_float(g.observed) if g.observed is not None else None,
              "proposed_correction": (None if g.proposed_correction is None
-                                     else float(g.proposed_correction)),
+                                     else _safe_float(g.proposed_correction)),
              "correction_basis": list(g.correction_basis),
              "confidence": g.confidence,
              "classification": g.classification,
