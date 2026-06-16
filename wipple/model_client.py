@@ -27,29 +27,59 @@ class TierConfig:
 
 # Pinnable models for the UI selector. Pricing per million tokens.
 MODEL_REGISTRY: dict[str, TierConfig] = {
-    "gemini-3.1-flash-lite-preview": TierConfig("gemini-3.1-flash-lite-preview", "google", 0.25, 1.50),
-    "gemini-3-flash-preview": TierConfig("gemini-3-flash-preview", "google", 0.50, 3.00),
-    "gemini-3.5-flash": TierConfig("gemini-3.5-flash", "google", 1.50, 9.00),
-    "gemini-3.1-pro-preview": TierConfig("gemini-3.1-pro-preview", "google", 2.00, 12.00),
-    "claude-haiku-4-5-20251001": TierConfig("claude-haiku-4-5-20251001", "anthropic", 1.00, 5.00),
-    "claude-sonnet-4-6": TierConfig("claude-sonnet-4-6", "anthropic", 3.00, 15.00),
-    "claude-opus-4-6": TierConfig("claude-opus-4-6", "anthropic", 5.00, 25.00),
+    "gemini-3.1-flash-lite": TierConfig(
+        "gemini-3.1-flash-lite", "google", 0.25, 1.50
+    ),
+    "gemini-3-flash-preview": TierConfig(
+        "gemini-3-flash-preview", "google", 0.50, 3.00
+    ),
+    "gemini-3.5-flash": TierConfig(
+        "gemini-3.5-flash", "google", 1.50, 9.00
+    ),
+    "gemini-3.1-pro-preview": TierConfig(
+        "gemini-3.1-pro-preview", "google", 2.00, 12.00
+    ),
+    "claude-haiku-4-5-20251001": TierConfig(
+        "claude-haiku-4-5-20251001", "anthropic", 1.00, 5.00
+    ),
+    "claude-sonnet-4-6": TierConfig(
+        "claude-sonnet-4-6", "anthropic", 3.00, 15.00
+    ),
+    "claude-opus-4-8": TierConfig(
+        "claude-opus-4-8", "anthropic", 5.00, 25.00
+    ),
 }
 
+
+def _model_config(model_id: str, source: str) -> TierConfig:
+    try:
+        return MODEL_REGISTRY[model_id]
+    except KeyError as e:
+        known = ", ".join(sorted(MODEL_REGISTRY))
+        raise RuntimeError(
+            f"{source}={model_id!r} is not in MODEL_REGISTRY. "
+            f"Known models: {known}"
+        ) from e
+
+
+def _tier_from_env(env_name: str, default_model_id: str) -> TierConfig:
+    return _model_config(os.environ.get(env_name, default_model_id), env_name)
+
+
 TIERS: dict[str, TierConfig] = {
-    "primary": TierConfig(
-        model_id=os.environ.get("WIPPLE_PRIMARY_MODEL",
-                                "gemini-3.1-flash-lite-preview"),
-        provider="google", input_per_m=0.25, output_per_m=1.50),
-    "escalated": TierConfig(
-        model_id=os.environ.get("WIPPLE_ESCALATED_MODEL",
-                                "gemini-3.1-pro-preview"),
-        provider="google", input_per_m=2.00, output_per_m=12.00),
+    "primary": _tier_from_env(
+        "WIPPLE_PRIMARY_MODEL",
+        "gemini-3.1-flash-lite",
+    ),
+    "escalated": _tier_from_env(
+        "WIPPLE_ESCALATED_MODEL",
+        "claude-sonnet-4-6",
+    ),
     # Small, cheap text-only tier for the header fallback / disambiguator.
-    "fallback": TierConfig(
-        model_id=os.environ.get("WIPPLE_FALLBACK_MODEL",
-                                "gemini-3.1-flash-lite-preview"),
-        provider="google", input_per_m=0.25, output_per_m=1.50),
+    "fallback": _tier_from_env(
+        "WIPPLE_FALLBACK_MODEL",
+        "gemini-3.1-flash-lite",
+    ),
 }
 
 
@@ -127,9 +157,17 @@ class ModelClient:
         purpose: str = "",
         model_override: Optional[str] = None,
     ) -> str:
-        cfg = MODEL_REGISTRY.get(model_override) if model_override else None
-        if cfg is None:
-            cfg = TIERS[tier]
+        if model_override:
+            cfg = _model_config(model_override, "model_override")
+        else:
+            try:
+                cfg = TIERS[tier]
+            except KeyError as e:
+                known = ", ".join(sorted(TIERS))
+                raise RuntimeError(
+                    f"unknown tier {tier!r}. Known tiers: {known}"
+                ) from e
+
         t0 = time.time()
         if cfg.provider == "google":
             text, ti, to = self._call_google(cfg, prompt, pdf_bytes,
