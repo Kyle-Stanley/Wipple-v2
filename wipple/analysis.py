@@ -44,6 +44,25 @@ def _money(x):
     return f"${x:,.0f}"
 
 
+def _safe_float(x) -> float | None:
+    """JSON-safe float: NaN/Inf/unconvertible -> None instead of a literal
+    NaN token that breaks standards-compliant JSON.parse() on the frontend.
+
+    _job_rows() below was the one place in this file building per-job dicts
+    with bare float(...) calls on core["U"]/core["O"]/etc. -- no guard at
+    all, unlike compute_kpis/compute_signals which already go through
+    np.nansum/np.where and tolerate NaN gracefully. If a job's U or O value
+    is NaN (either a blank/unparseable printed cell when U/O is a *direct*
+    mapped column, or propagated from an upstream NaN in E/B when U/O is
+    *derived* via reconstruct_core), it was reaching json.dumps untouched.
+    """
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if np.isfinite(v) else None
+
+
 def reconstruct_core(matrix, mapping):
     """Physical columns where mapped; identity-derived otherwise.
     Returns (core: {var: np.array}, derived: set[var]) or (None, ...)."""
@@ -392,7 +411,15 @@ def analyze_node(state: WippleState) -> dict:
 def _job_rows(core, labels):
     """Per-job values (as analyzed, i.e. with auto corrections applied).
     Carries the raw variables so the client can recompute KPIs when the
-    user accepts or rejects individual corrections."""
+    user accepts or rejects individual corrections.
+
+    Every numeric field goes through _safe_float(). This was the one
+    spot in the pipeline with no NaN guard at all: a blank/unparseable
+    printed cell (when U/O is a direct mapped column) or a propagated
+    upstream NaN (when U/O is derived from E/B) was reaching bare
+    float(...) here and then json.dumps -- which by default happily
+    emits the literal token NaN, breaking JSON.parse on the frontend.
+    """
     V, C, D = core["V"], core["C"], core["D"]
     E, B = core.get("E"), core.get("B")
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -400,19 +427,20 @@ def _job_rows(core, labels):
         m = np.where(V > 0, (V - C) / V, 0.0)
     out = []
     for i, lab in enumerate(labels):
-        row = {"label": lab, "V": float(V[i]), "C": float(C[i]),
-               "D": float(D[i]), "P": round(float(P[i]), 4),
+        row = {"label": lab, "V": _safe_float(V[i]), "C": _safe_float(C[i]),
+               "D": _safe_float(D[i]), "P": round(float(P[i]), 4),
                "margin": round(float(m[i]), 4)}
         if E is not None:
-            row["E"] = float(E[i])
+            row["E"] = _safe_float(E[i])
         if B is not None:
-            row["B"] = float(B[i])
+            row["B"] = _safe_float(B[i])
         if E is not None and B is not None:
-            row["net"] = round(float(B[i] - E[i]))
+            net = _safe_float(B[i] - E[i])
+            row["net"] = round(net) if net is not None else None
             if core.get("U") is not None:
-                row["U"] = float(core["U"][i])
+                row["U"] = _safe_float(core["U"][i])
             if core.get("O") is not None:
-                row["O"] = float(core["O"][i])
+                row["O"] = _safe_float(core["O"][i])
         out.append(row)
     return out
 
