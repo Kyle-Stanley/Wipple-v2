@@ -97,6 +97,14 @@ def _stream(initial: dict):
     def gen():
         # Heartbeat every 10s so proxies don't kill the connection while a
         # long model call is in flight.
+
+        yield ("event: progress\ndata: "
+          + json.dumps({
+              "node": "upload",
+              "message": "Upload received. Reading document"
+          })
+          + "\n\n")
+      
         while True:
             try:
                 kind, payload = q.get(timeout=10)
