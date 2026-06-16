@@ -283,12 +283,26 @@ const dz=$("#drop");
 ["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("on")}));
 dz.addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)scanFile(f)});
 
+let RUNNING=false,DOTS=0,LATEST_PROGRESS=null;
+setInterval(()=>{
+  if(!RUNNING||!LATEST_PROGRESS)return;
+  DOTS=(DOTS+1)%4;
+  const base=LATEST_PROGRESS.dataset.base||LATEST_PROGRESS.textContent.replace(/\.*$/,"");
+  LATEST_PROGRESS.textContent=base+".".repeat(DOTS);
+},450);
+function finishProgressLine(){
+  if(LATEST_PROGRESS&&LATEST_PROGRESS.dataset.base){
+    LATEST_PROGRESS.textContent=LATEST_PROGRESS.dataset.base;
+  }
+}
+
 function scanFile(f){const fd=new FormData();fd.append("file",f);
   const m=$("#model");if(m&&m.value)fd.append("model",m.value);
   stream(API+"/api/scan",{method:"POST",body:fd})}
 
 async function stream(url,opts){
   show("processing");$("#log").innerHTML="";
+  RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
   try{
     const r=await fetch(url,opts);
     const rd=r.body.getReader(),dec=new TextDecoder();let buf="";
@@ -301,13 +315,19 @@ async function stream(url,opts){
         const data=(block.match(/^data: (.+)$/m)||[])[1];
         if(!ev||!data)continue;
         if(ev==="progress")addLine(JSON.parse(data).message);
-        if(ev==="report")setTimeout(()=>render(JSON.parse(data)),650);
+        if(ev==="report"){RUNNING=false;finishProgressLine();setTimeout(()=>render(JSON.parse(data)),650);}
       }
     }
-  }catch(e){$("#errmsg").textContent=String(e);show("err")}
+  }catch(e){RUNNING=false;finishProgressLine();$("#errmsg").textContent=String(e);show("err")}
 }
-function addLine(m){const d=document.createElement("div");d.className="ln";
-  d.innerHTML=`<span class="dot">·</span><span>${m}</span>`;$("#log").appendChild(d)}
+function addLine(m){
+  finishProgressLine();DOTS=0;
+  const d=document.createElement("div");d.className="ln";
+  const bullet=document.createElement("span");bullet.className="dot";bullet.textContent="·";
+  const txt=document.createElement("span");txt.dataset.base=String(m).replace(/\.*$/,"");txt.textContent=txt.dataset.base;
+  d.appendChild(bullet);d.appendChild(txt);$("#log").appendChild(d);
+  LATEST_PROGRESS=txt;
+}
 
 function totalsDetail(rep){
   const tc=rep.totals_check;if(!tc)return null;
