@@ -63,58 +63,11 @@ def _safe_float(x) -> float | None:
     return v if np.isfinite(v) else None
 
 
-def _uo_as_magnitude(var, arr):
-    """Normalize split under/overbilling columns to semantic magnitudes.
-
-    Some WIPs print a split U/O balance column as a negative presentation
-    balance (for example, Billings in Excess shown as ``($12,204)``). The raw
-    parse should preserve that sign, but once the column has been mapped to
-    Underbillings (U) or Overbillings (O), the formula universe treats it as a
-    one-sided magnitude: U = max(E - B, 0), O = max(B - E, 0).
-    """
-    if var not in {"U", "O"}:
-        return arr
-
-    x = np.asarray(arr, dtype=float).copy()
-    nz = x[np.isfinite(x) & (np.abs(x) > 0.51)]
-
-    # Only flip the display sign when the populated column is consistently
-    # negative. Mixed signs should remain visible as a real data issue.
-    if nz.size and np.all(nz < 0):
-        x = -x
-
-    return x
-
-
-def _uo_sign_display_finding(f) -> bool:
-    """True when a U/O correction is only opposite-sign presentation."""
-    if f.get("culprit_variable") not in {"U", "O"}:
-        return False
-
-    obs = f.get("observed")
-    prop = f.get("proposed_correction")
-    if obs is None or prop is None:
-        return False
-
-    try:
-        obs = float(obs)
-        prop = float(prop)
-    except (TypeError, ValueError):
-        return False
-
-    if not (np.isfinite(obs) and np.isfinite(prop)):
-        return False
-    if abs(obs) <= 0.51 or abs(prop) <= 0.51:
-        return False
-
-    return abs(obs + prop) <= max(0.51, 0.005 * abs(prop))
-
-
 def reconstruct_core(matrix, mapping):
     """Physical columns where mapped; identity-derived otherwise.
     Returns (core: {var: np.array}, derived: set[var]) or (None, ...)."""
-    cols = {var: _uo_as_magnitude(var, matrix[:, c])
-            for c, var in mapping.items() if c < matrix.shape[1]}
+    cols = {var: matrix[:, c] for c, var in mapping.items()
+            if c < matrix.shape[1]}
     derived = set()
 
     def need(var, fn, *deps):
@@ -383,8 +336,6 @@ def analyze_node(state: WippleState) -> dict:
     corrections = []
     work = matrix
     for f in findings_list:
-        if _uo_sign_display_finding(f):
-            continue
         r, c, p = f.get("row_index"), f.get("culprit_column"), \
             f.get("proposed_correction")
         if r is None or c is None or p is None \
