@@ -323,14 +323,18 @@ def parse_table(
         n_total = n_section = 0
         for i in list(body):
             vals = np.nan_to_num(parsed[i, money_like])
-
+            
             def _matches(target):
                 informative = np.abs(target) > 1.0
-                if informative.sum() < 3:
+                n_info = int(informative.sum())
+                if n_info < 3:
                     return False
+            
                 ok = np.isclose(vals[informative], target[informative],
                                 rtol=0.005, atol=1.0)
-                return bool(ok.all())
+                n_ok = int(ok.sum())
+            
+                return n_ok >= 4 and (n_ok / n_info) >= 0.70
 
             why = None
             if n_section >= 2 and _matches(cum_section):
