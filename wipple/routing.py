@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from .state import WippleState
 from .validation import OCR_SHAPED
-from .wip_validator import VAR_NAMES
+from .schemas import ALL_VAR_NAMES as VAR_NAMES
 
 MAX_REEXTRACTS = 1
 
