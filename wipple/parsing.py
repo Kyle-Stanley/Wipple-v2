@@ -77,6 +77,7 @@ class ParseResult:
     dropped_columns: list[dict] = field(default_factory=list)
     stripped_total_rows: list[dict] = field(default_factory=list)
     totals_check: Optional[dict] = None  # stated vs computed per column
+    row_index: list[int] = field(default_factory=list)  # matrix row -> raw row
     decimal_convention: str = "us"
     percent_scaled_cols: list[int] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -87,6 +88,7 @@ class ParseResult:
             "n_rows": 0 if self.matrix is None else int(self.matrix.shape[0]),
             "n_numeric_cols": len(self.numeric_col_map),
             "numeric_col_map": list(self.numeric_col_map),
+            "row_index": list(self.row_index),
             "percent_scaled_cols": list(self.percent_scaled_cols),
             "dropped_columns": self.dropped_columns,
             "stripped_total_rows": self.stripped_total_rows,
@@ -323,18 +325,14 @@ def parse_table(
         n_total = n_section = 0
         for i in list(body):
             vals = np.nan_to_num(parsed[i, money_like])
-            
+
             def _matches(target):
                 informative = np.abs(target) > 1.0
-                n_info = int(informative.sum())
-                if n_info < 3:
+                if informative.sum() < 3:
                     return False
-            
                 ok = np.isclose(vals[informative], target[informative],
                                 rtol=0.005, atol=1.0)
-                n_ok = int(ok.sum())
-            
-                return n_ok >= 4 and (n_ok / n_info) >= 0.70
+                return bool(ok.all())
 
             why = None
             if n_section >= 2 and _matches(cum_section):
@@ -427,6 +425,7 @@ def parse_table(
         job_labels=labels,
         numeric_col_map=numeric_cols,
         headers=headers,
+        row_index=list(body),
         cell_flags=all_flags,
         dropped_columns=dropped,
         stripped_total_rows=stripped,
