@@ -22,7 +22,7 @@ import logging
 
 from .model_client import Metrics, extract_json, get_client
 from .state import WippleState
-from .wip_validator import VAR_NAMES
+from .schemas import ALL_VAR_NAMES as VAR_NAMES
 
 logger = logging.getLogger(__name__)
 
