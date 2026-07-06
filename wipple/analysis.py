@@ -301,6 +301,9 @@ def analyze_node(state: WippleState) -> dict:
         return {"analysis": {"kpis": None, "signals": [],
                              "basis": "none"}, "table": None}
 
+    if (v.get("schema") == "cc"):
+        return _analyze_cc(matrix, v, labels)
+
     # Final mapping: validator's, swapped if disambiguation chose the rival,
     # or the LLM fallback for sparse documents.
     mapping = {int(k): val for k, val in (v.get("mapping") or {}).items()}
@@ -463,3 +466,58 @@ def _table(state, mapping):
               for row in matrix] if matrix is not None else []
     return {"job_labels": state.get("job_labels", []),
             "columns": cols, "values": values}
+
+
+def _analyze_cc(matrix, v, labels):
+    """Completed-contract analysis: totals, realized margin, and the one
+    signal unique to closed work -- profit recognized in prior years given
+    back in the current year (fade on completed jobs: warranty, claims,
+    late costs). reconstruct_core is WIP-shaped; CC needs none of it."""
+    mapping = {int(k): val for k, val in (v.get("mapping") or {}).items()}
+    inv = {val: k for k, val in mapping.items()}
+    col = lambda code: (matrix[:, inv[code]] if code in inv else None)
+    RT, KT, GT = col("RT"), col("KT"), col("GT")
+    GC = col("GC")
+    kpis, signals = {}, []
+    if RT is not None:
+        kpis["total_revenue"] = float(np.nansum(RT))
+    if KT is not None:
+        kpis["total_cost"] = float(np.nansum(KT))
+    if GT is not None:
+        kpis["total_gross_profit"] = float(np.nansum(GT))
+        if RT is not None and np.nansum(RT):
+            kpis["realized_margin"] = float(np.nansum(GT) / np.nansum(RT))
+        for i in np.flatnonzero(np.nan_to_num(GT) < 0):
+            signals.append({
+                "signal": "loss_on_completed_contract",
+                "job": labels[i] if i < len(labels) else f"Row {i+1}",
+                "severity": 0.9,
+                "detail": f"contract closed at a loss of {_money(-GT[i])}"})
+    if GC is not None:
+        for i in np.flatnonzero(np.nan_to_num(GC) < 0):
+            sev = _clamp(-float(GC[i]) / (abs(float(GT[i])) + 1.0)
+                         if GT is not None else 0.5)
+            if sev >= TUNE["min_signal_severity"]:
+                signals.append({
+                    "signal": "profit_fade_on_completed_work",
+                    "job": labels[i] if i < len(labels) else f"Row {i+1}",
+                    "severity": round(sev, 3),
+                    "detail": f"{_money(-GC[i])} of previously recognized "
+                              "profit given back in the current year "
+                              "(warranty/claims/late costs on closed work)"})
+    return {"analysis": {"kpis": kpis or None, "signals": signals,
+                         "basis": "validator", "schema": "cc"},
+            "table": _table_cc(matrix, mapping, labels)}
+
+
+def _table_cc(matrix, mapping, labels):
+    from .schemas import CC_VAR_NAMES
+    cols = [{"index": int(k), "variable": val,
+             "name": CC_VAR_NAMES.get(val, val)}
+            for k, val in sorted(mapping.items())]
+    rows = []
+    for i in range(matrix.shape[0]):
+        rows.append({"label": labels[i] if i < len(labels) else f"Row {i+1}",
+                     "values": {val: _safe_float(matrix[i, k])
+                                for k, val in mapping.items()}})
+    return {"columns": cols, "rows": rows}
