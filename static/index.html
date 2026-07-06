@@ -226,6 +226,14 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
   <div class="log" id="log"></div>
 </section>
 
+<div id="secnav" class="hidden"></div>
+<style>
+.secnav{display:flex;gap:8px;justify-content:center;margin:0 0 20px;flex-wrap:wrap}
+.secnav button{font:inherit;font-size:13.5px;padding:7px 18px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer}
+.secnav button.on{color:var(--ink);border-color:var(--sage-deep);background:var(--surface)}
+.secnav button .pg{font-size:11px;margin-left:7px;opacity:.75}
+</style>
+
 <section id="certificate" class="hidden"></section>
 
 <section id="dash" class="hidden"></section>
@@ -330,7 +338,8 @@ function addLine(m){
 }
 
 function totalsDetail(rep){
-  const tc=rep.totals_check;if(!tc)return null;
+  const tc=rep.totals_check;
+  if(!tc)return rep._doc_totals_detail||null;
   const map=(rep.parse&&rep.parse.numeric_col_map)||[];
   const out=[];
   for(const[j,c]of Object.entries(tc.columns||{})){
@@ -346,22 +355,136 @@ function totalsDetail(rep){
   return{present:true,allMatch:tc.all_match,mismatches:out,
     allExplained:out.length>0&&out.every(m=>m.explained)};
 }
-let REPORT=null;
+let REPORT=null;          /* the ACTIVE section's v2-shaped report */
 let ACCEPTED=new Set();   /* correction indices the reviewer has applied */
-function render(rep){
-  REPORT=rep;ACCEPTED=new Set((((rep||{}).analysis||{}).corrections||[]).map((_,i)=>i));
-  if(rep.overall_status==="pipeline_error"){
-    $("#errmsg").textContent="The pipeline hit an unexpected error: "+(rep.validator_reason||"unknown")+". Try again, or try the sample schedule.";
+let DOC=null,SECTIONS=[],SECSTATE=[],ACTIVE=0,VIEW="certificate";
+
+/* v3 doc report -> flat list of v2-shaped section reports, each augmented
+   with what the document layer proved about it. Section reports are
+   v2-shaped by design, so renderCertificate/renderDash work untouched. */
+function adaptV3(doc){
+  const secs=[];
+  const disc=(((doc.document||{}).concordance)||{}).discordant||[];
+  for(const t of (doc.tables||[])){
+    /* doc-level grand-totals verdict, explained against pooled findings */
+    let dtd=null;
+    const tc=t.totals_check;
+    if(tc){
+      const allF=(t.sections||[]).flatMap(x=>((x.report||{}).findings)||[]);
+      const mism=[];
+      for(const[j,c]of Object.entries(tc.columns||{})){
+        if(c.matches)continue;
+        const mcol=(t.numeric_col_map||[]).indexOf(+j);
+        const header=(t.headers||[])[+j]||("column "+j);
+        const explained=allF.some(f=>f.culprit_column===mcol
+          &&f.proposed_correction!=null
+          &&Math.abs(Math.abs(f.observed-f.proposed_correction)-Math.abs(c.difference))
+            <=Math.max(2,.01*Math.abs(c.difference)));
+        mism.push({header,stated:c.stated,computed:c.computed,diff:c.difference,explained});
+      }
+      dtd={present:true,allMatch:tc.all_match,mismatches:mism,
+        allExplained:mism.length>0&&mism.every(m=>m.explained),docLevel:true};
+    }
+    for(const sec of (t.sections||[])){
+      const rep=sec.report||{};
+      rep.metrics=doc.metrics||rep.metrics;
+      rep._doc_totals_detail=dtd;
+      rep._extra=[];
+      for(const mf of (t.misalignment_findings||[])){
+        rep._extra.push({st:"warn",
+          label:"Page "+(mf.pages||[]).join(", ")+" was read with a column offset \u2014 repaired and re-certified",
+          note:"Every row on that page was transcribed out of alignment. The identities certified a deterministic repair: one structural finding, not one per cell. Any unrecoverable cells are shown as n/a."});
+      }
+      for(const iss of (t.stitch_issues||[])){
+        if(iss.kind==="hjoin_missing_row")rep._extra.push({st:"bad",
+          label:"Row '"+(iss.row_label||"?")+"' missing from the continuation page",
+          note:"Present on the base page, absent from page "+(iss.page||"?")+". Its continuation columns are blank."});
+        else if(iss.kind==="overlap_mismatch")rep._extra.push({st:"warn",
+          label:"The same row was extracted twice with different values",
+          note:"'"+(iss.row_label||"?")+"' disagrees between overlapping reads \u2014 extraction is unreliable there."});
+        else if(iss.kind==="hjoin_rowcount_mismatch")rep._extra.push({st:"warn",
+          label:"Facing pages carry different row counts",note:iss.note||""});
+      }
+      const secHeaders=new Set(((rep.table||{}).columns||[]).map(c=>c.header));
+      for(const d of disc){
+        if(secHeaders.size&&!secHeaders.has(d.header))continue;
+        rep._extra.push({st:"warn",
+          label:"Header '"+d.header+"' disagrees with what the numbers prove",
+          note:"The column certifies as "+(d.name||d.variable)+" on every row; the label says otherwise. The math outranks the label."});
+      }
+      /* CC: synthesize the corrections array the reviewer UI drives */
+      const a=rep.analysis||{};
+      if(a.schema==="cc"&&!(a.corrections||[]).length){
+        a.corrections=(rep.findings||[])
+          .filter(f=>f.proposed_correction!=null&&f.culprit_column!=null)
+          .map(f=>({label:f.row_label,row:f.row_index,col:f.culprit_column,
+            printed:f.observed,implied:f.proposed_correction,
+            classification:f.classification,basis:f.correction_basis||[],
+            checks:(f.failing_relations||[]).length,corroborated:false,variable:null}));
+        rep.analysis=a;
+      }
+      /* CC: server signals -> the shape the dash renders */
+      if(a.schema==="cc"&&(a.signals||[]).length&&!a.signals[0].headline){
+        const by={};
+        for(const g of a.signals)(by[g.signal]=by[g.signal]||[]).push(g);
+        const META={loss_on_completed_contract:["completed at a loss",
+            "A job that closed underwater. Realized, not estimated \u2014 it already hit the indemnitor's net worth."],
+          profit_fade_on_completed_work:["profit given back on closed work",
+            "Profit recognized in prior years reversed in the current year: warranty, claims, or late costs on finished jobs. The classic shape of estimates that were too optimistic."]};
+        a.signals=Object.entries(by).map(([k,gs])=>({
+          severity:Math.max(...gs.map(g=>g.severity||0)),
+          headline:gs.length+" job"+(gs.length>1?"s":"")+" \u2014 "+(META[k]||[k])[0],
+          jobs:gs.slice(0,5).map(g=>({label:g.job,detail:g.detail})),
+          why:(META[k]||["",""])[1]}));
+      }
+      secs.push({type:sec.type,pages:sec.pages||t.pages||[],rep});
+    }
+  }
+  return secs;
+}
+function secLabel(sc){
+  const p=sc.pages||[];
+  const pg=p.length?(p[0]===p[p.length-1]?"p. "+p[0]:"pp. "+p[0]+"\u2013"+p[p.length-1]):"";
+  return {name:sc.type==="cc"?"Completed contracts":"WIP schedule",pg};
+}
+function renderSecnav(){
+  const nav=$("#secnav");
+  if(SECTIONS.length<2){nav.classList.add("hidden");return;}
+  nav.classList.remove("hidden");
+  nav.innerHTML=SECTIONS.map((sc,i)=>{const l=secLabel(sc);
+    return '<button class="'+(i===ACTIVE?"on":"")+'" data-sec="'+i+'">'+l.name+(l.pg?'<span class="pg">'+l.pg+'</span>':"")+'</button>'}).join("");
+  nav.querySelectorAll("button").forEach(b=>b.onclick=()=>selectSection(+b.dataset.sec));
+}
+function selectSection(i){
+  SECSTATE[ACTIVE]=ACCEPTED;
+  ACTIVE=i;REPORT=SECTIONS[i].rep;ACCEPTED=SECSTATE[i];
+  renderSecnav();
+  if(VIEW==="dash"){renderDash(REPORT);show("dash");}
+  else{renderCertificate(REPORT);show("certificate");}
+  window.scrollTo(0,0);
+}
+function render(doc){
+  if(doc.overall_status==="pipeline_error"){
+    $("#errmsg").textContent="The pipeline hit an unexpected error: "+(doc.validator_reason||"unknown")+". Try again, or try the sample schedule.";
     show("err");return;
   }
-  if(rep.overall_status==="extraction_failed"){
+  if(doc.overall_status==="extraction_failed"){
     $("#errmsg").textContent="The document could not be transcribed. If you're running without a model API key, try the sample schedule instead.";
     show("err");return;
   }
-  renderCertificate(rep);show("certificate");
+  DOC=doc;
+  SECTIONS=doc.tables?adaptV3(doc):[{type:"wip",pages:[],rep:doc}];
+  if(!SECTIONS.length){
+    $("#errmsg").textContent="No tables were found in that document.";
+    show("err");return;
+  }
+  SECSTATE=SECTIONS.map(sc=>new Set((((sc.rep||{}).analysis||{}).corrections||[]).map((_,i)=>i)));
+  ACTIVE=0;REPORT=SECTIONS[0].rep;ACCEPTED=SECSTATE[0];VIEW="certificate";
+  renderSecnav();
+  renderCertificate(REPORT);show("certificate");
   const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
-  $("#navCert").onclick=()=>{renderCertificate(REPORT);show("certificate");window.scrollTo(0,0)};
-  $("#navDash").onclick=()=>{renderDash(REPORT);show("dash");window.scrollTo(0,0)};
+  $("#navCert").onclick=()=>{VIEW="certificate";renderCertificate(REPORT);show("certificate");window.scrollTo(0,0)};
+  $("#navDash").onclick=()=>{VIEW="dash";renderDash(REPORT);show("dash");window.scrollTo(0,0)};
 }
 
 function renderCertificate(rep){
@@ -399,11 +522,13 @@ function renderCertificate(rep){
     if(td.allMatch)C("ok","Stated totals match the column sums","");
     else if(td.allExplained)C("ok","Stated totals match once the exception is corrected",
       "The document's own totals row agrees with the implied value, not the printed one.");
-    else C("bad","Stated totals disagree with the column sums",
+    else C("bad","Stated totals disagree with the column sums"+(td.docLevel?" (document grand totals)":""),
       td.mismatches.map(m=>`${m.header}: stated $${fmt$(m.stated)}, rows sum to $${fmt$(m.computed)}`).join(" · "));
   }
 
-  const nExc=findings.length+((td&&!td.allMatch&&!td.allExplained)?1:0);
+  (rep._extra||[]).forEach(x=>C(x.st,x.label,x.note));
+  const nExc=findings.length+((td&&!td.allMatch&&!td.allExplained)?1:0)
+    +(rep._extra||[]).filter(x=>x.st==="bad").length;
   const passed=checks.filter(c=>c.st==="ok").length;
   const head=nExc?`${passed} of ${checks.length} checks passed`:"All checks passed";
   const SHOWN=6;
@@ -451,7 +576,7 @@ function renderCertificate(rep){
       ${m.api_calls?`<li>${m.api_calls} model call(s), $${(+m.cost_usd).toFixed(4)}</li>`:""}
     </ul></details>`:"";
   $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
-    <div class="kicker">validation results</div>
+    <div class="kicker">validation results${SECTIONS.length>1?" \u00b7 "+secLabel(SECTIONS[ACTIVE]).name.toLowerCase()+" \u00b7 "+secLabel(SECTIONS[ACTIVE]).pg:""}</div>
     <h2 style="font-size:22px">${head}</h2>
     <div style="margin-top:16px">${checks.map(c=>{
       const ic=c.st==="ok"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
@@ -484,7 +609,12 @@ function renderCertificate(rep){
 function renderDash(rep){
   const a=rep.analysis||{},k=computeKpis(rep),prov=a.kpi_provenance||{};
   const degraded=rep.overall_status==="llm_mapped_unverified"||rep.overall_status==="unmapped";
-  const kpis=[
+  const kpis=a.schema==="cc"?[
+    ["Total revenue",fmtM(k.total_revenue)],
+    ["Total cost",fmtM(k.total_cost)],
+    ["Gross profit",fmtM(k.total_gross_profit)],
+    ["Realized margin",k.realized_margin==null?"—":(100*k.realized_margin).toFixed(1)+"%"],
+  ]:[
     ["Contract value",fmtM(k.total_contract_value)],
     ["UEGP",fmtM(k.uegp)],
     ["Cost to complete",fmtM(k.cost_to_complete)],
