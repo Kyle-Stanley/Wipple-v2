@@ -11,6 +11,7 @@ import numpy as np
 
 from .parsing import parse_table
 from .state import WippleState
+from .cc_validator import validate_cc
 from .wip_validator import ValidationResult, validate_wip
 
 # Finding classifications that point at the EXTRACTION as the likely culprit
@@ -143,5 +144,46 @@ def validate_node(state: WippleState) -> dict:
             "competing_mapping": None, "suggested_disambiguator": None,
             "diagnostics": {},
         }}
-    result = validate_wip(matrix, job_labels=state.get("job_labels"))
-    return {"validation": serialize_validation(result)}
+    labels = state.get("job_labels")
+    chosen, race = run_schema_race(matrix, labels)
+    out = serialize_validation(chosen)
+    out["schema"] = race["chosen"]
+    out.setdefault("diagnostics", {})["schema_race"] = race
+    return {"validation": out}
+
+
+def _race_rank(r: ValidationResult) -> int:
+    """SUCCESS and FAILED both mean the mapping CERTIFIED (failed = certified
+    mapping, wrong values -- exactly the state that carries findings); a
+    mapping without witnesses ranks below both; nothing ranks last."""
+    if r.mapping and r.witnesses:
+        return 2
+    if r.mapping:
+        return 1
+    return 0
+
+
+def _race_score(r: ValidationResult, n_cols: int) -> float:
+    """Witnessed evidence weight x explained column fraction: the parsimony
+    term is what stops the CC engine claiming the G = V - C corner of a WIP
+    table it explains 3 columns of."""
+    w = sum(x.weight for x in r.witnesses)
+    return w * (len(r.mapping) / max(n_cols, 1))
+
+
+def run_schema_race(matrix, labels):
+    """Both engines run on every logical table; certification decides the
+    schema. No classifier, no header semantics -- the numbers vote."""
+    wip = validate_wip(matrix, job_labels=labels)
+    cc = validate_cc(matrix, job_labels=labels)
+    m = matrix.shape[1]
+    kw = (_race_rank(wip), _race_score(wip, m))
+    kc = (_race_rank(cc), _race_score(cc, m))
+    chosen, name = (wip, "wip") if kw >= kc else (cc, "cc")
+    return chosen, {"chosen": name,
+                    "wip": {"status": wip.status, "rank": kw[0],
+                            "score": round(kw[1], 3),
+                            "explained": len(wip.mapping)},
+                    "cc": {"status": cc.status, "rank": kc[0],
+                           "score": round(kc[1], 3),
+                           "explained": len(cc.mapping)}}
