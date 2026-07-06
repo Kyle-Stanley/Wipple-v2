@@ -1,5 +1,3 @@
-"""Wipple v2: deterministic-first WIP schedule pipeline."""
-
 from .graph import build_graph, run_pipeline
 from .parsing import parse_cell, parse_table
 from .wip_validator import VAR_NAMES, ValidationResult, validate_wip
