@@ -1,4 +1,19 @@
-"""wipple.ai server: FastAPI + SSE streaming of pipeline node events."""
+"""wipple.ai server v3: FastAPI + SSE streaming over the DOCUMENT graph.
+
+Same architecture as v2 (thread runs the graph, queue feeds the SSE
+generator, heartbeats keep proxies alive); what changed is the graph and
+therefore the narration. Extraction is per-page with live progress lines,
+and the new stages -- stitching, the schema race, splitting, block
+misalignment, concordance -- each narrate what they proved, not what they
+did. Everything the old endpoints accepted still works: spreadsheets and
+CSVs are sniffed inside the graph's own ingest node now, so /api/scan just
+forwards bytes.
+
+The final SSE `report` event carries the v3 shape:
+    {source, tables: [{sections: [{type, report}], ...}], document, metrics}
+Each section report is v2-shaped by design -- the existing renderer works
+per section; the frontend's only new job is the loop.
+"""
 
 from __future__ import annotations
 
@@ -12,81 +27,150 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
 from wipple.demo import demo_raw_table
-from wipple.ingest import csv_to_raw_table, sniff, xlsx_to_raw_table
-from wipple.graph import build_graph
+from wipple.docgraph import build_doc_graph
 from wipple.model_client import MODEL_REGISTRY, Metrics
 
 app = FastAPI(title="wipple")
-# Allow the frontend to be served from a different origin (e.g. Firebase
-# Hosting at wipple.ai) while the API lives here. No cookies or auth are
-# involved, so a permissive policy is fine.
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
-GRAPH = build_graph()
+GRAPH = build_doc_graph()
+
+
+def _plural(n, word):
+    if n == 1:
+        return f"1 {word}"
+    return f"{n} {word[:-1] + 'ies' if word.endswith('y') else word + 's'}"
 
 
 def _narrate(node: str, up: dict, state: dict) -> list[str]:
-    if node == "extract":
-        rt = up.get("raw_table")
-        if not rt:
-            return ["Could not read the document."]
-        tier = state.get("extraction_tier", "primary")
-        msg = (f"Transcribed {len(rt['rows'])} rows x "
-               f"{len(rt['headers'])} columns")
-        return [("Re-reading with a stronger model... " if tier == "escalated"
-                 else "Reading document... ") + msg.lower()]
-    if node == "parse":
-        pr = up.get("parse_report", {})
-        out = [f"Parsed {pr.get('n_rows', 0)} jobs, "
-               f"{pr.get('n_numeric_cols', 0)} numeric columns"]
-        reps = [f for f in pr.get("cell_flags", [])
-                if f["flag"] == "confusable_repair"]
-        if reps:
-            out.append(f"Repaired {len(reps)} OCR-damaged cell(s) in place")
-        tc = pr.get("totals_check")
-        if tc:
-            out.append("Stated totals reconcile with column sums"
-                       if tc["all_match"] else
-                       "Stated totals do not match the column sums")
-        return out
-    if node == "validate":
-        v = up.get("validation", {})
-        st = v.get("status")
-        if st == "success":
-            nw = len(v.get("witnesses", []))
-            return [f"Column mapping certified from {nw} accounting "
-                    "identities, headers not used"]
-        if st == "validation_failed":
-            k = len(v.get("findings", []))
-            return [f"{k} cell(s) fail the row identities, diagnosing"]
-        return ["Too little numeric structure to certify, "
-                "reading headers as fallback"]
+    if node == "ingest":
+        if up.get("fragments") and not up.get("chunks"):
+            f = up["fragments"][0]
+            return [f"Spreadsheet cells read natively: "
+                    f"{_plural(len(f['rows']), 'row')} x "
+                    f"{len(f['headers'])} columns, no vision model needed"]
+        n = len(up.get("chunks") or [])
+        if n:
+            kind = state.get("media_type", "")
+            unit = "strip" if str(kind).startswith("image/") else "page"
+            return [f"Document split into {_plural(n, unit)}"]
+        return []
+    if node == "extract_chunks":
+        frs = up.get("fragments") or []
+        failed = up.get("failed_chunks") or []
+        msg = (f"Extraction complete: {_plural(len(frs), 'table fragment')} "
+               f"transcribed")
+        if failed:
+            msg += f" ({_plural(len(failed), 'page')} unreadable)"
+        return [msg]
+    if node == "stitch":
+        lts = up.get("logical_tables") or []
+        if not lts:
+            return ["No tables found in the document"]
+        out = []
+        for t in lts:
+            p0, p1 = t["pages"][0], t["pages"][-1]
+            span = (f"page {p0}" if p0 == p1 else f"pages {p0}-{p1}")
+            piece = f"{_plural(len(t['rows']), 'row')} across {span}"
+            if t.get("joined_columns"):
+                piece += ", facing-page columns rejoined"
+            out.append(piece)
+        lines = [f"Assembled {_plural(len(lts), 'logical table')}: "
+                 + "; ".join(out)]
+        issues = [i for t in lts for i in t.get("issues", [])]
+        for i in issues[:3]:
+            if i["kind"] == "hjoin_missing_row":
+                lines.append(f"Row '{i.get('row_label', '?')}' missing from "
+                             f"the continuation page {i.get('page', '?')}")
+            elif i["kind"] == "overlap_mismatch":
+                lines.append("Same row extracted twice with different "
+                             "values -- extraction flagged unreliable there")
+        return lines
+    if node == "tables":
+        lines = []
+        for t in (up.get("tables") or []):
+            for mf in (t.get("misalignment_findings") or []):
+                pg = ", ".join(map(str, mf.get("pages", [])))
+                lines.append(f"Page {pg} was read with a column offset -- "
+                             "repaired deterministically and re-certified, "
+                             "one structural finding instead of dozens")
+            secs = t.get("sections") or []
+            if len(secs) > 1 and any(s["type"] == "cc" for s in secs):
+                k = next(s["n_rows"] for s in secs if s["type"] == "cc")
+                lines.append(f"{_plural(k, 'completed contract')} carved out "
+                             "of the WIP by exact identities, validated "
+                             "separately")
+            for s in secs:
+                r = s.get("report", {})
+                v = r.get("validation") or {}
+                st = r.get("overall_status", "")
+                label = ("WIP schedule" if s["type"] == "wip"
+                         else "Completed contracts")
+                nw = len(r.get("witnesses", []) or [])
+                nf = len(r.get("findings", []) or [])
+                if st == "verified":
+                    lines.append(f"{label}: certified from "
+                                 f"{_plural(nw, 'accounting identity')}, "
+                                 "headers not used")
+                elif st == "verified_mapping_with_findings":
+                    lines.append(f"{label}: mapping certified; "
+                                 f"{_plural(nf, 'cell')} "
+                                 f"fail{'s' if nf == 1 else ''} the row "
+                                 "identities, diagnosed below")
+                elif "ambig" in st or (v.get("competing_mapping")):
+                    lines.append(f"{label}: two readings both certified, "
+                                 "headers broke the tie")
+                else:
+                    lines.append(f"{label}: too little numeric structure to "
+                                 "certify, headers used as fallback and "
+                                 "marked unverified")
+            note = t.get("notes") or []
+            for x in note[:2]:
+                lines.append(x)
+        return lines
     if node == "re_extract":
-        return ["A value fails the row identities, "
-                "re-reading the document independently"]
-    if node == "fallback":
-        n = len(up.get("fallback_mapping", {}))
-        return [f"Headers mapped {n} columns, marked unverified"]
-    if node == "disambiguate":
-        return ["Two readings both certified, headers broke the tie"]
-    if node == "analyze":
-        a = up.get("analysis") or {}
-        k = len(a.get("signals", []))
-        return [f"Computed portfolio KPIs and {k} underwriting "
-                f"signal{'s' if k != 1 else ''}"]
+        bad = state.get("bad_chunks") or []
+        pages = ", ".join(str(b + 1) for b in bad) or "?"
+        return [f"Re-reading page {pages} with a stronger model -- "
+                "the rest of the document stands"]
+    if node == "concordance":
+        c = up.get("concordance") or {}
+        disc = c.get("discordant") or []
+        ann = c.get("annotations") or []
+        if disc:
+            d = disc[0]
+            return [f"Header '{d.get('header')}' disagrees with what the "
+                    f"numbers prove (column certifies as "
+                    f"{d.get('variable')}) -- the math outranks the label"]
+        if ann:
+            return [f"Headers agree with the certified mapping on "
+                    f"{_plural(len(ann), 'column')}"]
+        return []
+    if node == "emit":
+        rep = up.get("report") or {}
+        n = len(rep.get("tables") or [])
+        if n:
+            return ["Report ready"]
+        return []
     return []
 
 
 def _stream(initial: dict):
     metrics = Metrics()
     initial["_metrics"] = metrics
-    state = dict(initial)
     q: queue.Queue = queue.Queue()
+    # Per-page extraction progress, pushed straight into the SSE queue from
+    # inside the extract node -- a 10-page read narrates ten times instead
+    # of going silent behind keepalives.
+    initial["_progress"] = lambda msg: q.put(
+        ("progress_line", {"node": "extract_chunks", "message": msg}))
+    state = dict(initial)
     t0 = time.time()
 
     def run():
         try:
-            for update in GRAPH.stream(initial, stream_mode="updates"):
+            for update in GRAPH.stream(initial, {"recursion_limit": 50},
+                                       stream_mode="updates"):
                 q.put(("update", update))
         except Exception as e:  # noqa: BLE001
             q.put(("error", str(e)))
@@ -95,23 +179,20 @@ def _stream(initial: dict):
     threading.Thread(target=run, daemon=True).start()
 
     def gen():
-        # Heartbeat every 10s so proxies don't kill the connection while a
-        # long model call is in flight.
-
         yield ("event: progress\ndata: "
-          + json.dumps({
-              "node": "upload",
-              "message": "Upload received. Reading document"
-          })
-          + "\n\n")
-      
+               + json.dumps({"node": "upload",
+                             "message": "Upload received. Reading document"})
+               + "\n\n")
         while True:
             try:
                 kind, payload = q.get(timeout=10)
             except queue.Empty:
                 yield ": keepalive\n\n"
                 continue
-            if kind == "update":
+            if kind == "progress_line":
+                yield ("event: progress\ndata: " + json.dumps(payload)
+                       + "\n\n")
+            elif kind == "update":
                 for node, up in payload.items():
                     state.update(up or {})
                     for line in _narrate(node, up or {}, state):
@@ -124,11 +205,13 @@ def _stream(initial: dict):
                 break
             else:
                 break
-        report = state.get("report") or {"overall_status": "pipeline_error",
-                                         "validator_reason": "no report produced"}
+        report = state.get("report") or {
+            "overall_status": "pipeline_error",
+            "validator_reason": "no report produced"}
         report["metrics"] = metrics.summary()
         report["metrics"]["elapsed_seconds"] = round(time.time() - t0, 1)
-        yield "event: report\ndata: " + json.dumps(report, default=str) + "\n\n"
+        yield ("event: report\ndata: "
+               + json.dumps(report, default=str) + "\n\n")
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
@@ -141,9 +224,9 @@ def models():
 
 
 def _initial(**kw) -> dict:
-    return {"pdf_bytes": b"", "source_name": "", "raw_table": None,
-            "extraction_tier": "primary", "reextract_count": 0,
-            "extraction_attempts": [], **kw}
+    return {"doc_bytes": b"", "source_name": "", "media_type": None,
+            "fragments": [], "chunks": [], "extraction_tier": "primary",
+            "reextract_count": 0, "extraction_attempts": [], **kw}
 
 
 @app.get("/")
@@ -158,12 +241,14 @@ def how():
 
 @app.get("/api/sample")
 def sample():
-    # Demo injects a pre-transcribed table: extraction is bypassed (no key
-    # needed); parse, validation, analysis -- the deterministic spine -- run
-    # for real. reextract budget is pre-spent so the planted decimal slip
-    # emits as a finding instead of looping into a model call.
-    return _stream(_initial(raw_table=demo_raw_table(),
-                            source_name="sample_wip.pdf",
+    # Demo injects a pre-extracted fragment: perception is bypassed (no key
+    # needed); stitching, the schema race, validation, analysis -- the
+    # deterministic spine -- run for real. reextract budget pre-spent so
+    # the planted decimal slip emits as a finding, not a model call.
+    raw = demo_raw_table()
+    frag = {"chunk_id": 0, "pages": [1], "headers": raw["headers"],
+            "rows": raw["rows"], "position": 0, "notes": []}
+    return _stream(_initial(fragments=[frag], source_name="sample_wip.pdf",
                             reextract_count=1))
 
 
@@ -171,16 +256,11 @@ def sample():
 async def scan(file: UploadFile, model: str = Form("")):
     data = await file.read()
     name = file.filename or "upload"
-    kind = sniff(data, name)
-    override = model.strip() if model and model.strip() in MODEL_REGISTRY else None
-    if kind == "xlsx":
-        # spreadsheets carry their cells natively: deterministic ingest,
-        # no model call, no re-extract loop to fall into
-        return _stream(_initial(raw_table=xlsx_to_raw_table(data),
-                                source_name=name, reextract_count=1))
-    if kind == "csv":
-        return _stream(_initial(raw_table=csv_to_raw_table(data),
-                                source_name=name, reextract_count=1))
-    media = kind if kind != "unknown" else "application/pdf"
-    return _stream(_initial(pdf_bytes=data, media_type=media,
-                            source_name=name, model_override=override))
+    override = (model.strip()
+                if model and model.strip() in MODEL_REGISTRY else None)
+    # Sniffing (pdf / image / xlsx / csv) now lives in the graph's own
+    # ingest node; spreadsheets become fragments with no model call, and
+    # their empty chunk list means the re-extract route can never fire on
+    # them -- no budget pre-spend needed.
+    return _stream(_initial(doc_bytes=data, source_name=name,
+                            model_override=override))
