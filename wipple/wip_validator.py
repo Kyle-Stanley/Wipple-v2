@@ -521,45 +521,29 @@ def _match_candidates(pred, ptol, rule, unassigned, cols, cfg, ab,
         loose = strict + np.maximum(cfg.ident_abs, cfg.ident_rel * np.abs(pred))
         informative = int((np.abs(pred) > strict + 1e-9).sum())
         for j in unassigned:
-            raw = cols[j]
-            candidates = [(raw, 1.0, "")]
-
-            # Underbillings and overbillings are split magnitude columns:
-            # U = max(E - B, 0), O = max(B - E, 0). Some schedules print the
-            # populated side as a negative balance, e.g. Billings in Excess as
-            # ($12,204). Once a U/O rule is trying to claim the column, allow a
-            # consistently-negative displayed column to validate by magnitude.
-            # The parser still stays sign-faithful; this is semantic matching.
-            if rule.out in {"U", "O"}:
-                nz = raw[np.isfinite(raw) & (np.abs(raw) > cfg.money_obs_tol)]
-                if nz.size and np.all(nz < 0):
-                    candidates.append((-raw, -1.0, " with inverted display sign"))
-
-            for x, display_scale, display_note in candidates:
-                resid = np.abs(x - pred)
-                bad = int((resid > loose).sum())
-                strict_bad = int((resid > strict).sum())
-                if (strict_bad if exact_only else bad) > (0 if exact_only else ab):
-                    # NB: no majority-fit "salvage" here. Loosening identification
-                    # lets structurally-coincident predictions of WRONG hypotheses
-                    # claim real columns (e.g. with B anchored on the U column,
-                    # E - U literally equals B on every underbilled row). Heavier
-                    # corruption than the robust allowance is instead caught by
-                    # the post-selection shadow audit (_audit_shadowed_virtuals).
-                    continue
-                vv = VarVal(var=rule.out, values=x.copy(),
-                            tol=np.full(m, cfg.money_obs_tol),
-                            support=frozenset([j]), col=j,
-                            interp_scale=display_scale,
-                            derivation=display_note.strip(),
-                            deps=frozenset([rule.out]))
-                sortkey = (strict_bad, bad,
-                           float(np.minimum(resid, loose).sum()))
-                out.append((sortkey, j, vv,
-                            dict(bad=bad, strict_bad=strict_bad,
-                                 informative=informative,
-                                 max_resid=float(resid[resid <= loose]
-                                                 .max(initial=0.0)))))
+            x = cols[j]
+            resid = np.abs(x - pred)
+            bad = int((resid > loose).sum())
+            strict_bad = int((resid > strict).sum())
+            if (strict_bad if exact_only else bad) > (0 if exact_only else ab):
+                # NB: no majority-fit "salvage" here. Loosening identification
+                # lets structurally-coincident predictions of WRONG hypotheses
+                # claim real columns (e.g. with B anchored on the U column,
+                # E - U literally equals B on every underbilled row). Heavier
+                # corruption than the robust allowance is instead caught by
+                # the post-selection shadow audit (_audit_shadowed_virtuals).
+                continue
+            vv = VarVal(var=rule.out, values=x.copy(),
+                        tol=np.full(m, cfg.money_obs_tol),
+                        support=frozenset([j]), col=j,
+                        deps=frozenset([rule.out]))
+            sortkey = (strict_bad, bad,
+                       float(np.minimum(resid, loose).sum()))
+            out.append((sortkey, j, vv,
+                        dict(bad=bad, strict_bad=strict_bad,
+                             informative=informative,
+                             max_resid=float(resid[resid <= loose]
+                                             .max(initial=0.0)))))
     else:
         for j in unassigned:
             x = cols[j]
@@ -682,8 +666,7 @@ def _peel(cols, seeds, cfg):
                 if not cands:
                     continue
                 _, j, vv, st = cands[0]
-                note = f" ({vv.derivation})" if vv.derivation else ""
-                vv.derivation = f"column {j} matched by {rule.name}{note}"
+                vv.derivation = f"column {j} matched by {rule.name}"
                 known[rule.out] = vv
                 unassigned.remove(j)
                 edges.append(Edge(
@@ -990,7 +973,7 @@ def _certify(hyp, labels, cfg):
                 observed=float(out.values[r] * scale),
                 expected=float(pred[r] * scale),
                 difference=float(resid[r] * scale),
-                tolerance=float(strict[r] * abs(scale))))
+                tolerance=float(strict[r] * scale)))
         ok = np.abs(resid) <= strict
         witnesses.append(Witness(
             relation=rule.name, business_form=_business_form(rule),
