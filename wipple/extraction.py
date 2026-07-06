@@ -93,3 +93,77 @@ def re_extract_node(state: WippleState) -> dict:
         "extraction_tier": "escalated",
         "reextract_count": int(state.get("reextract_count", 0)) + 1,
     }
+
+
+# ---------------------------------------------------------------------------
+# v3: per-chunk extraction. The chunk is the perception unit; the page is
+# provenance. The prompt's only addition over v2 is the tables array (a page
+# can carry two distinct tables) -- every verbatim rule is unchanged.
+# ---------------------------------------------------------------------------
+
+_V2_SHAPE = (
+    '{\n'
+    '  "headers": ["<column header 1>", "..."],\n'
+    '  "rows": [["<cell>", "<cell>", "..."], ...],\n'
+    '  "page_count": <int>,\n'
+    '  "notes": ["<anything unusual about the document structure>"]\n'
+    '}')
+_V3_SHAPE = (
+    '{\n'
+    '  "tables": [\n'
+    '    {"headers": ["<column header 1>", "..."],\n'
+    '     "rows": [["<cell>", "<cell>", "..."], ...],\n'
+    '     "position": <0-based order of this table on the page>,\n'
+    '     "notes": ["<anything unusual>"]}\n'
+    '  ]\n'
+    '}\n\n'
+    'If the page continues a table from a previous page and reprints no\n'
+    'headers, return "headers" as a list of empty strings matching the\n'
+    'column count. If the page holds TWO separate tables (e.g. contracts in\n'
+    'progress and completed contracts), return both, in reading order.')
+
+CHUNK_PROMPT = EXTRACTION_PROMPT.replace(
+    'Return ONLY a JSON object with this exact shape:',
+    'This is ONE PAGE (or one slice) of a possibly longer document. '
+    'Return ONLY a JSON object with this exact shape:').replace(
+    _V2_SHAPE, _V3_SHAPE)
+
+
+def extract_chunks_node(state) -> dict:
+    """Extract every pending chunk (all on the first pass; the re-queued
+    subset on the escalated retry). Fragments accumulate with provenance."""
+    chunks = state.get("chunks") or []
+    pending = state.get("bad_chunks")
+    tier = state.get("extraction_tier", "primary")
+    metrics = state["_metrics"]
+    attempts = list(state.get("extraction_attempts", []))
+    fragments = [f for f in (state.get("fragments") or [])
+                 if pending is None or f["chunk_id"] not in set(pending)]
+    failed = []
+    for ch in chunks:
+        if pending is not None and ch["chunk_id"] not in set(pending):
+            continue
+        try:
+            text = get_client().generate(
+                CHUNK_PROMPT, tier=tier, pdf_bytes=ch["bytes"],
+                media_type=ch["media_type"], json_only=True,
+                metrics=metrics,
+                purpose=f"extract[chunk={ch['chunk_id']},{tier}]")
+            obj = extract_json(text)
+            for t in obj.get("tables", []):
+                fragments.append({
+                    "chunk_id": ch["chunk_id"], "pages": ch["pages"],
+                    "headers": [str(h) for h in t.get("headers", [])],
+                    "rows": [[str(c) for c in r] for r in t.get("rows", [])],
+                    "position": int(t.get("position", 0)),
+                    "notes": [str(n) for n in t.get("notes", [])],
+                    "overlaps_prev": bool(ch.get("overlaps_prev"))})
+            attempts.append({"chunk": ch["chunk_id"], "tier": tier,
+                             "ok": True})
+        except Exception as e:  # noqa: BLE001 -- routed state, not a crash
+            logger.exception("chunk %s extraction failed", ch["chunk_id"])
+            attempts.append({"chunk": ch["chunk_id"], "tier": tier,
+                             "ok": False, "error": str(e)})
+            failed.append(ch["chunk_id"])
+    return {"fragments": fragments, "extraction_attempts": attempts,
+            "failed_chunks": failed, "bad_chunks": None}
