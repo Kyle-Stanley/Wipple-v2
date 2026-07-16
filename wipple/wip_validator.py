@@ -157,7 +157,7 @@ class Config:
     # A failed identity may create a finding, but an ordinary replacement
     # value is suggested only when this many independent algebraic families
     # agree. Exact U/O sign reversals are the narrow exception.
-    correction_min_families: int = 3
+    correction_min_families: int = 2
 
     # ----- evidence weights --------------------------------------------------
     # Percent identities are weaker evidence than money identities (anti-bug
