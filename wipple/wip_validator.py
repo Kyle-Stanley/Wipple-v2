@@ -101,11 +101,9 @@ VAR_NAMES = {
 
 CORE_VARS = ("V", "C", "G", "D", "B")
 
-# U and O are presentation columns: schedules normally display both as
-# non-negative magnitudes even though the equivalent signed net position
-# carries opposite signs. During semantic identification we therefore match
-# their magnitudes, but retain the original signed observations so strict
-# certification can report a parenthesized/negative cell as an error.
+# U and O may be represented as either positive magnitudes or signed amounts
+# depending on the schedule. Their semantic value is therefore their
+# magnitude: sign is ignored for identification, certification, and auditing.
 MAGNITUDE_PRESENTATION_VARS = frozenset({"U", "O"})
 
 # Percent display grids considered, COARSEST FIRST (ratio space). Detection
@@ -980,7 +978,10 @@ def _certify(hyp, labels, cfg):
         else:
             strict = ptol + out.tol + 1e-9
         scale = out.interp_scale
-        resid = out.values - pred
+        compared = (np.abs(out.values)
+                    if e.out_var in MAGNITUDE_PRESENTATION_VARS
+                    else out.values)
+        resid = compared - pred
         bad_rows = np.nonzero(np.abs(resid) > strict)[0]
         for r in bad_rows:
             orig = int(hyp.row_index[r])
@@ -1238,7 +1239,10 @@ def _diagnose(hyp, cols, labels, cfg, failures):
                       + cfg.cert_money_rel * np.abs(pred))
         else:
             strict = ptol + out.tol + 1e-9
-        ok = np.abs(out.values - pred) <= strict
+        compared = (np.abs(out.values)
+                    if e.out_var in MAGNITUDE_PRESENTATION_VARS
+                    else out.values)
+        ok = np.abs(compared - pred) <= strict
         gset = out.deps | frozenset().union(*[iv.deps for iv in ins])
         edge_data.append((e, rule, ins, out, pred, strict, ok, gset))
 
@@ -1271,49 +1275,6 @@ def _diagnose(hyp, cols, labels, cfg, failures):
         common = dict(row_index=int(orig_r), row_label=labels[orig_r],
                       exonerated_variables=sorted(exonerated),
                       failing_relations=[f[1].name for f in failing])
-
-        # A negative U/O value whose magnitude exactly matches the clipped
-        # prediction is directly attributable to the presentation cell.
-        direct_sign_errors = []
-        for (e, rule, ins, out, pred, strict, gset) in failing:
-            if rule.out not in MAGNITUDE_PRESENTATION_VARS or out.col is None:
-                continue
-            scale = out.interp_scale
-            observed = float(out.values[r] * scale)
-            expected = float(pred[r] * scale)
-            tolerance = float(strict[r] * scale)
-            if (observed < 0.0 and expected >= 0.0
-                    and abs(abs(observed) - expected) <= tolerance):
-                direct_sign_errors.append((rule, out, observed, expected))
-
-        if direct_sign_errors:
-            for rule, out, observed, expected in direct_sign_errors:
-                culprit = rule.out
-                culprits_by_row[int(orig_r)] = culprit
-                proposed = round(expected)
-                findings.append(Finding(
-                    **common,
-                    culprit_column=out.col,
-                    culprit_variable=culprit,
-                    candidate_variables=[culprit],
-                    observed=observed,
-                    proposed_correction=float(proposed),
-                    correction_basis=[
-                        rule.name,
-                        f"{VAR_NAMES[culprit]} is presented as a "
-                        "non-negative magnitude",
-                    ],
-                    confidence="high",
-                    classification="sign_error",
-                    classification_detail=(
-                        "magnitude matches the calculated billing position, "
-                        "but this split under/over-billings column must be "
-                        "presented as a non-negative amount"
-                    ),
-                    transplant_sources=_transplant_sources(
-                        cols, orig_r, out.col, observed),
-                ))
-            continue
 
         cands = set(frozenset.intersection(*[f[-1] for f in failing])) \
             - exonerated
@@ -1403,24 +1364,14 @@ def _diagnose(hyp, cols, labels, cfg, failures):
         expected = (round(f.expected) if f.variable not in PCT_VARS
                     else f.expected)
         cls, detail = _classify_error(f.observed, expected)
-        is_direct_sign = (
-            f.variable in MAGNITUDE_PRESENTATION_VARS
-            and cls == "sign_error"
-        )
-        proposed = float(expected) if is_direct_sign else None
+        proposed = None
         basis = [f.relation]
         confidence = "low"
-        if is_direct_sign:
-            basis.append(
-                f"{VAR_NAMES[f.variable]} is presented as a "
-                "non-negative magnitude")
-            confidence = "high"
-        else:
-            detail += (
-                f"; 1 independent validation family supports this value, "
-                f"but {cfg.correction_min_families} are required before "
-                "suggesting a replacement"
-            )
+        detail += (
+            f"; 1 independent validation family supports this value, "
+            f"but {cfg.correction_min_families} are required before "
+            "suggesting a replacement"
+        )
 
         tr = _transplant_sources(cols, f.row_index, f.column, f.observed)
         if tr and cls in ("unexplained_substitution", "digit_transposition"):
@@ -1473,23 +1424,14 @@ def _audit_shadowed_virtuals(hyp, cols, labels, cfg):
             match_x = (np.abs(x)
                        if var in MAGNITUDE_PRESENTATION_VARS else x)
             match_resid = np.abs(match_x - vv.values)
-            signed_resid = np.abs(x - vv.values)
             fit = int((match_resid <= strict).sum())
-            signed_fit = int((signed_resid <= strict).sum())
-            # For ordinary variables, preserve the original heavy-corruption
-            # rule (majority but not perfect fit). For U/O, a perfect
-            # magnitude fit with imperfect signed fit is exactly the
-            # parenthesized-negative presentation error this audit must catch.
-            qualifies = (need <= fit and
-                         (fit < m or
-                          (var in MAGNITUDE_PRESENTATION_VARS
-                           and signed_fit < m)))
+            qualifies = need <= fit < m
             if qualifies and (best is None or fit > best[0]):
-                best = (fit, var, vv, strict, signed_resid)
+                best = (fit, var, vv, strict, match_resid, match_x)
         if best is None:
             continue
-        fit, var, vv, strict, signed_resid = best
-        for r in np.nonzero(signed_resid > strict)[0]:
+        fit, var, vv, strict, match_resid, match_x = best
+        for r in np.nonzero(match_resid > strict)[0]:
             orig = int(hyp.row_index[r])
             failures.append(RowFailure(
                 relation=f"column {j} realizes {var} "
@@ -1499,7 +1441,7 @@ def _audit_shadowed_virtuals(hyp, cols, labels, cfg):
                 variable=var, column=j, row_index=orig,
                 row_label=labels[orig],
                 observed=float(x[r]), expected=float(vv.values[r]),
-                difference=float(x[r] - vv.values[r]),
+                difference=float(match_x[r] - vv.values[r]),
                 tolerance=float(strict[r])))
     return failures
 
