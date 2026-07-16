@@ -439,9 +439,9 @@ function adaptV3(doc){
       for(const d of disc){
         if(secHeaders.size&&!secHeaders.has(d.header))continue;
         const provenName=d.name||VARIABLE_NAMES[d.variable]||d.variable;
-        rep._extra.push({st:"warn",
-          label:"Header '"+d.header+"' disagrees with what the numbers prove",
-          note:"The numbers consistently identify this column as "+provenName+". The label says otherwise. The math outranks the label."});
+        rep._extra.push({st:"ok",
+          label:"Header terminology",
+          note:"Expected: "+provenName+" · Provided: "+d.header+". The column was identified from its values; this may simply be alternate terminology."});
       }
       /* CC: synthesize the corrections array the reviewer UI drives */
       const a=rep.analysis||{};
