@@ -1024,11 +1024,24 @@ def _disp(v: float) -> str:
     return f"{v:,.4f}".rstrip("0").rstrip(".")
 
 
+def _single_deleted_digit_index(longer: str, shorter: str):
+    """Return the index of one removable digit, or None.
+
+    This detects a single inserted digit at the beginning, middle, or end.
+    """
+    if len(longer) != len(shorter) + 1:
+        return None
+    for i in range(len(longer)):
+        if longer[:i] + longer[i + 1:] == shorter:
+            return i
+    return None
+
+
 def _classify_error(observed: float, proposed: float):
     """Pattern-match an observed/implied value pair against known OCR
-    failure modes. Order matters: scale signatures are checked before
-    character edits because a separator slip also has small edit distance
-    in digit space."""
+    failure modes. Order matters: exact one-digit insertions/deletions
+    are checked before broader scale signatures because they identify the
+    more specific OCR failure mode."""
     if proposed != 0 and observed != 0:
         same_magnitude = abs(abs(observed) - abs(proposed)) <= max(
             0.51, 1e-9 * abs(proposed))
@@ -1038,6 +1051,20 @@ def _classify_error(observed: float, proposed: float):
                     "reversed")
     do = re.sub(r"[^0-9]", "", _disp(abs(observed)))
     dp = re.sub(r"[^0-9]", "", _disp(abs(proposed)))
+
+    # Exact edit signatures are more specific than a generic 10x/100x scale
+    # signature, and now work for digits inserted or dropped anywhere.
+    extra_at = _single_deleted_digit_index(do, dp)
+    if extra_at is not None:
+        return ("extra_character",
+                f"one extra digit ({do[extra_at]}) at position "
+                f"{extra_at + 1} of the observed value")
+    missing_at = _single_deleted_digit_index(dp, do)
+    if missing_at is not None:
+        return ("dropped_character",
+                f"one digit ({dp[missing_at]}) is missing at position "
+                f"{missing_at + 1} of the observed value")
+
     if proposed != 0 and observed != 0:
         ratio = abs(observed / proposed)
         for k in range(1, 9):
@@ -1047,13 +1074,6 @@ def _classify_error(observed: float, proposed: float):
                             f"observed is {r:g}x the implied value -- "
                             "thousands-separator misread (comma/period) or "
                             "dropped/added digits")
-    if len(do) == len(dp) + 1 and (do[1:] == dp or do[:-1] == dp):
-        return ("extra_character",
-                "one extra leading/trailing digit -- e.g. a currency "
-                "symbol or stray mark read as a digit")
-    if len(dp) == len(do) + 1 and (dp[1:] == do or dp[:-1] == do):
-        return ("dropped_character",
-                "one digit missing relative to the implied value")
     d = _lev(do, dp)
     if d == 0:
         return ("formatting_only",
