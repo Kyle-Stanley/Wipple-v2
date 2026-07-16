@@ -138,8 +138,11 @@ details.more li{margin:3px 0}
 .ctab .mny,.ctab th{white-space:nowrap}
 .evrow td{background:transparent;padding:2px 4px 12px}
 .evgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 8px}
-.evgrid .eq{display:flex;justify-content:space-between;gap:12px;align-items:baseline;background:var(--surface);border:1px solid var(--line-soft);border-radius:7px;padding:9px 13px;font-size:12.5px;text-align:left}
+.evtitle{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:3px 4px 7px;text-align:left}
+.evgrid .eq{display:block;background:var(--surface);border:1px solid var(--line-soft);border-radius:7px;padding:8px 13px 9px;font-size:12.5px;text-align:left}
 .evgrid .eq:last-child:nth-child(odd){grid-column:1/-1}
+.evgrid .eqname{display:block;color:var(--muted);font-size:10.5px;line-height:1.3;margin-bottom:3px}
+.evgrid .eqline{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
 .evgrid .fr{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500}
 .evnote{font-size:12px;color:var(--muted);margin:0;padding:0 4px;text-align:left}
 .evtoggle{cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--sage-deep);font-size:12px;width:20px;height:20px;border-radius:6px;margin-right:8px;line-height:1;vertical-align:middle}
@@ -257,7 +260,34 @@ const fmtM=x=>{if(x==null)return"—";const a=Math.abs(x),
   return x<0?`($${s})`:`$${s}`};
 const fmt$=x=>x==null?"—":(x<0?`(${Math.abs(x).toLocaleString(undefined,{maximumFractionDigits:0})})`
   :x.toLocaleString(undefined,{maximumFractionDigits:0}));
-const causeText=(cls,printed,implied)=>{
+
+/* Internal formula codes stay compact in the math display, but bare codes
+   should never be shown as user-facing column names. */
+const VARIABLE_NAMES={
+  V:"Contract Value",
+  C:"Estimated Total Cost",
+  G:"Estimated Gross Profit",
+  M:"Estimated Gross Margin %",
+  D:"Cost to Date",
+  Q:"Cost to Complete",
+  P:"Percent Complete",
+  E:"Earned Revenue",
+  B:"Billings to Date",
+  H:"Earned Gross Profit to Date",
+  N:"Net Billing Position",
+  U:"Underbillings",
+  O:"Overbillings",
+  R:"Remaining Revenue (Backlog)",
+  RB:"Remaining Billings",
+  PB:"Percent Billed"
+};
+const variableName=code=>VARIABLE_NAMES[code]||code||"Detected variable";
+const formulaHeading=formula=>{
+  const m=String(formula||"").match(/^\s*([A-Z]{1,2})\s*=/);
+  return m?variableName(m[1]):"Validation check";
+};
+
+const causeText=(cls,printed,implied,label)=>{
   if(cls==="separator_or_magnitude_error"&&printed&&implied){
     const dp=String(Math.round(Math.abs(printed))),di=String(Math.round(Math.abs(implied)));
     for(const k of[1,2,3]){
@@ -268,16 +298,16 @@ const causeText=(cls,printed,implied)=>{
     if(dp===di)return"misread separator";
     return"extra or missing digit";
   }
-  return CLASS_SHORT[cls]||cls;
+  return label||CLASS_SHORT[cls]||cls;
 };
 const CLASS_SHORT={separator_or_magnitude_error:"extra or missing digit",
-  ocr_character_misread:"misread character",digit_transposition:"digits swapped",
+  ocr_character_misread:"digit error",digit_transposition:"digits swapped",
   extra_character:"extra digit",dropped_character:"missing digit",
   formatting_only:"formatting",unexplained_substitution:"unknown",
   ambiguous_multi_cell:"multiple cells"};
 const checksText=c=>`${c.checks} identit${c.checks===1?"y":"ies"}${c.corroborated?" + totals row":""}`;
 const CLASS_EN={separator_or_magnitude_error:"decimal or thousands-separator slip",
-  ocr_character_misread:"character misread",digit_transposition:"digits transposed",
+  ocr_character_misread:"one or more digits differ from the implied value",digit_transposition:"digits transposed",
   extra_character:"stray extra digit",dropped_character:"missing digit",
   formatting_only:"formatting discrepancy",
   ambiguous_multi_cell:"multiple errors in this row, no single cell isolated",
@@ -408,9 +438,10 @@ function adaptV3(doc){
       const secHeaders=new Set(((rep.table||{}).columns||[]).map(c=>c.header));
       for(const d of disc){
         if(secHeaders.size&&!secHeaders.has(d.header))continue;
+        const provenName=d.name||VARIABLE_NAMES[d.variable]||d.variable;
         rep._extra.push({st:"warn",
           label:"Header '"+d.header+"' disagrees with what the numbers prove",
-          note:"The column certifies as "+(d.name||d.variable)+" on every row; the label says otherwise. The math outranks the label."});
+          note:"The numbers consistently identify this column as "+provenName+". The label says otherwise. The math outranks the label."});
       }
       /* CC: synthesize the corrections array the reviewer UI drives */
       const a=rep.analysis||{};
@@ -419,7 +450,9 @@ function adaptV3(doc){
           .filter(f=>f.proposed_correction!=null&&f.culprit_column!=null)
           .map(f=>({label:f.row_label,row:f.row_index,col:f.culprit_column,
             printed:f.observed,implied:f.proposed_correction,
-            classification:f.classification,basis:f.correction_basis||[],
+            classification:f.classification,
+            classification_label:f.classification_label,
+            basis:f.correction_basis||[],
             checks:(f.failing_relations||[]).length,corroborated:false,variable:null}));
         rep.analysis=a;
       }
@@ -540,16 +573,17 @@ function renderCertificate(rep){
     const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""} aria-label="apply suggested value for ${f.row_label}">`
                :`<span style="color:var(--muted);font-size:12px">review</span>`;
     const ev=c?`<tr class="evrow hidden" data-ev="${ci}"><td colspan="6">
+        <p class="evtitle">Formulas used</p>
         <div class="evgrid">
-          ${(c.basis||[]).map(b=>`<div class="eq"><span>${b}</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div>`).join("")}
-          ${c.corroborated?`<div class="eq"><span>stated total \u2212 the other rows</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div>`:""}
+          ${(c.basis||[]).map(b=>`<div class="eq"><span class="eqname">${formulaHeading(b)}</span><div class="eqline"><span>${b}</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div></div>`).join("")}
+          ${c.corroborated?`<div class="eq"><span class="eqname">Stated total</span><div class="eqline"><span>stated total \u2212 the other rows</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div></div>`:""}
         </div>
         <p class="evnote">every check lands on the same number; the printed $${fmt$(c.printed)} satisfies none of them</p>
       </td></tr>`:"";
     return `<tr>${c?`<td><button class="evtoggle" data-ev="${ci}" aria-label="show the math">\u25B8</button>${f.row_label}<small style="margin-left:14px">${col}</small></td>`:`<td>${f.row_label}<small>${col}</small></td>`}
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
       <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
-      <td>${causeText(f.classification,f.observed,f.proposed_correction)}</td>
+      <td>${causeText(f.classification,f.observed,f.proposed_correction,f.classification_label)}</td>
       <td>${c?`${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}`:"\u2014"}</td>
       <td style="text-align:right">${use}</td></tr>${ev}`;
   };
@@ -632,14 +666,14 @@ function renderDash(rep){
       <td>${c.label}<small>${colName(c.col)}</small></td>
       <td class="mny bad">$${fmt$(c.printed)}</td>
       <td class="mny">$${fmt$(c.implied)}</td>
-      <td>${causeText(c.classification,c.printed,c.implied)}</td>
+      <td>${causeText(c.classification,c.printed,c.implied,c.classification_label)}</td>
       <td>${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}</td>
       <td style="font-size:12px;color:${ACCEPTED.has(ci)?"var(--sage-deep)":"var(--muted)"}">${ACCEPTED.has(ci)?"applied":"as printed"}</td></tr>`),
     ...flagged.map(f=>`<tr>
       <td>${f.row_label}<small>${colName(f.culprit_column)}</small></td>
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
       <td class="mny">\u2014</td>
-      <td title="${CLASS_EN[f.classification]||""}">${CLASS_SHORT[f.classification]||f.classification}</td>
+      <td title="${CLASS_EN[f.classification]||""}">${f.classification_label||CLASS_SHORT[f.classification]||f.classification}</td>
       <td>\u2014</td>
       <td style="color:var(--muted);font-size:12px">review</td></tr>`)
   ];
