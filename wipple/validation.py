@@ -12,7 +12,7 @@ import numpy as np
 from .parsing import parse_table
 from .state import WippleState
 from .cc_validator import validate_cc
-from .wip_validator import VAR_NAMES, ValidationResult, validate_wip
+from .wip_validator import ValidationResult, validate_wip
 
 # Finding classifications that point at the EXTRACTION as the likely culprit
 # (transcription-shaped errors) vs. the document itself. Drives the
@@ -42,17 +42,107 @@ CLASSIFICATION_LABELS = {
 }
 
 
+def _trailing_total_evidence(matrix) -> dict | None:
+    """Return evidence that the final parsed row is an aggregate total.
+
+    This is deliberately numerical rather than header-based. A candidate row
+    must equal the sum of all preceding rows across several additive-looking
+    columns. Ratio/percent columns are naturally ignored because their final
+    value will not resemble the sum of the preceding percentages.
+
+    Requiring agreement across multiple columns makes it extraordinarily
+    unlikely that a real job will be removed merely because one value happens
+    to equal a prior-column sum.
+    """
+    a = np.asarray(matrix, dtype=float)
+    if a.ndim != 2 or a.shape[0] < 4 or a.shape[1] < 4:
+        return None
+
+    prior = a[:-1]
+    candidate = a[-1]
+    considered = []
+    matched = []
+
+    for j in range(a.shape[1]):
+        col = prior[:, j]
+        finite = np.isfinite(col)
+        if not np.isfinite(candidate[j]) or int(finite.sum()) < 2:
+            continue
+
+        vals = col[finite]
+        nonzero = np.abs(vals) > 0.51
+        if int(nonzero.sum()) < 2:
+            continue
+
+        expected = float(vals.sum())
+        observed = float(candidate[j])
+
+        # Exclude ratio-like / tiny columns and values that do not have the
+        # scale shape of a total. Dollar totals should generally be larger
+        # than a typical constituent row.
+        typical = float(np.median(np.abs(vals[nonzero])))
+        if abs(expected) <= 2.0 or abs(observed) < 1.25 * max(typical, 1.0):
+            continue
+
+        tolerance = max(
+            1.0,
+            0.0005 * max(abs(expected), abs(observed)),
+        )
+        considered.append(j)
+        if abs(observed - expected) <= tolerance:
+            matched.append(j)
+
+    if not considered:
+        return None
+
+    # Four matching numeric columns is already strong evidence. Also require
+    # at least half of the additive-looking columns so a partial coincidence
+    # cannot remove a real final job.
+    required = max(4, int(np.ceil(0.50 * len(considered))))
+    if len(matched) < required:
+        return None
+
+    return {
+        "row_index": int(a.shape[0] - 1),
+        "reason": "trailing_row_sums_predecessors",
+        "matching_numeric_columns": [int(j) for j in matched],
+        "considered_numeric_columns": [int(j) for j in considered],
+        "matches": int(len(matched)),
+        "required": int(required),
+    }
+
+
 def parse_node(state: WippleState) -> dict:
     raw = state.get("raw_table")
     if not raw or not raw.get("rows"):
         return {"matrix": None, "job_labels": [], "numeric_col_map": [],
                 "parse_report": {"notes": ["no extracted table"]}}
-    result = parse_table(raw["rows"], headers=raw.get("headers"))
+
+    rows = list(raw["rows"])
+    result = parse_table(rows, headers=raw.get("headers"))
+
+    # Parse once with every row so the detector can inspect the complete
+    # numeric table. If the final row is proven to be a total, reparse without
+    # it. The original raw table remains untouched for stated-total checks.
+    total_evidence = _trailing_total_evidence(result.matrix)
+    if total_evidence is not None and rows:
+        rows = rows[:-1]
+        result = parse_table(rows, headers=raw.get("headers"))
+
+    report = result.report()
+    if total_evidence is not None:
+        report.setdefault("notes", []).append(
+            "final aggregate row excluded from job validation: "
+            f"{total_evidence['matches']} numeric columns equal the sum "
+            "of their predecessors"
+        )
+        report["excluded_rows"] = [total_evidence]
+
     return {
         "matrix": result.matrix,
         "job_labels": result.job_labels,
         "numeric_col_map": result.numeric_col_map,
-        "parse_report": result.report(),
+        "parse_report": report,
     }
 
 
@@ -96,7 +186,6 @@ def serialize_validation(r: ValidationResult) -> dict:
         "reason": r.reason,
         "mapping": {int(k): v for k, v in r.mapping.items()},
         "mapping_named": {int(k): v for k, v in r.mapping_named.items()},
-        "variable_names": dict(VAR_NAMES),
         "estimate_orientation": r.estimate_orientation,
         "virtuals": dict(r.virtuals),
         "row_index": (None if r.row_index is None
