@@ -12,7 +12,7 @@ import numpy as np
 from .parsing import parse_table
 from .state import WippleState
 from .cc_validator import validate_cc
-from .wip_validator import ValidationResult, validate_wip
+from .wip_validator import VAR_NAMES, ValidationResult, validate_wip
 
 # Finding classifications that point at the EXTRACTION as the likely culprit
 # (transcription-shaped errors) vs. the document itself. Drives the
@@ -96,6 +96,7 @@ def serialize_validation(r: ValidationResult) -> dict:
         "reason": r.reason,
         "mapping": {int(k): v for k, v in r.mapping.items()},
         "mapping_named": {int(k): v for k, v in r.mapping_named.items()},
+        "variable_names": dict(VAR_NAMES),
         "estimate_orientation": r.estimate_orientation,
         "virtuals": dict(r.virtuals),
         "row_index": (None if r.row_index is None
