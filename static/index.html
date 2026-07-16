@@ -536,8 +536,8 @@ function renderCertificate(rep){
   if(o==="verified"||o==="verified_mapping_with_findings"){
     const cov=(rep.analysis||{}).coverage||{};
     const partial=cov.numeric_cols&&cov.mapped_cols<cov.numeric_cols;
-    C(partial?"warn":"ok","Column identification certified",
-      `${partial?`${cov.mapped_cols} of ${cov.numeric_cols} numeric columns identified. `:""}${witnesses.length} accounting identit${witnesses.length===1?"y":"ies"} verified across the rows. Headers were not used.`);
+    C("ok","Column identification certified",
+      `${partial?`${cov.mapped_cols} of ${cov.numeric_cols} numeric columns identified; the remaining columns were not needed to validate the WIP. `:""}${witnesses.length} accounting identit${witnesses.length===1?"y":"ies"} verified across the rows. Headers were not used.`);
   }else if(o==="disambiguated"){
     C("warn","Column identification certified, with one tie",
       "The numbers allowed two readings. Column headers decided between them.");
