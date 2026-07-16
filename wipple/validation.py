@@ -25,7 +25,21 @@ OCR_SHAPED = {
     "ocr_character_misread",
     "formatting_only",
 }
-DOCUMENT_SHAPED = {"unexplained_substitution"}
+DOCUMENT_SHAPED = {"unexplained_substitution", "sign_error"}
+
+CLASSIFICATION_LABELS = {
+    "separator_or_magnitude_error": "scale error",
+    "extra_character": "extra digit",
+    "dropped_character": "missing digit",
+    "digit_transposition": "digit swap",
+    "ocr_character_misread": "digit error",
+    "formatting_only": "formatting",
+    "neighbor_transplant": "wrong cell",
+    "unexplained_substitution": "wrong value",
+    "sign_error": "sign error",
+    "ambiguous_multi_cell": "multiple cells",
+    "unresolved": "unresolved",
+}
 
 
 def parse_node(state: WippleState) -> dict:
@@ -121,6 +135,8 @@ def serialize_validation(r: ValidationResult) -> dict:
              "correction_basis": list(g.correction_basis),
              "confidence": g.confidence,
              "classification": g.classification,
+             "classification_label": CLASSIFICATION_LABELS.get(
+                 g.classification, g.classification.replace("_", " ")),
              "classification_detail": g.classification_detail,
              "transplant_sources": [list(t) for t in g.transplant_sources],
              "failing_relations": list(g.failing_relations)}
