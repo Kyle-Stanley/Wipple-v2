@@ -1003,19 +1003,19 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 @page summary{size:letter portrait;margin:.45in}
 @page schedule{size:letter landscape;margin:.3in}
 .summary-page{page:summary}
-.chart-block{page:summary;break-inside:avoid;page-break-inside:avoid;margin-top:18px}
+.chart-block{page:summary;break-inside:avoid;page-break-inside:avoid;margin-top:32px}
 .schedule-page{page:schedule;break-before:page}
 .report-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:14px}
 .report-head h1{font-family:Georgia,serif;font-size:22px;font-weight:500;margin:0}
 .report-head p{font-size:10px;color:var(--muted);margin:3px 0 0}
 .report-meta{text-align:right;font-size:9px;color:var(--muted);line-height:1.5}
-.print-kpis{display:grid;grid-template-columns:repeat(${kpis.length},1fr);gap:7px;margin:0 0 18px}
+.print-kpis{display:grid;grid-template-columns:repeat(${kpis.length},1fr);gap:7px;margin:0 0 26px}
 .print-kpi{border:1px solid var(--line);border-radius:6px;padding:9px 8px;min-width:0}
 .print-kpi .label{font-size:8px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);line-height:1.25;min-height:20px}
 .print-kpi .value{font-size:17px;font-weight:600;margin-top:4px;white-space:nowrap}
-.section-title{font-family:Georgia,serif;font-size:17px;font-weight:500;margin:0 0 3px}
-.section-sub{font-size:10px;color:var(--muted);margin:0 0 9px}
-.print-signal{border-top:1px solid var(--line);padding:10px 0 9px;break-inside:avoid}
+.section-title{font-family:Georgia,serif;font-size:17px;font-weight:500;margin:0 0 5px}
+.section-sub{font-size:10px;color:var(--muted);margin:0 0 14px}
+.print-signal{border-top:1px solid var(--line);padding:14px 0 13px;break-inside:avoid}
 .signal-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
 .signal-head h3{font-size:12px;margin:0;font-weight:600}
 .signal-amount{font-size:11px;font-weight:600;white-space:nowrap}
@@ -1025,6 +1025,7 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 .print-signal li span{color:var(--muted);text-align:right}
 .signal-why{font-size:9px;color:var(--muted);margin:6px 0 0;line-height:1.4}
 .signal-why strong{color:var(--ink);font-weight:600}
+.print-signal + .print-signal{margin-top:4px}
 .chart-block h2,.schedule-page h2{font-family:Georgia,serif;font-size:18px;font-weight:500;margin:0 0 3px}
 .chart-block .sub,.schedule-page .sub{font-size:10px;color:var(--muted);margin:0 0 12px}
 .chart-block .card{border:0;padding:0;margin:0;background:white;break-inside:avoid;page-break-inside:avoid}
