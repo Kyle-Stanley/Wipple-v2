@@ -101,6 +101,13 @@ VAR_NAMES = {
 
 CORE_VARS = ("V", "C", "G", "D", "B")
 
+# U and O are presentation columns: schedules normally display both as
+# non-negative magnitudes even though the equivalent signed net position
+# carries opposite signs. During semantic identification we therefore match
+# their magnitudes, but retain the original signed observations so strict
+# certification can report a parenthesized/negative cell as an error.
+MAGNITUDE_PRESENTATION_VARS = frozenset({"U", "O"})
+
 # Percent display grids considered, COARSEST FIRST (ratio space). Detection
 # must return the coarsest grid the data satisfies (anti-bug 5): [0.5,0.6,0.7]
 # lives on the 0.1 grid even though it also lies on the 0.01 grid, and percent
@@ -146,6 +153,11 @@ class Config:
     pct_grid_mult: float = 1.0   # percent tolerance = grid * mult (covers
     # truncation, whose error is strictly less than one grid step)
     pct_default_tol: float = 5e-7   # percent column with no detectable grid
+
+    # A failed identity may create a finding, but an ordinary replacement
+    # value is suggested only when this many independent algebraic families
+    # agree. Exact U/O sign reversals are the narrow exception.
+    correction_min_families: int = 3
 
     # ----- evidence weights --------------------------------------------------
     # Percent identities are weaker evidence than money identities (anti-bug
@@ -522,7 +534,13 @@ def _match_candidates(pred, ptol, rule, unassigned, cols, cfg, ab,
         informative = int((np.abs(pred) > strict + 1e-9).sum())
         for j in unassigned:
             x = cols[j]
-            resid = np.abs(x - pred)
+            match_x = (np.abs(x)
+                       if rule.out in MAGNITUDE_PRESENTATION_VARS else x)
+            # Identification answers "which business column is this?"
+            # For U/O, sign is presentation validation, not semantic identity.
+            # Keep x itself in VarVal below so certification still sees and
+            # reports every negative presentation value.
+            resid = np.abs(match_x - pred)
             bad = int((resid > loose).sum())
             strict_bad = int((resid > strict).sum())
             if (strict_bad if exact_only else bad) > (0 if exact_only else ab):
@@ -1011,6 +1029,13 @@ def _classify_error(observed: float, proposed: float):
     failure modes. Order matters: scale signatures are checked before
     character edits because a separator slip also has small edit distance
     in digit space."""
+    if proposed != 0 and observed != 0:
+        same_magnitude = abs(abs(observed) - abs(proposed)) <= max(
+            0.51, 1e-9 * abs(proposed))
+        if same_magnitude and np.signbit(observed) != np.signbit(proposed):
+            return ("sign_error",
+                    "magnitude matches the implied value, but the sign is "
+                    "reversed")
     do = re.sub(r"[^0-9]", "", _disp(abs(observed)))
     dp = re.sub(r"[^0-9]", "", _disp(abs(proposed)))
     if proposed != 0 and observed != 0:
@@ -1096,7 +1121,7 @@ def _implied_values(culprit, failing, r, cfg):
     for (e, rule, ins, outv, pred, strict, gset) in failing:
         if culprit == rule.out:
             out.append((float(pred[r]), float(strict[r]), rule.kind,
-                        rule.name))
+                        rule.name, rule.family))
         elif culprit in rule.ins:
             target = float(outv.values[r])
             if rule.clipped and abs(target) <= float(strict[r]):
@@ -1110,7 +1135,8 @@ def _implied_values(culprit, failing, r, cfg):
                                 target + float(strict[r]), vals[i])
             tol = (abs(solp - sol) if solp is not None
                    else float(strict[r]))
-            out.append((sol, max(tol, 1e-9), rule.kind, rule.name))
+            out.append((sol, max(tol, 1e-9), rule.kind, rule.name,
+                        rule.family))
     return out
 
 
@@ -1130,6 +1156,40 @@ def _consistent(vals):
             if abs(vi - vj) > max(2.0, ti, tj):
                 return False
     return True
+
+
+
+def _family_consensus(implied):
+    """Collapse correction implications to one vote per algebraic family."""
+    grouped = {}
+    for value, tol, kind, name, family in implied:
+        grouped.setdefault(family, []).append(
+            (value, tol, kind, name, family))
+
+    representatives = []
+    for family, votes in grouped.items():
+        money = [v for v in votes if v[2] == "money"]
+        used = money if money else votes
+        representatives.append((
+            float(np.median([v[0] for v in used])),
+            max(v[1] for v in used),
+            "money" if money else used[0][2],
+            [v[3] for v in votes],
+            family,
+        ))
+
+    primary = [v for v in representatives if v[2] == "money"]
+    primary = primary if primary else representatives
+    if not primary:
+        return None, [], []
+
+    center = float(np.median([v[0] for v in primary]))
+    agreeing = [
+        v for v in representatives
+        if abs(v[0] - center) <= max(2.0, v[1])
+    ]
+    basis = [v[3][0] for v in agreeing]
+    return center, agreeing, basis
 
 
 def _diagnose(hyp, cols, labels, cfg, failures):
@@ -1187,6 +1247,54 @@ def _diagnose(hyp, cols, labels, cfg, failures):
                 failing.append((e, rule, ins, out, pred, strict, gset))
         if not failing:
             continue
+
+        common = dict(row_index=int(orig_r), row_label=labels[orig_r],
+                      exonerated_variables=sorted(exonerated),
+                      failing_relations=[f[1].name for f in failing])
+
+        # A negative U/O value whose magnitude exactly matches the clipped
+        # prediction is directly attributable to the presentation cell.
+        direct_sign_errors = []
+        for (e, rule, ins, out, pred, strict, gset) in failing:
+            if rule.out not in MAGNITUDE_PRESENTATION_VARS or out.col is None:
+                continue
+            scale = out.interp_scale
+            observed = float(out.values[r] * scale)
+            expected = float(pred[r] * scale)
+            tolerance = float(strict[r] * scale)
+            if (observed < 0.0 and expected >= 0.0
+                    and abs(abs(observed) - expected) <= tolerance):
+                direct_sign_errors.append((rule, out, observed, expected))
+
+        if direct_sign_errors:
+            for rule, out, observed, expected in direct_sign_errors:
+                culprit = rule.out
+                culprits_by_row[int(orig_r)] = culprit
+                proposed = round(expected)
+                findings.append(Finding(
+                    **common,
+                    culprit_column=out.col,
+                    culprit_variable=culprit,
+                    candidate_variables=[culprit],
+                    observed=observed,
+                    proposed_correction=float(proposed),
+                    correction_basis=[
+                        rule.name,
+                        f"{VAR_NAMES[culprit]} is presented as a "
+                        "non-negative magnitude",
+                    ],
+                    confidence="high",
+                    classification="sign_error",
+                    classification_detail=(
+                        "magnitude matches the calculated billing position, "
+                        "but this split under/over-billings column must be "
+                        "presented as a non-negative amount"
+                    ),
+                    transplant_sources=_transplant_sources(
+                        cols, orig_r, out.col, observed),
+                ))
+            continue
+
         cands = set(frozenset.intersection(*[f[-1] for f in failing])) \
             - exonerated
         if len(cands) > 1:
@@ -1194,9 +1302,6 @@ def _diagnose(hyp, cols, labels, cfg, failures):
                         if _consistent(_implied_values(cv, failing, r, cfg))]
             if len(ok_cands) == 1:
                 cands = set(ok_cands)
-        common = dict(row_index=int(orig_r), row_label=labels[orig_r],
-                      exonerated_variables=sorted(exonerated),
-                      failing_relations=[f[1].name for f in failing])
         if len(cands) != 1:
             findings.append(Finding(
                 **common, culprit_column=None, culprit_variable=None,
@@ -1213,46 +1318,57 @@ def _diagnose(hyp, cols, labels, cfg, failures):
         cvv = hyp.known[culprit]
         scale = cvv.interp_scale
         implied = _implied_values(culprit, failing, r, cfg)
-        money = [iv for iv in implied if iv[2] == "money"]
-        primary = money if money else implied
-        proposed = conf = None
-        agreeing = []
-        if primary:
-            med = float(np.median([v for v, _, _, _ in primary]))
-            agreeing = [name for v, t, _, name in implied
-                        if abs(v - med) <= max(2.0, t)]
-            proposed = med
+        candidate, agreeing_families, basis = _family_consensus(implied)
+        proposed = None
+        conf = "low"
+
+        if candidate is not None:
             if culprit not in PCT_VARS:
-                proposed = round(proposed)      # table is dollar-grained
+                candidate = round(candidate)
             elif cvv.grid is not None:
-                proposed = round(proposed / cvv.grid) * cvv.grid
-            conf = "high" if len(agreeing) >= 2 else "medium"
+                candidate = round(candidate / cvv.grid) * cvv.grid
+
+            if len(agreeing_families) >= cfg.correction_min_families:
+                proposed = candidate
+                conf = "high"
+
         observed = (float(cvv.values[r]) * scale
                     if cvv.col is not None else None)
         transplant = (_transplant_sources(cols, orig_r, cvv.col, observed)
                       if cvv.col is not None and observed is not None else [])
-        if proposed is not None and observed is not None:
-            cls, detail = _classify_error(observed, proposed * scale)
+
+        if candidate is not None and observed is not None:
+            cls, detail = _classify_error(observed, candidate * scale)
+            if proposed is None:
+                count = len(agreeing_families)
+                detail += (
+                    f"; {count} independent validation "
+                    f"{'family' if count == 1 else 'families'} agree, but "
+                    f"{cfg.correction_min_families} are required before "
+                    "suggesting a replacement"
+                )
             if transplant and cls in ("unexplained_substitution",
                                       "digit_transposition"):
                 src_s = ", ".join(f"(row {a}, col {b})"
                                   for a, b in transplant)
                 cls = "neighbor_transplant"
                 detail = ("observed value equals neighboring cell(s) "
-                          f"{src_s} -- extractor likely grabbed the "
-                          "wrong cell")
+                          f"{src_s} -- extractor likely grabbed the wrong cell"
+                          + ("" if proposed is not None else
+                             f"; fewer than {cfg.correction_min_families} "
+                             "independent validations support a replacement"))
         else:
             cls, detail = ("unresolved",
                            "culprit identified but no invertible identity "
                            "available to imply its value")
+
         findings.append(Finding(
             **common, culprit_column=cvv.col, culprit_variable=culprit,
             candidate_variables=[culprit], observed=observed,
             proposed_correction=(proposed * scale
                                  if proposed is not None else None),
-            correction_basis=agreeing if agreeing else
-                             [name for _, _, _, name in implied],
-            confidence=conf if conf else "low",
+            correction_basis=basis,
+            confidence=conf,
             classification=cls, classification_detail=detail,
             transplant_sources=transplant))
 
@@ -1267,18 +1383,40 @@ def _diagnose(hyp, cols, labels, cfg, failures):
         expected = (round(f.expected) if f.variable not in PCT_VARS
                     else f.expected)
         cls, detail = _classify_error(f.observed, expected)
+        is_direct_sign = (
+            f.variable in MAGNITUDE_PRESENTATION_VARS
+            and cls == "sign_error"
+        )
+        proposed = float(expected) if is_direct_sign else None
+        basis = [f.relation]
+        confidence = "low"
+        if is_direct_sign:
+            basis.append(
+                f"{VAR_NAMES[f.variable]} is presented as a "
+                "non-negative magnitude")
+            confidence = "high"
+        else:
+            detail += (
+                f"; 1 independent validation family supports this value, "
+                f"but {cfg.correction_min_families} are required before "
+                "suggesting a replacement"
+            )
+
         tr = _transplant_sources(cols, f.row_index, f.column, f.observed)
         if tr and cls in ("unexplained_substitution", "digit_transposition"):
             cls = "neighbor_transplant"
             detail = ("observed value equals neighboring cell(s) "
                       + ", ".join(f"(row {a}, col {b})" for a, b in tr)
-                      + " -- extractor likely grabbed the wrong cell")
+                      + " -- extractor likely grabbed the wrong cell"
+                      + ("" if proposed is not None else
+                         f"; fewer than {cfg.correction_min_families} "
+                         "independent validations support a replacement"))
         findings.append(Finding(
             row_index=f.row_index, row_label=f.row_label,
             culprit_column=f.column, culprit_variable=f.variable,
             candidate_variables=[f.variable], exonerated_variables=[],
-            observed=f.observed, proposed_correction=float(expected),
-            correction_basis=[f.relation], confidence="medium",
+            observed=f.observed, proposed_correction=proposed,
+            correction_basis=basis, confidence=confidence,
             classification=cls, classification_detail=detail,
             transplant_sources=tr,
             failing_relations=[f.relation]))
@@ -1312,14 +1450,26 @@ def _audit_shadowed_virtuals(hyp, cols, labels, cfg):
                 continue
             strict = vv.tol + cfg.money_obs_tol + cfg.cert_slack \
                 + cfg.cert_money_rel * np.abs(vv.values)
-            resid = np.abs(x - vv.values)
-            fit = int((resid <= strict).sum())
-            if need <= fit < m and (best is None or fit > best[0]):
-                best = (fit, var, vv, strict, resid)
+            match_x = (np.abs(x)
+                       if var in MAGNITUDE_PRESENTATION_VARS else x)
+            match_resid = np.abs(match_x - vv.values)
+            signed_resid = np.abs(x - vv.values)
+            fit = int((match_resid <= strict).sum())
+            signed_fit = int((signed_resid <= strict).sum())
+            # For ordinary variables, preserve the original heavy-corruption
+            # rule (majority but not perfect fit). For U/O, a perfect
+            # magnitude fit with imperfect signed fit is exactly the
+            # parenthesized-negative presentation error this audit must catch.
+            qualifies = (need <= fit and
+                         (fit < m or
+                          (var in MAGNITUDE_PRESENTATION_VARS
+                           and signed_fit < m)))
+            if qualifies and (best is None or fit > best[0]):
+                best = (fit, var, vv, strict, signed_resid)
         if best is None:
             continue
-        fit, var, vv, strict, resid = best
-        for r in np.nonzero(resid > strict)[0]:
+        fit, var, vv, strict, signed_resid = best
+        for r in np.nonzero(signed_resid > strict)[0]:
             orig = int(hyp.row_index[r])
             failures.append(RowFailure(
                 relation=f"column {j} realizes {var} "
