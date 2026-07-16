@@ -1001,10 +1001,9 @@ function printSummary(rep){
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-serif}
 @page summary{size:letter portrait;margin:.45in}
-@page chart{size:letter portrait;margin:.45in}
 @page schedule{size:letter landscape;margin:.3in}
 .summary-page{page:summary}
-.chart-page{page:chart;break-before:page}
+.chart-block{page:summary;break-inside:avoid;page-break-inside:avoid;margin-top:18px}
 .schedule-page{page:schedule;break-before:page}
 .report-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:14px}
 .report-head h1{font-family:Georgia,serif;font-size:22px;font-weight:500;margin:0}
@@ -1026,12 +1025,12 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 .print-signal li span{color:var(--muted);text-align:right}
 .signal-why{font-size:9px;color:var(--muted);margin:6px 0 0;line-height:1.4}
 .signal-why strong{color:var(--ink);font-weight:600}
-.chart-page h2,.schedule-page h2{font-family:Georgia,serif;font-size:18px;font-weight:500;margin:0 0 3px}
-.chart-page .sub,.schedule-page .sub{font-size:10px;color:var(--muted);margin:0 0 12px}
-.chart-page .card{border:0;padding:0;margin:0;background:white}
-.chart-page .card h3{display:none}
-.chart-page svg{margin-top:14px!important}
-.chart-page .card p{font-size:10px!important;line-height:1.45;margin-top:12px!important}
+.chart-block h2,.schedule-page h2{font-family:Georgia,serif;font-size:18px;font-weight:500;margin:0 0 3px}
+.chart-block .sub,.schedule-page .sub{font-size:10px;color:var(--muted);margin:0 0 12px}
+.chart-block .card{border:0;padding:0;margin:0;background:white;break-inside:avoid;page-break-inside:avoid}
+.chart-block .card h3{display:none}
+.chart-block svg{margin-top:10px!important;max-height:3.2in}
+.chart-block .card p{font-size:10px!important;line-height:1.45;margin-top:8px!important}
 .empty-print{font-size:10px;color:var(--muted)}
 .print-wip{border-collapse:collapse;width:100%;table-layout:auto;font-size:7px;font-variant-numeric:tabular-nums}
 .print-wip thead{display:table-header-group}
@@ -1043,7 +1042,7 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 .print-wip tfoot td{font-weight:600;border-top:1.5px solid var(--ink)}
 .schedule-note{font-size:8px;color:var(--muted);margin:8px 0 0}
 @media print{
-  .summary-page,.chart-page,.schedule-page{display:block}
+  .summary-page,.chart-block,.schedule-page{display:block}
 }
 </style>
 </head>
@@ -1067,7 +1066,7 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
   ${signalHtml}
 </section>
 
-<section class="chart-page">
+<section class="chart-block">
   <h2>Billing position by completion</h2>
   <p class="sub">Each dot is a job, sized by contract value.</p>
   ${bookShape(rep)}
@@ -1082,16 +1081,41 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 </body>
 </html>`;
 
-  const w=window.open("","_blank");
-  if(!w){
-    alert("The print report was blocked by the browser. Allow pop-ups for this site and try again.");
-    return;
-  }
-  w.document.open();
-  w.document.write(reportHtml);
-  w.document.close();
-  w.focus();
-  setTimeout(()=>w.print(),250);
+  /* Print from an isolated iframe. Using window.open/document.write can
+     replace the current application in browsers that reuse the same tab. */
+  const oldFrame=document.getElementById("wipple-print-frame");
+  if(oldFrame)oldFrame.remove();
+
+  const frame=document.createElement("iframe");
+  frame.id="wipple-print-frame";
+  frame.setAttribute("aria-hidden","true");
+  frame.style.position="fixed";
+  frame.style.right="0";
+  frame.style.bottom="0";
+  frame.style.width="0";
+  frame.style.height="0";
+  frame.style.border="0";
+  frame.style.visibility="hidden";
+  document.body.appendChild(frame);
+
+  const doc=frame.contentDocument||frame.contentWindow.document;
+  doc.open();
+  doc.write(reportHtml);
+  doc.close();
+
+  const printFrame=()=>{
+    try{
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    }finally{
+      /* Keep it alive long enough for browsers that prepare the print
+         preview asynchronously, then clean it up without touching the app. */
+      setTimeout(()=>frame.remove(),30000);
+    }
+  };
+
+  if(doc.readyState==="complete")setTimeout(printFrame,100);
+  else frame.onload=()=>setTimeout(printFrame,100);
 }
 
 function downloadCSV(rep){
