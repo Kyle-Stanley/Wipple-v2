@@ -655,6 +655,8 @@ function renderDash(rep){
     ["Earned revenue",fmtM(k.earned_revenue)],
     ["GP %",k.gp_pct==null?"—":(100*k.gp_pct).toFixed(1)+"%"],
     ["Net over/(under)",fmtM(k.net_billing_position)],
+    ["Largest job",k.largest_job_share==null?"—":(100*k.largest_job_share).toFixed(0)+"%"],
+    ["Top 5 jobs",k.top5_share==null?"—":(100*k.top5_share).toFixed(0)+"%"],
   ];
   const td=totalsDetail(rep);
   const corrs=a.corrections||[];
@@ -753,15 +755,20 @@ function computeKpis(rep){
   const sum=k=>jobs.reduce((s,j)=>s+(j[k]??0),0);
   const tcv=sum("V"),estgp=sum("V")-sum("C");
   const hasE=jobs.every(j=>j.E!=null),hasB=jobs.every(j=>j.B!=null);
+  const vs=jobs.map(j=>j.V??0).sort((a,b)=>b-a);
   return {total_contract_value:tcv,
     uegp:hasE?estgp-(sum("E")-sum("D")):null,
     cost_to_complete:sum("C")-sum("D"),
     earned_revenue:hasE?sum("E"):null,
     gp_pct:tcv?estgp/tcv:null,
-    net_billing_position:hasE&&hasB?sum("B")-sum("E"):null};
+    net_billing_position:hasE&&hasB?sum("B")-sum("E"):null,
+    largest_job_share:tcv?vs[0]/tcv:null,
+    top5_share:tcv?vs.slice(0,5).reduce((a,b)=>a+b,0)/tcv:null};
 }
-/*SIGSTART*/
-const SIG_T={late_stage_p:.55,ub_frac_full:.10,ob_frac_full:.15,loss_margin_full:.05,overrun_full:.10,early_p:.15,early_share_floor:.25,early_share_full:.70,outlier_z_floor:2.0,outlier_z_full:5.0,min_signal_severity:.12};
+/*SIGSTART -- mirror of analysis.py compute_signals; keep in lockstep.
+  Server TUNE (analysis.tuning) overrides these defaults when present, so a
+  constant retuned server-side propagates here without an edit. */
+const SIG_T={ub_ratio_floor:.50,ub_ratio_full:1.00,ob_ratio_floor:.15,ob_ratio_full:.75,min_flag_dollars:10000,loss_margin_full:.05,overrun_full:.10,early_p:.15,early_share_floor:.25,early_share_full:.70,outlier_z_floor:2.0,outlier_z_full:5.0,thin_margin_p:.05,thin_share_floor:.20,thin_share_full:.60,big_job_floor:.20,big_job_full:.50,fade_gap_full:.08,fade_min_p:.35,min_signal_severity:.12};
 const sMoney=x=>"$"+Math.round(x).toLocaleString("en-US");
 const pct0=x=>Math.round(100*x)+"%";
 const pct1=x=>(100*x).toFixed(1)+"%";
@@ -771,7 +778,7 @@ const pctile=(a,q)=>{const b=[...a].sort((x,y)=>x-y),i=(b.length-1)*q,lo=Math.fl
 function computeSignals(rep){
   const jobs=currentJobs(rep);
   if(!jobs.length||!jobs.every(j=>j.C!=null&&j.D!=null&&j.V!=null))return (rep.analysis||{}).signals||[];
-  const T=SIG_T,n=jobs.length;
+  const T={...SIG_T,...((rep.analysis||{}).tuning||{})},n=jobs.length;
   const V=jobs.map(j=>j.V),C=jobs.map(j=>j.C),D=jobs.map(j=>j.D);
   const hasEB=jobs.every(j=>j.E!=null&&j.B!=null);
   const E=hasEB?jobs.map(j=>j.E):null,B=hasEB?jobs.map(j=>j.B):null;
@@ -779,17 +786,17 @@ function computeSignals(rep){
   const U=hasEB?jobs.map((j,i)=>j.U!=null?j.U:Math.max(E[i]-B[i],0)):null;
   const O=hasEB?jobs.map((j,i)=>j.O!=null?j.O:Math.max(B[i]-E[i],0)):null;
   const lab=i=>jobs[i].label,out=[];
-  if(U){const rows=[];for(let i=0;i<n;i++){const w=clamp01((P[i]-T.late_stage_p)/(0.95-T.late_stage_p));const sev=w*clamp01((U[i]/Math.max(V[i],1))/T.ub_frac_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
+  if(U&&E){const rows=[];for(let i=0;i<n;i++){if(U[i]<T.min_flag_dollars)continue;const remRev=Math.max(V[i]-E[i],1);const ratio=U[i]/remRev;const sev=clamp01((ratio-T.ub_ratio_floor)/(T.ub_ratio_full-T.ub_ratio_floor));if(sev>T.min_signal_severity)rows.push([sev,i,ratio]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+U[r[1]],0),k=rows.length;
     out.push({id:"trapped_cash",count:k,severity:rows[0][0],dollars,
-     headline:`${k} late-stage job${k>1?"s":""} carrying ${sMoney(dollars)} in unbilled earned revenue`,
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(U[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled`})),
+     headline:`${k} job${k>1?"s":""} carrying ${sMoney(dollars)} in unbilled earned revenue with little job left to bill it through`,
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(U[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`})),
      why:"Earned revenue the contractor has not billed. On nearly-finished work this usually means unapproved change orders or receivables that may never collect; in a default the surety inherits the gap."});}}
-  if(O){const rows=[];for(let i=0;i<n;i++){const sev=clamp01((O[i]/Math.max(V[i],1))/T.ob_frac_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
+  if(O){const rows=[];for(let i=0;i<n;i++){if(O[i]<T.min_flag_dollars)continue;const ctc=C[i]-D[i];const ratio=ctc>0?O[i]/ctc:Infinity;const sev=clamp01((ratio-T.ob_ratio_floor)/(T.ob_ratio_full-T.ob_ratio_floor));if(sev>T.min_signal_severity)rows.push([sev,i,Math.min(ratio,99)]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+O[r[1]],0);
     out.push({id:"job_borrow",count:rows.length,severity:rows[0][0],dollars,
-     headline:`${sMoney(dollars)} billed ahead of earnings across ${rows.length} job${rows.length>1?"s":""}`,
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(O[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(O[r[1]])} overbilled`})),
+     headline:`${sMoney(dollars)} billed ahead of earnings across ${rows.length} job${rows.length>1?"s":""}, large against the cost left to finish`,
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(O[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(O[r[1]])} overbilled = ${pct0(r[2])} of cost to finish`})),
      why:"Cash collected for work not yet performed is typically already spent on other jobs. The remaining work must be financed from elsewhere, a quiet dependency on everything finishing clean."});}}
   {const rows=[];for(let i=0;i<n;i++)if(m[i]<0){const sev=clamp01(-m[i]/T.loss_margin_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(C[r[1]]-V[r[1]]),0);
@@ -818,6 +825,36 @@ function computeSignals(rep){
      headline:`${rows.length} job${rows.length>1?"s":""} claiming margin far above this contractor's own norm`,
      jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(V[r[1]]-C[r[1]]),detail:`${pct1(m[r[1]])} margin vs book median ${pct1(med)}`})),
      why:"Judged against this contractor's own bidding history on this schedule, not an industry benchmark. An outlier margin at mid-completion is the classic shape of profit fade that has not been recognized yet."});}}
+  {const ctcAll=jobs.map((j,i)=>Math.max(C[i]-D[i],0));const totalCtc=ctcAll.reduce((a,b)=>a+b,0);
+   const thin=[];for(let i=0;i<n;i++)if(m[i]>=0&&m[i]<T.thin_margin_p&&ctcAll[i]>0)thin.push(i);
+   if(totalCtc>0&&thin.length){const thinCtc=thin.reduce((s,i)=>s+ctcAll[i],0),share=thinCtc/totalCtc;
+    const sev=clamp01((share-T.thin_share_floor)/(T.thin_share_full-T.thin_share_floor));
+    if(sev>T.min_signal_severity){thin.sort((a,b)=>ctcAll[b]-ctcAll[a]);
+     out.push({id:"thin_margin_backlog",count:thin.length,severity:sev,dollars:Math.round(thinCtc),
+      headline:`${pct0(share)} of remaining cost sits on jobs with margin under ${pct0(T.thin_margin_p)}`,
+      jobs:thin.slice(0,5).map(i=>({label:lab(i),dollars:Math.round(ctcAll[i]),detail:`${pct1(m[i])} margin, ${sMoney(ctcAll[i])} still to build`})),
+      why:"Thin-margin work has no cushion: a small overrun flips it to a loss. When much of the remaining book is fragile, one bad quarter can erase the schedule's stated profit."});}}}
+  {const tcv=V.reduce((a,b)=>a+b,0);
+   if(tcv>0&&n>=2){let top=0;for(let i=1;i<n;i++)if(V[i]>V[top])top=i;const share=V[top]/tcv;
+    const sev=clamp01((share-T.big_job_floor)/(T.big_job_full-T.big_job_floor));
+    if(sev>T.min_signal_severity)out.push({id:"job_concentration",count:1,severity:sev,dollars:Math.round(V[top]),
+     headline:`Largest job is ${pct0(share)} of the program`,
+     jobs:[{label:lab(top),dollars:Math.round(V[top]),detail:`${pct0(P[top])} complete, ${pct1(m[top])} margin`}],
+     why:"The program's outcome is coupled to one job. Whatever happens on it -- fade, dispute, slow pay -- happens to the contractor."});}}
+  /* fade proxy: only when E carries information beyond V*D/C. The guard is
+     numeric rather than provenance-based on purpose -- it stays correct
+     even after a reviewer edits E through a correction. */
+  if(E){const eDerived=jobs.every((j,i)=>Math.abs(E[i]-(C[i]>0?V[i]*D[i]/C[i]:0))<=Math.max(1,.005*V[i]));
+   if(!eDerived){const rows=[];
+    for(let i=0;i<n;i++){if(P[i]<T.fade_min_p||E[i]<=0)continue;
+     const earnedM=(E[i]-D[i])/E[i],gap=m[i]-earnedM;
+     const sev=clamp01(P[i])*clamp01(gap/T.fade_gap_full);
+     if(sev>T.min_signal_severity&&gap*E[i]>=T.min_flag_dollars)rows.push([sev,i,earnedM,gap]);}
+    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+r[3]*E[r[1]],0);
+     out.push({id:"unrecognized_fade",count:rows.length,severity:rows[0][0],dollars:Math.round(dollars),
+      headline:`${rows.length} job${rows.length>1?"s":""} earning below the stated final margin`,
+      jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(r[3]*E[r[1]]),detail:`${pct0(P[r[1]])} complete, earned ${pct1(r[2])} to date vs ${pct1(m[r[1]])} estimated final`})),
+      why:"For the stated margin to hold, the remaining work must out-earn everything built so far. Margin estimates that survive on the back half of a job are rare; this is where fade hides before it is recognized."});}}}
   out.forEach(x=>x.severity=Math.round(x.severity*1000)/1000);
   out.sort((a,b)=>(b.severity-a.severity)||(b.dollars-a.dollars));
   return out;
@@ -826,24 +863,54 @@ function computeSignals(rep){
 function bookShape(rep){
   const jobs=currentJobs(rep).filter(j=>j.net!=null&&j.V>0);
   if(jobs.length<4)return"";
-  const W=960,H=210,L=46,R=14,T=18,Bm=34;
+  const T={...SIG_T,...((rep.analysis||{}).tuning||{})};
+  const W=960,H=210,L=46,R=14,Tm=18,Bm=34;
   const ymax=Math.min(.28,Math.max(.06,...jobs.map(j=>Math.abs(j.net/j.V))))*1.15;
-  const x=p=>L+(W-L-R)*Math.min(Math.max(p,0),1.02), y=v=>{v=Math.max(-ymax,Math.min(ymax,v));return T+(H-T-Bm)*(1-(v+ymax)/(2*ymax))};
+  const x=p=>L+(W-L-R)*Math.min(Math.max(p,0),1.02), y=v=>{v=Math.max(-ymax,Math.min(ymax,v));return Tm+(H-Tm-Bm)*(1-(v+ymax)/(2*ymax))};
+  /* dot color comes from the SAME severity math as the flag list, so the
+     chart and the signals can never disagree about what is a problem */
+  const sevOf=j=>{
+    const U=Math.max(-(j.net),0),O=Math.max(j.net,0);
+    if(U>=T.min_flag_dollars){
+      const r=U/Math.max(j.V-(j.E??j.V*j.P),1);
+      const s=clamp01((r-T.ub_ratio_floor)/(T.ub_ratio_full-T.ub_ratio_floor));
+      if(s>T.min_signal_severity)return{s,side:"under"};
+    }
+    if(O>=T.min_flag_dollars){
+      const ctc=(j.C??0)-(j.D??0);
+      const r=ctc>0?O/ctc:Infinity;
+      const s=clamp01((r-T.ob_ratio_floor)/(T.ob_ratio_full-T.ob_ratio_floor));
+      if(s>T.min_signal_severity)return{s,side:"over"};
+    }
+    return null;
+  };
   const dots=jobs.map(j=>{
     const f=j.net/j.V, r=4+9*Math.sqrt(j.V/Math.max(...jobs.map(q=>q.V)));
-    const col=f<-.02?"var(--brick)":f>.06?"var(--amber)":"var(--sage)";
-    return `<circle cx="${x(j.P).toFixed(1)}" cy="${y(f).toFixed(1)}" r="${r.toFixed(1)}" fill="${col}" fill-opacity=".55" stroke="${col}"><title>${j.label}: ${(100*j.P).toFixed(0)}% complete, ${j.net<0?"under":"over"}billed $${fmt$(Math.abs(j.net))} (${(100*f).toFixed(1)}% of contract)</title></circle>`;
+    const sev=sevOf(j);
+    const col=sev?(sev.side==="under"?"var(--brick)":"var(--amber)"):"var(--sage)";
+    const op=sev?(.45+.35*sev.s).toFixed(2):".45";
+    return `<circle cx="${x(j.P).toFixed(1)}" cy="${y(f).toFixed(1)}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="${op}" stroke="${col}"><title>${j.label}: ${(100*j.P).toFixed(0)}% complete, ${j.net<0?"under":"over"}billed $${fmt$(Math.abs(j.net))} (${(100*f).toFixed(1)}% of contract)${sev?` — flagged, severity ${(100*sev.s).toFixed(0)}%`:""}</title></circle>`;
   }).join("");
+  /* the underbilling flag boundary U/(V-E)=floor is the straight line
+     net/V = -floor*(1-P) in these axes -- exact when E is cost-to-cost */
+  const cc=jobs.every(j=>j.E==null||Math.abs(j.E-j.V*j.P)<=Math.max(1,.005*j.V));
+  let guide="";
+  if(cc){
+    const r0=T.ub_ratio_floor;
+    const pStart=Math.max(0,1-ymax/r0);
+    guide=`<line x1="${x(pStart).toFixed(1)}" y1="${y(-r0*(1-pStart)).toFixed(1)}" x2="${x(1).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--brick)" stroke-width="1" stroke-dasharray="4 4" opacity=".5"/>
+    <text x="${x(1)-4}" y="${y(-r0*(1-.97))+13}" text-anchor="end" font-size="9" fill="var(--brick)" opacity=".75">underbilling flag boundary</text>`;
+  }
   const ticks=[0,.25,.5,.75,1].map(p=>`<text x="${x(p)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--muted)">${100*p}%</text>`).join("");
   return `<div class="card" id="bookshape" style="margin-bottom:18px">
     <h3>Billing position by completion <small>Each dot is a job, sized by contract value</small></h3>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:8px" role="img" aria-label="Scatter of billing position against completion for each job">
       <line x1="${L}" y1="${y(0)}" x2="${W-R}" y2="${y(0)}" stroke="var(--line)" stroke-width="1"/>
-      <text x="${L}" y="${T+2}" font-size="10" fill="var(--muted)">overbilled</text>
+      <text x="${L}" y="${Tm+2}" font-size="10" fill="var(--muted)">overbilled</text>
       <text x="${L}" y="${H-Bm-4}" font-size="10" fill="var(--muted)">underbilled</text>
-      ${ticks}${dots}
+      ${guide}${ticks}${dots}
     </svg>
-    <p style="font-size:12px;color:var(--muted);margin:6px 0 0">A healthy book sits slightly above the line early and converges to it near completion. Dots far below the line late are earned revenue that hasn't been billed; far above early is billing ahead of the work.</p>
+    <p style="font-size:12px;color:var(--muted);margin:6px 0 0">A healthy book sits slightly above the line early and converges to it near completion. Colored dots are flagged by the same rules as the signals above: red when unbilled earned revenue is large against what's left to bill${cc?" (the dashed boundary)":""}, gold when overbilling is large against the cost left to finish.</p>
   </div>`;
 }
 
@@ -894,7 +961,10 @@ function printSignalTitle(s){
     loss_jobs:`${jobs} losing money`,
     cost_overrun:`${jobs} over estimated cost`,
     early_concentration:"Significant contract value remains in early-stage work",
-    margin_outlier:`${jobs} with unusually high estimated margins`
+    margin_outlier:`${jobs} with unusually high estimated margins`,
+    thin_margin_backlog:"Significant remaining work carries thin margins",
+    job_concentration:"Program value is concentrated in a single job",
+    unrecognized_fade:`${jobs} earning below the stated final margin`
   };
   return titles[s.id]||s.headline;
 }
@@ -906,7 +976,10 @@ function printSignalWhy(s){
     loss_jobs:"Expected job losses reduce the contractor's net worth and should be recognized immediately.",
     cost_overrun:"Costs above the current estimate indicate that the estimate is stale and reported profit may be overstated.",
     early_concentration:"Early-stage margins are less proven and carry greater estimate risk.",
-    margin_outlier:"Margins far above the contractor's own norm may indicate unrecognized profit fade."
+    margin_outlier:"Margins far above the contractor's own norm may indicate unrecognized profit fade.",
+    thin_margin_backlog:"Thin-margin work has no cushion; small overruns flip it to losses.",
+    job_concentration:"The program's outcome is tied to a single job's performance.",
+    unrecognized_fade:"The remaining work must out-earn the work completed so far for the stated margin to hold."
   };
   return why[s.id]||s.why||"";
 }
