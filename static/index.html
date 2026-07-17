@@ -135,13 +135,16 @@ tr.sigrow-brick>td:first-child{background:#F3E7E3}
 tr.sigrow-amber>td:first-child{background:#F2ECDC}
 td.sigcell-brick{color:var(--brick);font-weight:600}
 td.sigcell-amber{color:var(--amber);font-weight:600}
-.rowmark{font-size:8px;margin-left:6px;vertical-align:2px}
-.rowmark.brick{color:var(--brick)}
-.rowmark.amber{color:var(--amber)}
+.sigicons{display:inline-flex;gap:3px;margin-right:8px;vertical-align:-1px}
+.sigicon{font-size:10px;line-height:1;padding:3px 4px;border-radius:5px;cursor:help}
+.sigicon.brick{color:var(--brick);background:#F2DDD6}
+.sigicon.amber{color:var(--amber);background:#F2E7CF}
+tr.selrow>td{box-shadow:inset 3px 0 0 var(--sage-deep)}
+tr.selrow>td:first-child{background:#E4E9E1!important}
 tr.pulse>td{animation:rowpulse 1.4s ease-out 2}
 @keyframes rowpulse{0%{background:rgba(92,113,96,.3)}100%{background:transparent}}
-.tablewrap.bleed{margin-left:calc(50% - min(50vw - 20px,720px));margin-right:calc(50% - min(50vw - 20px,720px))}
-.wipmodal{position:fixed;inset:0;background:rgba(32,37,31,.45);z-index:60;display:flex;padding:2.5vh 2vw}
+.receipt.wide{margin-left:calc(50% - min(50vw - 24px,720px));margin-right:calc(50% - min(50vw - 24px,720px));transition:margin .2s ease}
+.wipmodal{position:fixed;inset:0;background:rgba(32,37,31,.32);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);z-index:60;display:flex;padding:2vh 1.5vw}
 .wm-panel{background:var(--surface);border-radius:14px;flex:1;display:flex;flex-direction:column;min-height:0;box-shadow:0 24px 70px rgba(32,37,31,.35)}
 .wm-head{display:flex;align-items:center;gap:16px;padding:13px 22px;border-bottom:1px solid var(--line-soft)}
 .wm-head h3{font:500 16px Inter;white-space:nowrap}
@@ -742,22 +745,24 @@ function renderDash(rep){
     ${bookShape(rep)}
     <div class="card" style="margin-bottom:14px"><h3>Errors and corrections <small>Record of what was flagged and decided</small></h3>
       ${errBody||`<p class="empty">No errors. Every job satisfies the identities.</p>`}</div>
-    <div class="receipt">
+    <div class="receipt" id="receipt">
       <div class="bar">
         <p>Validated schedule · ${rep.table?.values?.length??0} jobs</p>
         <button class="btn" id="toggleT">Show table</button>
-        <button class="btn" id="fsT">Full screen</button>
+        <button class="btn" id="fsT">Expand</button>
         <button class="btn" id="csv">Download CSV</button>
         <button class="btn" id="prnt">Print summary</button>
       </div>
-      <div class="tablewrap bleed hidden" id="twrap"></div>
+      <div class="tablewrap hidden" id="twrap"></div>
     </div>
     <p class="foot">${footMeta(rep)}wipple does not store documents</p>`;
   $("#toggleT").onclick=()=>{const w=$("#twrap");const on=w.classList.toggle("hidden");
-    $("#toggleT").textContent=on?"Show table":"Hide table";if(!on&&!w.innerHTML)w.innerHTML=tableHTML(rep)};
+    $("#toggleT").textContent=on?"Show table":"Hide table";
+    $("#receipt").classList.toggle("wide",!on);
+    if(!on&&!w.innerHTML)w.innerHTML=tableHTML(rep)};
   $("#fsT").onclick=()=>openWipModal(rep);
   $("#dash").querySelectorAll(".sigtab tbody tr[data-row]").forEach(tr=>{
-    tr.onclick=()=>revealWipRow(rep,+tr.dataset.row)});
+    tr.onclick=()=>openWipModal(rep,+tr.dataset.row)});
   $("#csv").onclick=()=>downloadCSV(rep);
   $("#prnt").onclick=()=>printSummary(rep);
   const ed=$("#editDecisions");
@@ -991,18 +996,10 @@ function signalRowFlags(rep){
   }
   return map;
 }
-function revealWipRow(rep,row){
-  const w=$("#twrap");
-  if(!w.innerHTML)w.innerHTML=tableHTML(rep);
-  w.classList.remove("hidden");$("#toggleT").textContent="Hide table";
-  const el=document.getElementById("wiprow-"+row);
-  if(el){el.scrollIntoView({behavior:"smooth",block:"center"});
-    el.classList.remove("pulse");void el.offsetWidth;el.classList.add("pulse");}
-}
 function openWipModal(rep,focusRow){
   const flags=signalRowFlags(rep);
   const present=[...new Map(Object.values(flags).flat().map(f=>[f.name,f])).values()];
-  const legend=present.length?`<div class="wm-legend">${present.map(p=>`<span class="lg ${p.color}">${p.name}</span>`).join("")}</div>`:"";
+  const legend=present.length?`<div class="wm-legend">${present.map(p=>`<span class="lg ${p.color}">${p.color==="brick"?"\u2691":"\u25B2"} ${p.name}</span>`).join("")}</div>`:"";
   const m=document.createElement("div");m.className="wipmodal";
   m.innerHTML=`<div class="wm-panel">
     <div class="wm-head"><h3>Validated WIP schedule <small>${rep.table?.values?.length??0} jobs · signals marked</small></h3>${legend}<button class="btn" id="wmClose">Close</button></div>
@@ -1014,7 +1011,7 @@ function openWipModal(rep,focusRow){
   m.onclick=e=>{if(e.target===m)close()};
   m.querySelector("#wmClose").onclick=close;
   if(focusRow!=null){const el=m.querySelector("#wmrow-"+focusRow);
-    if(el){el.scrollIntoView({block:"center"});el.classList.add("pulse");}}
+    if(el){el.scrollIntoView({block:"center"});el.classList.add("selrow","pulse");}}
 }
 function tableHTML(rep,idp="wiprow"){
   const t=rep.table;if(!t)return"";
@@ -1027,7 +1024,9 @@ function tableHTML(rep,idp="wiprow"){
     const worst=rf.some(f=>f.color==="brick")?"brick":rf.length?"amber":"";
     const mark={};rf.forEach(f=>f.vars.forEach(v=>{if(mark[v]!=="brick")mark[v]=f.color}));
     const names=rf.map(f=>f.name).join(", ");
-    return `<tr id="${idp}-${i}"${worst?` class="sigrow-${worst}" title="${names}"`:""}><td>${t.job_labels[i]??""}${worst?`<span class="rowmark ${worst}">●</span>`:""}</td>${row.map((x,j)=>{
+    const icons=[...new Map(rf.map(f=>[f.name,f])).values()]
+      .map(f=>`<span class="sigicon ${f.color}" title="${f.name}">${f.color==="brick"?"\u2691":"\u25B2"}</span>`).join("");
+    return `<tr id="${idp}-${i}"${worst?` class="sigrow-${worst}" title="${names}"`:""}><td>${icons?`<span class="sigicons">${icons}</span>`:""}${t.job_labels[i]??""}</td>${row.map((x,j)=>{
     const c=corr[i+"_"+j];
     const v=t.columns[j]&&t.columns[j].variable;
     const mk=v&&mark[v]?` sigcell-${mark[v]}`:"";
