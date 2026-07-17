@@ -121,6 +121,39 @@ details.more li{margin:3px 0}
 .item .sub2{font-size:13px;color:var(--muted);margin-top:4px}
 .item .jobs{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
 .chip{font-size:12px;border:1px solid var(--line);border-radius:7px;padding:3px 9px;color:var(--muted)}
+.sigtab{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:9px}
+.sigtab th{font-weight:500;font-size:11px;color:var(--muted);text-align:right;padding:2px 0 5px 16px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+.sigtab th:first-child{text-align:left;padding-left:0}
+.sigtab td{padding:5px 0 5px 16px;border-bottom:1px solid var(--line-soft);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sigtab td:first-child{text-align:left;padding-left:0;white-space:normal}
+.sigtab tbody tr:last-child td{border-bottom:0}
+.sigtab tbody tr[data-row]{cursor:pointer}
+.sigtab tbody tr[data-row]:hover td{background:var(--paper)}
+tr.sigrow-brick>td{background:rgba(163,64,47,.055)}
+tr.sigrow-amber>td{background:rgba(146,103,30,.055)}
+tr.sigrow-brick>td:first-child{background:#F3E7E3}
+tr.sigrow-amber>td:first-child{background:#F2ECDC}
+td.sigcell-brick{color:var(--brick);font-weight:600}
+td.sigcell-amber{color:var(--amber);font-weight:600}
+.rowmark{font-size:8px;margin-left:6px;vertical-align:2px}
+.rowmark.brick{color:var(--brick)}
+.rowmark.amber{color:var(--amber)}
+tr.pulse>td{animation:rowpulse 1.4s ease-out 2}
+@keyframes rowpulse{0%{background:rgba(92,113,96,.3)}100%{background:transparent}}
+.tablewrap.bleed{margin-left:calc(50% - min(50vw - 20px,720px));margin-right:calc(50% - min(50vw - 20px,720px))}
+.wipmodal{position:fixed;inset:0;background:rgba(32,37,31,.45);z-index:60;display:flex;padding:2.5vh 2vw}
+.wm-panel{background:var(--surface);border-radius:14px;flex:1;display:flex;flex-direction:column;min-height:0;box-shadow:0 24px 70px rgba(32,37,31,.35)}
+.wm-head{display:flex;align-items:center;gap:16px;padding:13px 22px;border-bottom:1px solid var(--line-soft)}
+.wm-head h3{font:500 16px Inter;white-space:nowrap}
+.wm-head h3 small{font-weight:400;font-size:12.5px;color:var(--muted);margin-left:8px}
+.wm-legend{display:flex;gap:8px;flex-wrap:wrap;flex:1;justify-content:flex-end}
+.lg{font-size:11px;border-radius:6px;padding:2px 9px;font-weight:600;white-space:nowrap}
+.lg.brick{background:#F2DDD6;color:var(--brick)}
+.lg.amber{background:#F2E7CF;color:var(--amber)}
+.wm-body{overflow:auto;padding:6px 22px 18px;min-height:0}
+.wm-body table{border-collapse:collapse;font-size:12.5px;min-width:100%}
+.wm-body th:first-child,.wm-body td:first-child{position:sticky;left:0;background:var(--surface)}
+@media print{.wipmodal{display:none}}
 .why{font-size:12.5px;margin-top:8px}
 .why summary{cursor:pointer;color:var(--sage-deep);list-style:none;display:inline-block;border-bottom:1px dotted var(--sage)}
 .why summary::before{content:"\25B8  ";font-size:10px}
@@ -655,8 +688,6 @@ function renderDash(rep){
     ["Earned revenue",fmtM(k.earned_revenue)],
     ["GP %",k.gp_pct==null?"—":(100*k.gp_pct).toFixed(1)+"%"],
     ["Net over/(under)",fmtM(k.net_billing_position)],
-    ["Largest job",k.largest_job_share==null?"—":(100*k.largest_job_share).toFixed(0)+"%"],
-    ["Top 5 jobs",k.top5_share==null?"—":(100*k.top5_share).toFixed(0)+"%"],
   ];
   const td=totalsDetail(rep);
   const corrs=a.corrections||[];
@@ -693,9 +724,12 @@ function renderDash(rep){
   const errBody=ledger+tcRow;
   const sigs=computeSignals(rep).map(s=>{
     const tier=s.severity>=.66?"high":s.severity>=.33?"med":"low";
+    const body=s.cols?`<table class="sigtab"><thead><tr><th>Job</th>${s.cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead><tbody>${
+      (s.jobs||[]).map(j=>`<tr${j.row!=null?` data-row="${j.row}" title="View in schedule"`:""}><td>${j.label}</td>${(j.cells||[j.detail]).map(c=>`<td class="num">${c}</td>`).join("")}</tr>`).join("")
+    }</tbody></table>`:`<div class="jobs">${(s.jobs||[]).map(j=>`<span class="chip">${j.label} · ${j.detail}</span>`).join("")}</div>`;
     return `<div class="item">
       <div class="head"><span class="sevr ${tier}">${tier}</span><p class="hl">${s.headline}</p></div>
-      <div class="jobs">${(s.jobs||[]).map(j=>`<span class="chip">${j.label} · ${j.detail}</span>`).join("")}</div>
+      ${body}
       <details class="why"><summary>Why this matters</summary><p>${s.why}</p></details>
     </div>`}).join("");
   $("#dash").innerHTML=`
@@ -712,14 +746,18 @@ function renderDash(rep){
       <div class="bar">
         <p>Validated schedule · ${rep.table?.values?.length??0} jobs</p>
         <button class="btn" id="toggleT">Show table</button>
+        <button class="btn" id="fsT">Full screen</button>
         <button class="btn" id="csv">Download CSV</button>
         <button class="btn" id="prnt">Print summary</button>
       </div>
-      <div class="tablewrap hidden" id="twrap"></div>
+      <div class="tablewrap bleed hidden" id="twrap"></div>
     </div>
     <p class="foot">${footMeta(rep)}wipple does not store documents</p>`;
   $("#toggleT").onclick=()=>{const w=$("#twrap");const on=w.classList.toggle("hidden");
     $("#toggleT").textContent=on?"Show table":"Hide table";if(!on&&!w.innerHTML)w.innerHTML=tableHTML(rep)};
+  $("#fsT").onclick=()=>openWipModal(rep);
+  $("#dash").querySelectorAll(".sigtab tbody tr[data-row]").forEach(tr=>{
+    tr.onclick=()=>revealWipRow(rep,+tr.dataset.row)});
   $("#csv").onclick=()=>downloadCSV(rep);
   $("#prnt").onclick=()=>printSummary(rep);
   const ed=$("#editDecisions");
@@ -755,15 +793,12 @@ function computeKpis(rep){
   const sum=k=>jobs.reduce((s,j)=>s+(j[k]??0),0);
   const tcv=sum("V"),estgp=sum("V")-sum("C");
   const hasE=jobs.every(j=>j.E!=null),hasB=jobs.every(j=>j.B!=null);
-  const vs=jobs.map(j=>j.V??0).sort((a,b)=>b-a);
   return {total_contract_value:tcv,
     uegp:hasE?estgp-(sum("E")-sum("D")):null,
     cost_to_complete:sum("C")-sum("D"),
     earned_revenue:hasE?sum("E"):null,
     gp_pct:tcv?estgp/tcv:null,
-    net_billing_position:hasE&&hasB?sum("B")-sum("E"):null,
-    largest_job_share:tcv?vs[0]/tcv:null,
-    top5_share:tcv?vs.slice(0,5).reduce((a,b)=>a+b,0)/tcv:null};
+    net_billing_position:hasE&&hasB?sum("B")-sum("E"):null};
 }
 /*SIGSTART -- mirror of analysis.py compute_signals; keep in lockstep.
   Server TUNE (analysis.tuning) overrides these defaults when present, so a
@@ -790,32 +825,37 @@ function computeSignals(rep){
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+U[r[1]],0),k=rows.length;
     out.push({id:"trapped_cash",count:k,severity:rows[0][0],dollars,
      headline:`${k} job${k>1?"s":""} carrying ${sMoney(dollars)} in unbilled earned revenue with little job left to bill it through`,
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(U[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`})),
+     cols:["Complete","Underbilled","Of remaining revenue"],
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(U[r[1]]),cells:[pct0(P[r[1]]),sMoney(U[r[1]]),pct0(r[2])],detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`})),
      why:"Earned revenue the contractor has not billed. On nearly-finished work this usually means unapproved change orders or receivables that may never collect; in a default the surety inherits the gap."});}}
   if(O){const rows=[];for(let i=0;i<n;i++){if(O[i]<T.min_flag_dollars)continue;const ctc=C[i]-D[i];const ratio=ctc>0?O[i]/ctc:Infinity;const sev=clamp01((ratio-T.ob_ratio_floor)/(T.ob_ratio_full-T.ob_ratio_floor));if(sev>T.min_signal_severity)rows.push([sev,i,Math.min(ratio,99)]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+O[r[1]],0);
     out.push({id:"job_borrow",count:rows.length,severity:rows[0][0],dollars,
      headline:`${sMoney(dollars)} billed ahead of earnings across ${rows.length} job${rows.length>1?"s":""}, large against the cost left to finish`,
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(O[r[1]]),detail:`${pct0(P[r[1]])} complete, ${sMoney(O[r[1]])} overbilled = ${pct0(r[2])} of cost to finish`})),
+     cols:["Complete","Overbilled","Of cost to finish"],
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(O[r[1]]),cells:[pct0(P[r[1]]),sMoney(O[r[1]]),pct0(r[2])],detail:`${pct0(P[r[1]])} complete, ${sMoney(O[r[1]])} overbilled = ${pct0(r[2])} of cost to finish`})),
      why:"Cash collected for work not yet performed is typically already spent on other jobs. The remaining work must be financed from elsewhere, a quiet dependency on everything finishing clean."});}}
   {const rows=[];for(let i=0;i<n;i++)if(m[i]<0){const sev=clamp01(-m[i]/T.loss_margin_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(C[r[1]]-V[r[1]]),0);
     out.push({id:"loss_jobs",count:rows.length,severity:rows[0][0],dollars,
      headline:`${rows.length} job${rows.length>1?"s":""} estimated to lose ${sMoney(dollars)}`,
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(C[r[1]]-V[r[1]]),detail:`estimated margin ${pct1(m[r[1]])}`})),
+     cols:["Est. margin","Expected loss"],
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(C[r[1]]-V[r[1]]),cells:[pct1(m[r[1]]),sMoney(C[r[1]]-V[r[1]])],detail:`estimated margin ${pct1(m[r[1]])}`})),
      why:"GAAP requires the full expected loss to be recognized immediately, not as the work progresses. A loss job on the schedule is a direct hit to the indemnitor's net worth."});}}
   {const rows=[];for(let i=0;i<n;i++)if(D[i]>C[i]){const sev=clamp01(((D[i]-C[i])/Math.max(C[i],1))/T.overrun_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(D[r[1]]-C[r[1]]),0);
     out.push({id:"cost_overrun",count:rows.length,severity:rows[0][0],dollars,
      headline:`${rows.length} job${rows.length>1?"s":""} already ${sMoney(dollars)} past estimated cost`,
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(D[r[1]]-C[r[1]]),detail:`costs at ${pct0(D[r[1]]/Math.max(C[r[1]],1))} of estimate`})),
+     cols:["Costs vs estimate","Over by"],
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(D[r[1]]-C[r[1]]),cells:[pct0(D[r[1]]/Math.max(C[r[1]],1)),sMoney(D[r[1]]-C[r[1]])],detail:`costs at ${pct0(D[r[1]]/Math.max(C[r[1]],1))} of estimate`})),
      why:"Cost to date exceeding the total estimate means the estimate is stale and the stated gross profit is fiction until re-estimated."});}}
   {const tcv=V.reduce((a,b)=>a+b,0),eIdx=[];for(let i=0;i<n;i++)if(P[i]<T.early_p)eIdx.push(i);
    if(tcv>0&&eIdx.length){const eV=eIdx.reduce((s,i)=>s+V[i],0),share=eV/tcv;
     const sev=clamp01((share-T.early_share_floor)/(T.early_share_full-T.early_share_floor));
     if(sev>T.min_signal_severity)out.push({id:"early_concentration",count:eIdx.length,severity:sev,dollars:Math.round(eV),
      headline:`${pct0(share)} of contract value is on jobs under ${pct0(T.early_p)} complete`,
-     jobs:eIdx.slice(0,5).map(i=>({label:lab(i),dollars:Math.round(V[i]),detail:`${pct0(P[i])} complete`})),
+     cols:["Complete","Contract value"],
+     jobs:eIdx.slice(0,5).map(i=>({label:lab(i),row:i,dollars:Math.round(V[i]),cells:[pct0(P[i]),sMoney(V[i])],detail:`${pct0(P[i])} complete`})),
      why:"Early-stage estimates are unproven. A book concentrated at the front of the lifecycle has margins that exist mostly on paper."});}}
   if(n>=6){const med=median(m),iqr=(pctile(m,.75)-pctile(m,.25))||0.01,rows=[];
    for(let i=0;i<n;i++){const z=Math.abs(m[i]-med)/iqr;const sev=clamp01((z-T.outlier_z_floor)/(T.outlier_z_full-T.outlier_z_floor));
@@ -823,7 +863,8 @@ function computeSignals(rep){
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);
     out.push({id:"margin_outlier",count:rows.length,severity:rows[0][0],dollars:Math.round(rows.reduce((s,r)=>s+(V[r[1]]-C[r[1]]),0)),
      headline:`${rows.length} job${rows.length>1?"s":""} claiming margin far above this contractor's own norm`,
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(V[r[1]]-C[r[1]]),detail:`${pct1(m[r[1]])} margin vs book median ${pct1(med)}`})),
+     cols:["Margin","Book median","Est. GP"],
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(V[r[1]]-C[r[1]]),cells:[pct1(m[r[1]]),pct1(med),sMoney(V[r[1]]-C[r[1]])],detail:`${pct1(m[r[1]])} margin vs book median ${pct1(med)}`})),
      why:"Judged against this contractor's own bidding history on this schedule, not an industry benchmark. An outlier margin at mid-completion is the classic shape of profit fade that has not been recognized yet."});}}
   {const ctcAll=jobs.map((j,i)=>Math.max(C[i]-D[i],0));const totalCtc=ctcAll.reduce((a,b)=>a+b,0);
    const thin=[];for(let i=0;i<n;i++)if(m[i]>=0&&m[i]<T.thin_margin_p&&ctcAll[i]>0)thin.push(i);
@@ -832,14 +873,16 @@ function computeSignals(rep){
     if(sev>T.min_signal_severity){thin.sort((a,b)=>ctcAll[b]-ctcAll[a]);
      out.push({id:"thin_margin_backlog",count:thin.length,severity:sev,dollars:Math.round(thinCtc),
       headline:`${pct0(share)} of remaining cost sits on jobs with margin under ${pct0(T.thin_margin_p)}`,
-      jobs:thin.slice(0,5).map(i=>({label:lab(i),dollars:Math.round(ctcAll[i]),detail:`${pct1(m[i])} margin, ${sMoney(ctcAll[i])} still to build`})),
+      cols:["Margin","Still to build"],
+      jobs:thin.slice(0,5).map(i=>({label:lab(i),row:i,dollars:Math.round(ctcAll[i]),cells:[pct1(m[i]),sMoney(ctcAll[i])],detail:`${pct1(m[i])} margin, ${sMoney(ctcAll[i])} still to build`})),
       why:"Thin-margin work has no cushion: a small overrun flips it to a loss. When much of the remaining book is fragile, one bad quarter can erase the schedule's stated profit."});}}}
   {const tcv=V.reduce((a,b)=>a+b,0);
    if(tcv>0&&n>=2){let top=0;for(let i=1;i<n;i++)if(V[i]>V[top])top=i;const share=V[top]/tcv;
     const sev=clamp01((share-T.big_job_floor)/(T.big_job_full-T.big_job_floor));
     if(sev>T.min_signal_severity)out.push({id:"job_concentration",count:1,severity:sev,dollars:Math.round(V[top]),
      headline:`Largest job is ${pct0(share)} of the program`,
-     jobs:[{label:lab(top),dollars:Math.round(V[top]),detail:`${pct0(P[top])} complete, ${pct1(m[top])} margin`}],
+     cols:["Share","Complete","Margin"],
+     jobs:[{label:lab(top),row:top,dollars:Math.round(V[top]),cells:[pct0(share),pct0(P[top]),pct1(m[top])],detail:`${pct0(P[top])} complete, ${pct1(m[top])} margin`}],
      why:"The program's outcome is coupled to one job. Whatever happens on it -- fade, dispute, slow pay -- happens to the contractor."});}}
   /* fade proxy: only when E carries information beyond V*D/C. The guard is
      numeric rather than provenance-based on purpose -- it stays correct
@@ -853,7 +896,8 @@ function computeSignals(rep){
     if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+r[3]*E[r[1]],0);
      out.push({id:"unrecognized_fade",count:rows.length,severity:rows[0][0],dollars:Math.round(dollars),
       headline:`${rows.length} job${rows.length>1?"s":""} earning below the stated final margin`,
-      jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),dollars:Math.round(r[3]*E[r[1]]),detail:`${pct0(P[r[1]])} complete, earned ${pct1(r[2])} to date vs ${pct1(m[r[1]])} estimated final`})),
+      cols:["Complete","Earned to date","Est. final"],
+      jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(r[3]*E[r[1]]),cells:[pct0(P[r[1]]),pct1(r[2]),pct1(m[r[1]])],detail:`${pct0(P[r[1]])} complete, earned ${pct1(r[2])} to date vs ${pct1(m[r[1]])} estimated final`})),
       why:"For the stated margin to hold, the remaining work must out-earn everything built so far. Margin estimates that survive on the back half of a job are rare; this is where fade hides before it is recognized."});}}}
   out.forEach(x=>x.severity=Math.round(x.severity*1000)/1000);
   out.sort((a,b)=>(b.severity-a.severity)||(b.dollars-a.dollars));
@@ -924,16 +968,72 @@ function footMeta(rep){
   }
   return bits.length?bits.join(" · ")+" · ":"";
 }
-function tableHTML(rep){
+/* which schedule columns each signal points at, and its ink color.
+   brick = money at risk, amber = leverage / estimate quality */
+const SIG_MARK={
+  trapped_cash:{color:"brick",vars:["U"],name:"Trapped cash"},
+  job_borrow:{color:"amber",vars:["O"],name:"Job borrow"},
+  loss_jobs:{color:"brick",vars:["G","M"],name:"Loss job"},
+  cost_overrun:{color:"amber",vars:["D"],name:"Cost overrun"},
+  early_concentration:{color:"amber",vars:["P"],name:"Early stage"},
+  margin_outlier:{color:"amber",vars:["M","G"],name:"Margin outlier"},
+  thin_margin_backlog:{color:"amber",vars:["M","G"],name:"Thin margin"},
+  job_concentration:{color:"amber",vars:["V"],name:"Concentration"},
+  unrecognized_fade:{color:"brick",vars:["E"],name:"Earning below estimate"}};
+function signalRowFlags(rep){
+  const map={};
+  for(const s of computeSignals(rep)){
+    const mk=SIG_MARK[s.id];if(!mk)continue;
+    for(const j of (s.jobs||[])){
+      if(j.row==null)continue;
+      (map[j.row]=map[j.row]||[]).push({id:s.id,...mk});
+    }
+  }
+  return map;
+}
+function revealWipRow(rep,row){
+  const w=$("#twrap");
+  if(!w.innerHTML)w.innerHTML=tableHTML(rep);
+  w.classList.remove("hidden");$("#toggleT").textContent="Hide table";
+  const el=document.getElementById("wiprow-"+row);
+  if(el){el.scrollIntoView({behavior:"smooth",block:"center"});
+    el.classList.remove("pulse");void el.offsetWidth;el.classList.add("pulse");}
+}
+function openWipModal(rep,focusRow){
+  const flags=signalRowFlags(rep);
+  const present=[...new Map(Object.values(flags).flat().map(f=>[f.name,f])).values()];
+  const legend=present.length?`<div class="wm-legend">${present.map(p=>`<span class="lg ${p.color}">${p.name}</span>`).join("")}</div>`:"";
+  const m=document.createElement("div");m.className="wipmodal";
+  m.innerHTML=`<div class="wm-panel">
+    <div class="wm-head"><h3>Validated WIP schedule <small>${rep.table?.values?.length??0} jobs · signals marked</small></h3>${legend}<button class="btn" id="wmClose">Close</button></div>
+    <div class="wm-body">${tableHTML(rep,"wmrow")}</div></div>`;
+  document.body.appendChild(m);document.body.style.overflow="hidden";
+  const close=()=>{m.remove();document.body.style.overflow="";document.removeEventListener("keydown",esc)};
+  const esc=e=>{if(e.key==="Escape")close()};
+  document.addEventListener("keydown",esc);
+  m.onclick=e=>{if(e.target===m)close()};
+  m.querySelector("#wmClose").onclick=close;
+  if(focusRow!=null){const el=m.querySelector("#wmrow-"+focusRow);
+    if(el){el.scrollIntoView({block:"center"});el.classList.add("pulse");}}
+}
+function tableHTML(rep,idp="wiprow"){
   const t=rep.table;if(!t)return"";
   const corr={};(rep.analysis?.corrections_applied||[]).forEach(c=>corr[c.row+"_"+c.col]=c);
+  const flags=signalRowFlags(rep);
   const pct=t.columns.map(c=>["P","PB","M"].includes(c.variable));
   const head=`<tr><th>Job</th>${t.columns.map(c=>`<th>${c.header}${c.variable_name?`<span class="vn">${c.variable_name}</span>`:""}</th>`).join("")}</tr>`;
-  const body=t.values.map((row,i)=>`<tr><td>${t.job_labels[i]??""}</td>${row.map((x,j)=>{
+  const body=t.values.map((row,i)=>{
+    const rf=flags[i]||[];
+    const worst=rf.some(f=>f.color==="brick")?"brick":rf.length?"amber":"";
+    const mark={};rf.forEach(f=>f.vars.forEach(v=>{if(mark[v]!=="brick")mark[v]=f.color}));
+    const names=rf.map(f=>f.name).join(", ");
+    return `<tr id="${idp}-${i}"${worst?` class="sigrow-${worst}" title="${names}"`:""}><td>${t.job_labels[i]??""}${worst?`<span class="rowmark ${worst}">●</span>`:""}</td>${row.map((x,j)=>{
     const c=corr[i+"_"+j];
+    const v=t.columns[j]&&t.columns[j].variable;
+    const mk=v&&mark[v]?` sigcell-${mark[v]}`:"";
     const txt=x==null?"—":pct[j]?(100*x).toFixed(1)+"%":fmt$(x);
-    return c?`<td class="flag num" title="document shows ${fmt$(c.observed)}; identities imply ${fmt$(c.used)}">${fmt$(c.observed)}</td>`
-            :`<td class="num">${txt}</td>`}).join("")}</tr>`).join("");
+    return c?`<td class="flag num${mk}" title="document shows ${fmt$(c.observed)}; identities imply ${fmt$(c.used)}">${fmt$(c.observed)}</td>`
+            :`<td class="num${mk}">${txt}</td>`}).join("")}</tr>`}).join("");
   const sums=t.columns.map((c,j)=>pct[j]?"":fmt$(t.values.reduce((s,r)=>s+(r[j]??0),0)));
   const foot=`<tr><td>Total</td>${sums.map(s=>`<td class="num">${s}</td>`).join("")}</tr>`;
   return `<table><thead>${head}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>`;
