@@ -19,9 +19,15 @@ from .state import WippleState
 from .wip_validator import VAR_NAMES
 
 TUNE = {
-    "late_stage_p": 0.55,      # completion where underbilling starts to bite
-    "ub_frac_full": 0.10,      # U/V that saturates severity at late stage
-    "ob_frac_full": 0.15,      # O/V that saturates job-borrow severity
+    # Billing-position signals are ratios against what is LEFT of the job:
+    # underbilling vs revenue left to earn, overbilling vs cost left to
+    # spend. Ratio 1.0 means the imbalance fully consumes the remainder --
+    # "underbilling% + completion% > 1" falls out as the ub ratio crossing 1.
+    "ub_ratio_floor": 0.50,    # U/(V-E) where trapped-cash severity starts
+    "ub_ratio_full": 1.00,     # ...and saturates (no room left to bill it)
+    "ob_ratio_floor": 0.15,    # O/(C-D) where job-borrow severity starts
+    "ob_ratio_full": 0.75,     # ...and saturates
+    "min_flag_dollars": 10_000,  # imbalances below this never flag
     "loss_margin_full": 0.05,  # negative margin that saturates loss severity
     "overrun_full": 0.10,      # (D-C)/C that saturates overrun severity
     "early_p": 0.15,           # "early stage" completion cutoff
@@ -29,6 +35,13 @@ TUNE = {
     "early_share_full": 0.70,  # ...and where it saturates
     "outlier_z_floor": 2.0,    # robust z where margin outlier starts
     "outlier_z_full": 5.0,
+    "thin_margin_p": 0.05,     # margin under which backlog counts as fragile
+    "thin_share_floor": 0.20,  # share of CTC in thin jobs where sev starts
+    "thin_share_full": 0.60,
+    "big_job_floor": 0.20,     # largest-job share of TCV where sev starts
+    "big_job_full": 0.50,
+    "fade_gap_full": 0.08,     # (est final margin - earned margin) saturation
+    "fade_min_p": 0.35,        # completion below which the fade proxy is noise
     "min_signal_severity": 0.12,
 }
 # NOTE: failing-row density no longer suppresses anything; with no
@@ -117,17 +130,20 @@ def compute_kpis(core):
         "overbillings_total": (float(np.nansum(core["O"]))
                                if "O" in core else None),
         "job_count": int(V.shape[0]),
+        # concentration: the two shares every underwriter asks for anyway
+        "largest_job_share": (float(np.nanmax(V)) / tcv if tcv else None),
+        "top5_share": (float(np.nansum(np.sort(np.nan_to_num(V))[-5:])) / tcv
+                       if tcv else None),
     }
     return out
 
 
-def compute_signals(core, labels):
+def compute_signals(core, labels, derived=frozenset()):
     V, C, D = core["V"], core["C"], core["D"]
     with np.errstate(divide="ignore", invalid="ignore"):
         P = np.where(C > 0, D / C, 0.0)
         m = np.where(V > 0, (V - C) / V, 0.0)
     E = core.get("E")
-    B = core.get("B")
     U = core.get("U")
     O = core.get("O")
     n = len(labels)
@@ -138,54 +154,78 @@ def compute_signals(core, labels):
         return {"label": labels[i], "dollars": round(float(dollars)),
                 "detail": detail}
 
-    # -- trapped cash: underbilling on late-stage work -----------------------
-    if U is not None:
+    # -- trapped cash: underbilling vs the revenue left to earn ---------------
+    # Severity is U / (V - E): the fraction of the job's remaining revenue
+    # that the catch-up billing would consume. At ratio 1 there is literally
+    # not enough job left to bill it through -- equivalently, the shorthand
+    # "underbilling% + completion% > 1". Completion needs no separate weight;
+    # a shrinking denominator IS the late-stage escalation, and it cannot
+    # promote pocket change (dollar floor) or early-stage timing noise.
+    if U is not None and E is not None:
         rows = []
         for i in range(n):
-            w = _clamp((P[i] - T["late_stage_p"]) / (0.95 - T["late_stage_p"]))
-            sev = w * _clamp((U[i] / max(V[i], 1)) / T["ub_frac_full"])
+            if U[i] < T["min_flag_dollars"]:
+                continue
+            rem_rev = max(float(V[i] - E[i]), 1.0)
+            ratio = float(U[i]) / rem_rev
+            sev = _clamp((ratio - T["ub_ratio_floor"])
+                         / (T["ub_ratio_full"] - T["ub_ratio_floor"]))
             if sev > T["min_signal_severity"]:
-                rows.append((sev, i))
+                rows.append((sev, i, ratio))
         if rows:
             rows.sort(reverse=True)
-            dollars = sum(U[i] for _, i in rows)
+            dollars = sum(U[i] for _, i, _ in rows)
             k = len(rows)
             signals.append({
                 "id": "trapped_cash",
-                "severity": round(max(s for s, _ in rows), 3),
-                "headline": (f"{k} late-stage job{'s' if k > 1 else ''} "
-                             f"carrying {_money(dollars)} in unbilled "
-                             "earned revenue"),
+                "severity": round(max(s for s, _, _ in rows), 3),
+                "headline": (f"{k} job{'s' if k > 1 else ''} carrying "
+                             f"{_money(dollars)} in unbilled earned revenue "
+                             "with little job left to bill it through"),
                 "dollars": round(float(dollars)),
                 "jobs": [job(i, U[i],
-                             f"{P[i]:.0%} complete, {_money(U[i])} underbilled")
-                         for _, i in rows[:5]],
+                             f"{P[i]:.0%} complete, {_money(U[i])} underbilled "
+                             f"= {ratio:.0%} of remaining revenue")
+                         for _, i, ratio in rows[:5]],
                 "why": ("Earned revenue the contractor has not billed. On "
                         "nearly-finished work this usually means unapproved "
                         "change orders or receivables that may never "
                         "collect; in a default the surety inherits the gap."),
             })
 
-    # -- job borrow: overbilling funding other work ---------------------------
+    # -- job borrow: overbilling vs the cost left to finish -------------------
+    # Severity is O / (C - D): what fraction of the remaining work is being
+    # funded by cash already collected (and typically already spent). Early
+    # front-loading -- large O against a huge CTC -- correctly scores near
+    # zero; it is normal and usually GOOD for the surety. A job that is
+    # overbilled AND already past its cost estimate has no denominator left
+    # and saturates outright.
     if O is not None:
         rows = []
         for i in range(n):
-            sev = _clamp((O[i] / max(V[i], 1)) / T["ob_frac_full"])
+            if O[i] < T["min_flag_dollars"]:
+                continue
+            ctc = float(C[i] - D[i])
+            ratio = float(O[i]) / ctc if ctc > 0 else float("inf")
+            sev = _clamp((ratio - T["ob_ratio_floor"])
+                         / (T["ob_ratio_full"] - T["ob_ratio_floor"]))
             if sev > T["min_signal_severity"]:
-                rows.append((sev, i))
+                rows.append((sev, i, min(ratio, 99.0)))
         if rows:
             rows.sort(reverse=True)
-            dollars = sum(O[i] for _, i in rows)
+            dollars = sum(O[i] for _, i, _ in rows)
             signals.append({
                 "id": "job_borrow",
-                "severity": round(max(s for s, _ in rows), 3),
+                "severity": round(max(s for s, _, _ in rows), 3),
                 "headline": (f"{_money(dollars)} billed ahead of earnings "
                              f"across {len(rows)} "
-                             f"job{'s' if len(rows) > 1 else ''}"),
+                             f"job{'s' if len(rows) > 1 else ''}, large "
+                             "against the cost left to finish"),
                 "dollars": round(float(dollars)),
                 "jobs": [job(i, O[i],
-                             f"{P[i]:.0%} complete, {_money(O[i])} overbilled")
-                         for _, i in rows[:5]],
+                             f"{P[i]:.0%} complete, {_money(O[i])} overbilled "
+                             f"= {ratio:.0%} of cost to finish")
+                         for _, i, ratio in rows[:5]],
                 "why": ("Cash collected for work not yet performed is "
                         "typically already spent on other jobs. The "
                         "remaining work must be financed from elsewhere -- "
@@ -283,6 +323,93 @@ def compute_signals(core, labels):
                         "benchmark. An outlier margin at mid-completion is "
                         "the classic shape of profit fade that has not been "
                         "recognized yet."),
+            })
+
+    # -- fragile backlog: remaining work riding on thin margin ----------------
+    # Loss jobs (m < 0) are excluded -- they have their own signal above.
+    ctc_all = np.maximum(C - D, 0.0)
+    total_ctc = float(np.nansum(ctc_all))
+    thin = (m >= 0) & (m < T["thin_margin_p"]) & (ctc_all > 0)
+    if total_ctc > 0 and thin.any():
+        thin_ctc = float(np.nansum(ctc_all[thin]))
+        share = thin_ctc / total_ctc
+        sev = _clamp((share - T["thin_share_floor"])
+                     / (T["thin_share_full"] - T["thin_share_floor"]))
+        if sev > T["min_signal_severity"]:
+            order = sorted(np.where(thin)[0], key=lambda i: -ctc_all[i])
+            signals.append({
+                "id": "thin_margin_backlog",
+                "severity": round(sev, 3),
+                "headline": (f"{share:.0%} of remaining cost sits on jobs "
+                             f"with margin under {T['thin_margin_p']:.0%}"),
+                "dollars": round(thin_ctc),
+                "jobs": [job(i, ctc_all[i],
+                             f"{m[i]:.1%} margin, {_money(ctc_all[i])} "
+                             "still to build")
+                         for i in order[:5]],
+                "why": ("Thin-margin work has no cushion: a small overrun "
+                        "flips it to a loss. When much of the remaining "
+                        "book is fragile, one bad quarter can erase the "
+                        "schedule's stated profit."),
+            })
+
+    # -- single-job concentration ----------------------------------------------
+    if tcv > 0 and n >= 2:
+        top = int(np.nanargmax(V))
+        share = float(V[top]) / tcv
+        sev = _clamp((share - T["big_job_floor"])
+                     / (T["big_job_full"] - T["big_job_floor"]))
+        if sev > T["min_signal_severity"]:
+            signals.append({
+                "id": "job_concentration",
+                "severity": round(sev, 3),
+                "headline": (f"Largest job is {share:.0%} of the program"),
+                "dollars": round(float(V[top])),
+                "jobs": [job(top, V[top],
+                             f"{P[top]:.0%} complete, {m[top]:.1%} margin")],
+                "why": ("The program's outcome is coupled to one job. "
+                        "Whatever happens on it -- fade, dispute, slow pay "
+                        "-- happens to the contractor."),
+            })
+
+    # -- unrecognized fade proxy: earned margin lagging the estimate ----------
+    # Only meaningful when E is a PHYSICAL column: with E derived cost-to-cost
+    # (E = V*D/C), earned-to-date margin equals estimated margin identically
+    # and this comparison is a tautology. When the contractor's own revenue
+    # recognition runs below the stated final margin on well-progressed work,
+    # the schedule is implicitly claiming the REMAINING work will be more
+    # profitable than the work done so far -- the classic shape of fade that
+    # has not been booked yet. Single-document stand-in until multi-period
+    # WIPs land; the real fade analysis compares schedules across time.
+    if E is not None and "E" not in derived:
+        rows = []
+        for i in range(n):
+            if P[i] < T["fade_min_p"] or E[i] <= 0:
+                continue
+            earned_m = float((E[i] - D[i]) / E[i])
+            gap = float(m[i]) - earned_m
+            sev = _clamp(P[i]) * _clamp(gap / T["fade_gap_full"])
+            if sev > T["min_signal_severity"] \
+                    and gap * E[i] >= T["min_flag_dollars"]:
+                rows.append((sev, i, earned_m, gap))
+        if rows:
+            rows.sort(reverse=True)
+            dollars = sum(g * E[i] for _, i, _, g in rows)
+            signals.append({
+                "id": "unrecognized_fade",
+                "severity": round(max(s for s, *_ in rows), 3),
+                "headline": (f"{len(rows)} job{'s' if len(rows) > 1 else ''} "
+                             "earning below the stated final margin"),
+                "dollars": round(float(dollars)),
+                "jobs": [job(i, g * E[i],
+                             f"{P[i]:.0%} complete, earned {em:.1%} to date "
+                             f"vs {m[i]:.1%} estimated final")
+                         for _, i, em, g in rows[:5]],
+                "why": ("For the stated margin to hold, the remaining work "
+                        "must out-earn everything built so far. Margin "
+                        "estimates that survive on the back half of a job "
+                        "are rare; this is where fade hides before it is "
+                        "recognized."),
             })
 
     signals.sort(key=lambda s: (s["severity"], s["dollars"]), reverse=True)
@@ -395,7 +522,7 @@ def analyze_node(state: WippleState) -> dict:
         "uegp": kpi_prov("V", "C", "E", "D"),
         "net_billing_position": kpi_prov("E", "B"),
     }
-    signals = compute_signals(core, labels)
+    signals = compute_signals(core, labels, derived=derived_vars)
     return {
         "analysis": {"kpis": kpis, "kpi_provenance": kpi_provenance,
                      "signals": signals, "basis": basis,
