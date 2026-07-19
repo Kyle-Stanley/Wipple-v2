@@ -25,6 +25,7 @@ import time
 from fastapi import FastAPI, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from wipple.demo import demo_raw_table
 from wipple.docgraph import build_doc_graph
@@ -33,6 +34,7 @@ from wipple.model_client import MODEL_REGISTRY, Metrics
 app = FastAPI(title="wipple")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
+app.mount("/static", StaticFiles(directory="static"), name="static")
 GRAPH = build_doc_graph()
 
 

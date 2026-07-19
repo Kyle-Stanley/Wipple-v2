@@ -24,9 +24,10 @@ def test_xlsx_upload_end_to_end():
                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
     with c.stream("POST", "/api/scan", files=files) as r:
         ev = [json.loads(l[6:]) for l in r.iter_lines() if l.startswith("data: ")]
-    rep = ev[-1]
+    doc = ev[-1]
+    rep = doc["tables"][0]["sections"][0]["report"]
     assert rep["overall_status"] == "verified_mapping_with_findings"
-    assert rep["metrics"]["api_calls"] == 0          # fully deterministic
+    assert doc["metrics"]["api_calls"] == 0          # fully deterministic
     assert rep["findings"][0]["row_label"] == "Harbor District Garage"
 
 
