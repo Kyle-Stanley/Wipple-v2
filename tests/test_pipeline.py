@@ -13,6 +13,7 @@ import wipple.fallback as fallback
 from wipple.graph import build_graph
 from wipple.model_client import Metrics
 from wipple.parsing import parse_cell, parse_table
+from wipple.wip_validator import validate_wip
 from synth import raw_table, rows_numeric
 
 
@@ -133,6 +134,28 @@ def test_e2e_failed_emits_finding_when_not_ocr_shaped(patch_client):
     f0 = rep["findings"][0]
     assert f0["classification"] == "unexplained_substitution"
     assert f0["proposed_correction"] == 300000.0
+    assert f0["proof_kind"] == "direct"
+    correction = rep["analysis"]["corrections"][0]
+    assert correction["corroborated"]
+    revenue_total = rep["analysis"]["totals_after_corrections"][7]
+    assert revenue_total["matches_after_corrections"]
+    assert revenue_total["computed_after_corrections"] == 3860000.0
+
+
+def test_bad_stated_total_does_not_block_a_proven_row_correction(patch_client):
+    bad = raw_table(corrupt={(2, "Revenues Earned"): "287,451"})
+    revenue_col = bad["headers"].index("Revenues Earned")
+    bad["rows"][-1][revenue_col] = "3,900,000"  # separate footing error
+    patch_client([json.dumps(bad)])
+
+    rep = invoke(build_graph())["report"]
+
+    assert rep["findings"][0]["proposed_correction"] == 300000.0
+    total = rep["analysis"]["totals_after_corrections"][revenue_col]
+    assert total["computed_after_corrections"] == 3860000.0
+    assert total["stated"] == 3900000.0
+    assert not total["matches_after_corrections"]
+    assert not rep["analysis"]["corrections"][0]["corroborated"]
 
 
 def test_e2e_persistent_error_is_document_finding(patch_client):
@@ -144,7 +167,60 @@ def test_e2e_persistent_error_is_document_finding(patch_client):
     rep = final["report"]
     assert rep["reextract_count"] == 1
     assert rep["overall_status"] == "verified_mapping_with_findings"
-    assert rep["findings"][0]["classification"] == "separator_or_magnitude_error"
+    assert rep["findings"][0]["classification"] == "extra_character"
+
+
+def test_single_formula_inherits_proof_from_the_rest_of_the_row():
+    bad = raw_table(corrupt={(0, "Cost to Complete"): "7,760,000"})
+    parsed = parse_table(bad["rows"], headers=bad["headers"])
+    result = validate_wip(parsed.matrix, parsed.job_labels)
+
+    assert result.status == "validation_failed"
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.culprit_variable == "Q"
+    assert finding.proposed_correction == 360000.0
+    assert finding.correction_basis == ["Q = C - D"]
+    assert finding.proof_kind == "inherited"
+
+
+def test_two_errors_in_one_job_are_repaired_together_when_uniquely_proven():
+    rows, labels = [], []
+    for tup in rows_numeric():
+        name, V, C, G, D, Q, P, E, B, U, O = tup
+        labels.append(name)
+        rows.append([V, C, G, D, Q, P, E, B, U, O, V - B])
+    matrix = np.asarray(rows, dtype=float)
+    matrix[0, 3] = 47000.0       # Costs to Date; true value 40,000
+    matrix[0, 7] = 68000.0       # Billed to Date; true value 60,000
+
+    result = validate_wip(matrix, labels)
+
+    assert result.status == "validation_failed"
+    corrections = {
+        f.culprit_variable: f.proposed_correction for f in result.findings}
+    assert corrections == {"B": 60000.0, "D": 40000.0}
+    assert all(f.proof_kind == "joint" for f in result.findings)
+
+
+def test_competing_minimal_repairs_remain_unresolved():
+    rows, labels = [], []
+    for tup in rows_numeric():
+        name, V, C, G, D, Q, P, E, B, _U, _O = tup
+        labels.append(name)
+        rows.append([V, C, G, D, Q, P, E, B, B / V])
+    matrix = np.asarray(rows, dtype=float)
+    matrix[0, 7] = 68000.0       # B could be changed to agree with PB...
+    matrix[0, 8] = 0.13          # ...or PB could be changed to agree with B
+
+    result = validate_wip(matrix, labels)
+
+    assert result.status == "validation_failed"
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.proposed_correction is None
+    assert finding.classification == "ambiguous_multi_cell"
+    assert finding.candidate_variables == ["B", "PB"]
 
 
 def test_e2e_confusable_repaired_in_parse(patch_client):

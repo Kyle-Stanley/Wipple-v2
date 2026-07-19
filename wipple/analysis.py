@@ -473,15 +473,56 @@ def analyze_node(state: WippleState) -> dict:
         corrections.append({
             "row": int(r), "label": labels[r] if r < len(labels) else "",
             "col": int(c),
-            "variable": mapping.get(int(c)),
+            "variable": mapping.get(int(c)) or f.get("culprit_variable"),
             "printed": float(matrix[r, c]), "implied": float(p),
             "classification": f.get("classification"),
             "confidence": f.get("confidence"),
+            "proof_kind": f.get("proof_kind", "direct"),
             "corroborated": _totals_corroborates(c, float(matrix[r, c]),
                                                  float(p)),
             "basis": list(f.get("correction_basis") or []),
             "checks": len(f.get("correction_basis") or []) or 1,
         })
+
+    # Totals are downstream checks, never correction anchors. Re-evaluate
+    # each stated total against a working column sum after every supported row
+    # correction in that column. This handles multiple repaired cells in one
+    # column and prevents a bad printed total from suppressing valid row math.
+    totals_after_corrections = {}
+    for raw_col, total in tc_cols.items():
+        try:
+            raw_j = int(raw_col)
+        except (TypeError, ValueError):
+            continue
+        matrix_cols = [i for i, original in enumerate(col_map)
+                       if int(original) == raw_j]
+        if not matrix_cols:
+            continue
+        matrix_col = matrix_cols[0]
+        column_corrections = [
+            c for c in corrections if c["col"] == matrix_col]
+        corrected = float(total.get("computed", 0.0)) + sum(
+            c["implied"] - c["printed"] for c in column_corrections)
+        stated = total.get("stated")
+        if stated is None:
+            continue
+        tolerance = max(1.0, 0.51 * rows_n + 1.0,
+                        1e-9 * abs(corrected))
+        matches = abs(float(stated) - corrected) <= tolerance
+        totals_after_corrections[raw_j] = {
+            "stated": float(stated),
+            "computed_from_printed_rows": float(total.get("computed", 0.0)),
+            "computed_after_corrections": round(corrected, 2),
+            "difference_after_corrections": round(
+                float(stated) - corrected, 2),
+            "matches_after_corrections": bool(matches),
+            "row_corrections": len(column_corrections),
+        }
+        before_gap = abs(float(stated) - float(total.get("computed", 0.0)))
+        after_gap = abs(float(stated) - corrected)
+        if column_corrections and matches and after_gap + 1.0 < before_gap:
+            for correction in column_corrections:
+                correction["corroborated"] = True
 
     core, derived_vars = (reconstruct_core(work, mapping)
                           if mapping else (None, set()))
@@ -531,6 +572,7 @@ def analyze_node(state: WippleState) -> dict:
                                   "failing_rows": len(failing_rows),
                                   "rows": rows_n},
                      "corrections": corrections,
+                     "totals_after_corrections": totals_after_corrections,
                      "jobs": _job_rows(core, labels),
                      "tuning": dict(TUNE)},
         "table": _table(state, mapping),
