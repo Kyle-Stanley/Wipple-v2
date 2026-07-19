@@ -177,16 +177,18 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .analysis-switcher>span{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);white-space:nowrap;margin-right:3px}
 .analysis-switcher .btn{background:var(--surface);white-space:nowrap}
 .analysis-switcher .btn.on{background:var(--sage-deep);border-color:var(--sage-deep);color:white}
+.analysis-topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.analysis-topline .analysis-switcher{flex:1;margin:0}
 .dedupe-key{font-size:11px;color:var(--muted);margin:10px 2px 0}
 .dedupe-mark{font-size:8px;color:var(--sage-deep);vertical-align:top;margin-left:1px}
 .consolidated-table.scroll-table{table-layout:auto;min-width:1900px;font-size:11.5px;white-space:nowrap}
 .consolidated-table.scroll-table th,.consolidated-table.scroll-table td{padding:6px 8px}
-.consolidated-table.compact-table{table-layout:fixed;font-size:9px;white-space:normal}
-.consolidated-table.compact-table th{padding:5px 2px;font-size:8.5px;line-height:1.08;white-space:normal;overflow-wrap:normal}
+.consolidated-table.compact-table{table-layout:fixed;font-size:10.25px;white-space:normal}
+.consolidated-table.compact-table th{padding:5px 2px;font-size:9px;line-height:1.08;white-space:normal;overflow-wrap:normal}
 .consolidated-table.compact-table td{padding:4px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.consolidated-table.compact-table th:nth-child(1),.consolidated-table.compact-table td:nth-child(1){width:6%;text-align:left}
-.consolidated-table.compact-table th:nth-child(2),.consolidated-table.compact-table td:nth-child(2){width:21%;text-align:left}
-.consolidated-table.compact-table th:nth-child(n+3),.consolidated-table.compact-table td:nth-child(n+3){width:4.55%}
+.consolidated-table.compact-table th:nth-child(1),.consolidated-table.compact-table td:nth-child(1){width:5%;text-align:left}
+.consolidated-table.compact-table th:nth-child(2),.consolidated-table.compact-table td:nth-child(2){width:11%;text-align:left}
+.consolidated-table.compact-table th:nth-child(n+3),.consolidated-table.compact-table td:nth-child(n+3){width:5.25%}
 .consolidated-table .history-col{border-right:6px solid var(--paper);background:#EEF0EA;text-align:left;min-width:96px}
 .consolidated-table .history-col strong{font-size:8.5px}
 .consolidated-table .history-col small{display:block;color:var(--muted);font-size:7.5px;line-height:1.1;margin-top:1px;white-space:normal}
@@ -195,7 +197,7 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .consolidated-table tfoot td{font-size:8.5px}
 .validated-modal .wm-body{padding:0 18px 18px}
 .validated-modal .tablewrap{max-height:none;overflow:visible}
-.validated-modal .consolidated-table{min-width:0;font-size:9px}
+.validated-modal .consolidated-table{min-width:0;font-size:10.25px}
 @media(max-width:760px){
   .batch-intro,.flow-head{align-items:start;flex-direction:column}
   .batch-grid,.match-work,.trend-cards{grid-template-columns:1fr}
@@ -206,11 +208,13 @@ h1 em{font-style:normal;color:var(--sage-deep)}
   .unmatched-head .btn{justify-self:start}
   .match-row{grid-template-columns:1fr auto}.match-row .periods{grid-column:1/-1;grid-row:2}
   .linked-group>summary{grid-template-columns:1fr auto}.linked-group>summary .periods{grid-column:1/-1;grid-row:2}
+  .analysis-topline{align-items:stretch;flex-direction:column}
+  .analysis-topline>#printAnalysis{align-self:flex-end}
 }
 
 /* processing */
-#processing{padding:10vh 0}
-.logoanim{position:relative;width:150px;height:60px;margin:0 auto 36px;animation:lgpulse 3.6s ease-in-out infinite}
+#processing{padding:5vh 0 7vh}
+.logoanim{position:relative;width:138px;height:56px;margin:0 auto 24px;animation:lgpulse 3.6s ease-in-out infinite}
 .logoanim .lg{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 .logoanim .cyc{opacity:0;animation:lgfade 3.6s ease-in-out infinite}
 .logoanim .c2{animation-delay:1.2s}
@@ -220,7 +224,13 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .logoanim.noimg .lgfall{display:block}
 @keyframes lgfade{0%,100%{opacity:0}35%{opacity:1}70%{opacity:0}}
 @keyframes lgpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
-.log{max-width:560px;margin:0 auto}
+.batch-progress{max-width:560px;margin:0 auto 18px}
+.batch-progress-top{display:flex;align-items:baseline;justify-content:space-between;gap:18px;margin-bottom:8px}
+.batch-progress-top strong{font-size:14px;font-weight:600}
+.batch-progress-top span{font-size:12px;color:var(--muted);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.batch-progress-track{height:7px;border-radius:999px;background:#E1DDD1;overflow:hidden}
+.batch-progress-track span{display:block;width:0;height:100%;border-radius:inherit;background:var(--sage-deep);transition:width .25s ease}
+.log{max-width:560px;max-height:330px;overflow:hidden;margin:0 auto}
 .log .ln{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);
   font-size:14.5px;color:var(--muted);animation:rise .35s ease both}
 .log .ln:last-child{color:var(--ink)}
@@ -462,6 +472,11 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
     <img class="lg cyc c3" src="/static/logo/wipple-red.png" alt="">
     <span class="lgfall mark">w<span>i</span>pple</span>
   </div>
+  <div class="batch-progress hidden" id="batchProgress">
+    <div class="batch-progress-top"><strong id="batchProgressCount">0 of 0 complete</strong>
+      <span id="batchProgressFile"></span></div>
+    <div class="batch-progress-track" aria-hidden="true"><span id="batchProgressBar"></span></div>
+  </div>
   <div class="log" id="log"></div>
 </section>
 
@@ -586,6 +601,15 @@ function finishProgressLine(){
     LATEST_PROGRESS.textContent=LATEST_PROGRESS.dataset.base;
   }
 }
+function showBatchProgress(completed,total,file=""){
+  $("#batchProgress").classList.remove("hidden");
+  $("#batchProgressCount").textContent=`${completed} of ${total} complete`;
+  $("#batchProgressFile").textContent=file;
+  $("#batchProgressBar").style.width=`${total?100*completed/total:0}%`;
+}
+function resetProgressStage(){
+  finishProgressLine();DOTS=0;LATEST_PROGRESS=null;$("#log").innerHTML="";
+}
 
 let SOURCE_FILE=null,SOURCE_URL=null,SOURCE_KIND="";
 function clearSourceFile(){
@@ -630,7 +654,7 @@ async function readStream(url,opts,onProgress=addLine){
   return report;
 }
 async function stream(url,opts){
-  show("processing");$("#log").innerHTML="";
+  show("processing");$("#batchProgress").classList.add("hidden");$("#log").innerHTML="";
   RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
   try{
     const doc=await readStream(url,opts);
@@ -647,6 +671,7 @@ function addLine(m){
   const bullet=document.createElement("span");bullet.className="dot";bullet.textContent="·";
   const txt=document.createElement("span");txt.dataset.base=String(m).replace(/\.*$/,"");txt.textContent=txt.dataset.base;
   d.appendChild(bullet);d.appendChild(txt);$("#log").appendChild(d);
+  while($("#log").children.length>7)$("#log").firstElementChild.remove();
   LATEST_PROGRESS=txt;
 }
 
@@ -770,26 +795,29 @@ async function scanBatch(files){
   resetBatch();clearSourceFile();BATCH_MODE=true;
   BATCH_ITEMS=files.map((file,i)=>({id:i,file,name:file.name||`Schedule ${i+1}`,
     status:"queued",doc:null,error:"",reviewState:null,periodEnd:"",scheduleType:""}));
-  show("processing");$("#log").innerHTML="";
+  show("processing");resetProgressStage();showBatchProgress(0,BATCH_ITEMS.length);
   $("#nav").classList.add("hidden");$("#tagline").classList.remove("hidden");
   RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
   const model=$("#model")?.value||"";
   for(let i=0;i<BATCH_ITEMS.length;i++){
     const item=BATCH_ITEMS[i];item.status="processing";
-    addLine(`${i+1} of ${BATCH_ITEMS.length}: ${item.name}`);
+    resetProgressStage();showBatchProgress(i,BATCH_ITEMS.length,item.name);
+    addLine("Reading and validating schedule");
     const fd=new FormData();fd.append("file",item.file);
     if(model)fd.append("model",model);
     try{
       item.doc=await readStream(API+"/api/scan",{method:"POST",body:fd},
-        message=>addLine(`${item.name}: ${message}`));
+        message=>addLine(message));
       item.error=batchDocError(item.doc);
       item.status=item.error?"failed":"ready";
       if(item.status==="ready")initBatchMetadata(item);
-      addLine(`${item.name}: ${item.status==="ready"?"ready for review":"needs attention"}`);
+      addLine(item.status==="ready"?"Ready for review":"Needs attention");
     }catch(e){
       item.error=String(e);item.status="failed";
-      addLine(`${item.name}: could not be processed`);
+      addLine("Could not be processed");
     }
+    showBatchProgress(i+1,BATCH_ITEMS.length,item.name);
+    await new Promise(resolve=>setTimeout(resolve,220));
   }
   RUNNING=false;finishProgressLine();BATCH_ACTIVE=-1;
   setTimeout(renderBatch,350);
@@ -1379,6 +1407,7 @@ function consolidatedTableHTML(period,expanded=false){
     ["Work in progress",rows.filter(r=>r.type!=="cc"),"WIP total"],
     ["Completed contracts",rows.filter(r=>r.type==="cc"),"CC total"]
   ].filter(([,selected])=>selected.length);
+  const showCombined=sections.length===2;
   const span=cols.length+(expanded?2:3);
   const body=sections.map(([label,selected,total])=>
     `<tr class="group-row"><td colspan="${span}">${label}</td></tr>
@@ -1388,7 +1417,7 @@ function consolidatedTableHTML(period,expanded=false){
     ${expanded?"":'<th class="history-col">Matched</th>'}<th>Job<br>ID</th><th>Job name</th>
     ${cols.map(([key,name])=>`<th title="${htmlEsc(name)}">${expanded?COMPACT_COLUMN_NAMES[key]:htmlEsc(name)}</th>`).join("")}
     </tr></thead><tbody>${body}</tbody>
-    <tfoot>${totalLine("Combined total",rows)}</tfoot></table></div>
+    ${showCombined?`<tfoot>${totalLine("Combined total",rows)}</tfoot>`:""}</table></div>
     ${hasDedupe?'<p class="dedupe-key">* Completed-contract values replace the same-period WIP duplicate.</p>':""}`;
 }
 function renderConsolidated(){
@@ -1804,7 +1833,8 @@ function renderDash(rep){
     ?sigs+timeSignals
     :`<p class="empty">Nothing above threshold in this book.</p>`;
   $("#dash").innerHTML=`
-    ${BATCH_MODE?analysisSwitcherHTML():""}
+    <div class="analysis-topline">${BATCH_MODE?analysisSwitcherHTML():"<span></span>"}
+      <button class="btn" id="printAnalysis">Print analysis</button></div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     <div class="cols">
@@ -1819,6 +1849,7 @@ function renderDash(rep){
   if(portfolioSwitch)portfolioSwitch.onclick=renderPortfolioAnalysis;
   $("#dash").querySelectorAll(".analysis-period-switch").forEach(button=>
     button.onclick=()=>renderPeriodAnalysis(button.dataset.period));
+  $("#printAnalysis").onclick=()=>printSummary(rep);
 }
 
 function currentJobs(rep){
@@ -2296,6 +2327,7 @@ function printConsolidated(period){
     ["Work in progress",rows.filter(r=>r.type!=="cc"),"WIP total"],
     ["Completed contracts",rows.filter(r=>r.type==="cc"),"CC total"]
   ].filter(([,selected])=>selected.length);
+  const showCombined=sections.length===2;
   const body=sections.map(([label,selected,total])=>
     `<tr class="group"><td colspan="${cols.length+2}">${label}</td></tr>
       ${selected.map(rowHTML).join("")}${totalLine(total,selected)}`).join("");
@@ -2322,7 +2354,7 @@ function printConsolidated(period){
       <div class="meta">${rows.length} jobs<br>${new Date().toLocaleString()}</div></header>
     <table><thead><tr><th>Job ID</th><th>Job name</th>
       ${cols.map(([,label])=>`<th>${label}</th>`).join("")}</tr></thead>
-      <tbody>${body}</tbody><tfoot>${totalLine("Combined total",rows)}</tfoot></table>
+      <tbody>${body}</tbody>${showCombined?`<tfoot>${totalLine("Combined total",rows)}</tfoot>`:""}</table>
     ${hasDedupe?'<p class="note">* Completed-contract values replace the same-period WIP duplicate.</p>':""}
     </body></html>`;
   printInFrame(reportHtml);
@@ -2360,6 +2392,17 @@ function printSummary(rep){
       <p class="signal-why"><strong>Why it matters.</strong> ${htmlEsc(printSignalWhy(s))}</p>
     </section>`;
   }).join(""):'<p class="empty-print">No underwriting signals exceeded the reporting threshold.</p>';
+  const trends=BATCH_ANALYSIS_MODE?timeSeriesData():null;
+  const trendHtml=trends?`<section class="print-trends">
+    <h2 class="section-title">Across reporting periods</h2>
+    <p class="section-sub">Material profit fade, cost-estimate changes, and stalled jobs.</p>
+    <table><thead><tr><th>Job</th><th>Periods</th><th>Cost change</th><th>Profit change</th><th>Stalled</th></tr></thead>
+      <tbody>${trends.rows.map(row=>`<tr><td>${htmlEsc(row.name||row.id||"—")}</td>
+        <td>${htmlEsc(`${row.from.slice(0,4)} → ${row.to.slice(0,4)}`)}</td>
+        <td>${htmlEsc(row.cost==null?"—":fmtM(row.cost))}</td>
+        <td>${htmlEsc(row.fade==null?"—":fmtM(row.fade))}</td>
+        <td>${row.stalled?"Yes":"—"}</td></tr>`).join("")}</tbody></table>
+    </section>`:"";
 
   const corrections=(a.corrections||[]).filter((_,i)=>ACCEPTED.has(i)).length;
   const jobCount=tableJobCount(rep.table);
@@ -2403,6 +2446,10 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 .signal-why{font-size:9px;color:var(--muted);margin:6px 0 0;line-height:1.4}
 .signal-why strong{color:var(--ink);font-weight:600}
 .print-signal + .print-signal{margin-top:4px}
+.print-trends{margin-top:24px;break-inside:avoid}
+.print-trends table{width:100%;border-collapse:collapse;font-size:9px}
+.print-trends th,.print-trends td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right}
+.print-trends th:first-child,.print-trends td:first-child{text-align:left}
 .chart-block h2,.schedule-page h2{font-family:Georgia,serif;font-size:18px;font-weight:500;margin:0 0 3px}
 .chart-block .sub,.schedule-page .sub{font-size:10px;color:var(--muted);margin:0 0 12px}
 .chart-block .card{border:0;padding:0;margin:0;background:white;break-inside:avoid;page-break-inside:avoid}
@@ -2442,6 +2489,7 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
   <h2 class="section-title">Underwriting signals</h2>
   <p class="section-sub">Items that warrant attention, with the relevant jobs and the underwriting implication.</p>
   ${signalHtml}
+  ${trendHtml}
 </section>
 
 <section class="chart-block">
