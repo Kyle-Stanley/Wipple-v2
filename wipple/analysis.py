@@ -166,7 +166,9 @@ def compute_signals(core, labels, derived=frozenset()):
         for i in range(n):
             if U[i] < T["min_flag_dollars"]:
                 continue
-            rem_rev = max(float(V[i] - E[i]), 1.0)
+            rem_rev = float(V[i] - E[i])
+            if P[i] >= .995 or rem_rev <= max(1.0, .005 * abs(float(V[i]))):
+                continue
             ratio = float(U[i]) / rem_rev
             sev = _clamp((ratio - T["ub_ratio_floor"])
                          / (T["ub_ratio_full"] - T["ub_ratio_floor"]))
@@ -179,9 +181,8 @@ def compute_signals(core, labels, derived=frozenset()):
             signals.append({
                 "id": "trapped_cash",
                 "severity": round(max(s for s, _, _ in rows), 3),
-                "headline": (f"{k} job{'s' if k > 1 else ''} carrying "
-                             f"{_money(dollars)} in unbilled earned revenue "
-                             "with little job left to bill it through"),
+                "headline": ("Significant under billings with limited time "
+                             "to recover"),
                 "dollars": round(float(dollars)),
                 "jobs": [job(i, U[i],
                              f"{P[i]:.0%} complete, {_money(U[i])} underbilled "
@@ -189,10 +190,9 @@ def compute_signals(core, labels, derived=frozenset()):
                          for _, i, ratio in rows[:5]],
                 "why": ("Earned revenue the contractor has not billed. On "
                         "nearly-finished work this usually means unapproved "
-                        "change orders or receivables that may never "
-                        "collect; in a default the surety inherits the gap."),
+                        "change orders or receivables that may not convert "
+                        "to cash."),
             })
-
     # -- job borrow: overbilling vs the cost left to finish -------------------
     # Severity is O / (C - D): what fraction of the remaining work is being
     # funded by cash already collected (and typically already spent). Early
@@ -217,10 +217,8 @@ def compute_signals(core, labels, derived=frozenset()):
             signals.append({
                 "id": "job_borrow",
                 "severity": round(max(s for s, _, _ in rows), 3),
-                "headline": (f"{_money(dollars)} billed ahead of earnings "
-                             f"across {len(rows)} "
-                             f"job{'s' if len(rows) > 1 else ''}, large "
-                             "against the cost left to finish"),
+                "headline": ("Significant over billings vs. Cost to "
+                             "Complete"),
                 "dollars": round(float(dollars)),
                 "jobs": [job(i, O[i],
                              f"{P[i]:.0%} complete, {_money(O[i])} overbilled "
@@ -443,9 +441,10 @@ def analyze_node(state: WippleState) -> dict:
         mapping = dict(state["fallback_mapping"])
         basis = "llm-headers"
 
-    # Corrections are PROPOSALS, never applied server-side. The page loads
-    # as-printed; the user applies suggestions explicitly (individually or
-    # "apply all"), and the client recomputes figures and the CSV export.
+    # Corrections are PROPOSALS and never mutate the server-side source table.
+    # The review UI includes supported proposals by default, lets the reviewer
+    # restore any printed value, and recomputes figures and exports from those
+    # reversible choices.
     findings_list = v.get("findings", [])
     rows_n = matrix.shape[0]
     failing_rows = {f.get("row_index") for f in v.get("failures", [])}

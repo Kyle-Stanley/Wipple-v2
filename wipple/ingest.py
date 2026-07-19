@@ -87,6 +87,7 @@ def xlsx_to_raw_table(data: bytes) -> dict:
             best, best_score, best_name = grid, score, ws.title
     headers, rows = _find_table(best or [])
     return {"headers": headers, "rows": rows, "page_count": 1,
+            "metadata_texts": [c for row in (best or []) for c in row if c],
             "notes": [f"read directly from worksheet '{best_name}', "
                       "no model call"]}
 
@@ -96,9 +97,16 @@ def csv_to_raw_table(data: bytes) -> dict:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = data.decode("latin-1")
-    dialect = csv.Sniffer().sniff(text[:4096]) if text.strip() else csv.excel
+    if text.strip():
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096])
+        except csv.Error:
+            dialect = csv.excel
+    else:
+        dialect = csv.excel
     grid = [[(c or "").strip() for c in row]
             for row in csv.reader(io.StringIO(text), dialect)]
     headers, rows = _find_table(grid)
     return {"headers": headers, "rows": rows, "page_count": 1,
+            "metadata_texts": [c for row in grid for c in row if c],
             "notes": ["read directly from CSV, no model call"]}

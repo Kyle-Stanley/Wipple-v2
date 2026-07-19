@@ -110,6 +110,7 @@ _V2_SHAPE = (
     '}')
 _V3_SHAPE = (
     '{\n'
+    '  "reporting_period_text": "<exact printed reporting-period phrase or null>",\n'
     '  "tables": [\n'
     '    {"headers": ["<column header 1>", "..."],\n'
     '     "rows": [["<cell>", "<cell>", "..."], ...],\n'
@@ -126,7 +127,12 @@ CHUNK_PROMPT = EXTRACTION_PROMPT.replace(
     'Return ONLY a JSON object with this exact shape:',
     'This is ONE PAGE (or one slice) of a possibly longer document. '
     'Return ONLY a JSON object with this exact shape:').replace(
-    _V2_SHAPE, _V3_SHAPE)
+    _V2_SHAPE, _V3_SHAPE) + """
+
+For reporting_period_text, copy the exact printed phrase that states the
+schedule's reporting or period-end date (for example, "Year ended December
+31, 2025"). If this page does not print one, return null. Do not guess a date
+from the table values or page number."""
 
 
 def extract_chunks_node(state) -> dict:
@@ -150,6 +156,7 @@ def extract_chunks_node(state) -> dict:
                 metrics=metrics,
                 purpose=f"extract[chunk={ch['chunk_id']},{tier}]")
             obj = extract_json(text)
+            period_text = obj.get("reporting_period_text")
             for t in obj.get("tables", []):
                 fragments.append({
                     "chunk_id": ch["chunk_id"], "pages": ch["pages"],
@@ -157,6 +164,8 @@ def extract_chunks_node(state) -> dict:
                     "rows": [[str(c) for c in r] for r in t.get("rows", [])],
                     "position": int(t.get("position", 0)),
                     "notes": [str(n) for n in t.get("notes", [])],
+                    "reporting_period_text": (
+                        str(period_text) if period_text else None),
                     "overlaps_prev": bool(ch.get("overlaps_prev"))})
             attempts.append({"chunk": ch["chunk_id"], "tier": tier,
                              "ok": True})

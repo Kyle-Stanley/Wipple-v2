@@ -21,6 +21,7 @@ in data; a combined view is a presentation-layer join.
 from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
+import re
 from typing import Any, Optional, TypedDict
 
 from . import ingest as ingest_mod
@@ -31,6 +32,7 @@ from .extraction import extract_chunks_node
 from .graph import build_graph
 from .model_client import Metrics
 from .parsing import parse_table
+from .periods import extract_period_end
 from .stitching import stitch
 from .splitting import find_cc_block, split_sections
 from .validation import run_schema_race, serialize_validation
@@ -52,6 +54,8 @@ class DocState(TypedDict, total=False):
     tables: list
     concordance: dict
     report: dict
+    reporting_date: Optional[str]
+    reporting_date_error: Optional[str]
     _metrics: Any
 
 
@@ -67,10 +71,13 @@ def ingest_doc_node(state: DocState) -> dict:
         raw = ingest_mod.csv_to_raw_table(data)
     else:
         return {"chunks": chunk_document(data, kind), "media_type": kind}
+    period = extract_period_end(raw.get("metadata_texts", []),
+                                state.get("source_name", ""))
     frag = {"chunk_id": 0, "pages": [1], "headers": raw.get("headers", []),
             "rows": raw.get("rows", []), "position": 0,
-            "notes": ["spreadsheet ingest; no vision extraction"]}
-    return {"chunks": [], "fragments": [frag], "media_type": kind}
+            "notes": ["spreadsheet ingest; no vision extraction"],
+            "reporting_period_text": None}
+    return {"chunks": [], "fragments": [frag], "media_type": kind, **period}
 
 
 def stitch_node(state: DocState) -> dict:
@@ -98,6 +105,74 @@ def _attach_pages(report: dict, section_prov: list) -> None:
         f["page"] = page(f.get("row_index"))
     for f in report.get("failures", []) or []:
         f["page"] = page(f.get("row_index"))
+
+
+_ID_HEAD = re.compile(
+    r"(?:job|project|contract).*(?:\bid\b|\bno\b|number|#)|"
+    r"^(?:id|job\s*#|job\s*no\.?)$", re.I)
+_NAME_HEAD = re.compile(
+    r"(?:job|project|contract).*(?:name|description)|"
+    r"^(?:name|description|project)$", re.I)
+_ID_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/#-]*$")
+
+
+def _attach_job_identity(report: dict, raw_rows: list,
+                         headers: list) -> None:
+    """Preserve ID and name separately without changing numeric validation."""
+    parse = report.get("parse") or {}
+    raw_indices = parse.get("row_index") or []
+    dropped = [int(d["col"]) for d in parse.get("dropped_columns", [])
+               if d.get("reason") in ("non-numeric", "job_labels")]
+    if not dropped:
+        return
+
+    id_col = next((j for j in dropped
+                   if j < len(headers) and _ID_HEAD.search(headers[j] or "")),
+                  None)
+    name_col = next((j for j in dropped
+                     if j < len(headers)
+                     and _NAME_HEAD.search(headers[j] or "")), None)
+
+    def values(j):
+        return [str(raw_rows[i][j]).strip()
+                for i in raw_indices if i < len(raw_rows)
+                and j < len(raw_rows[i]) and str(raw_rows[i][j]).strip()]
+
+    if id_col is None:
+        for j in dropped:
+            vals = values(j)
+            if vals and sum(bool(_ID_VALUE.match(v) and
+                                 any(ch.isdigit() for ch in v))
+                            for v in vals) / len(vals) >= .7:
+                id_col = j
+                break
+    if name_col is None:
+        for j in dropped:
+            if j == id_col:
+                continue
+            vals = values(j)
+            if vals and sum(bool(re.search(r"[A-Za-z]", v))
+                            for v in vals) / len(vals) >= .7:
+                name_col = j
+                break
+
+    def cell(raw_i, col):
+        if col is None or raw_i >= len(raw_rows) or col >= len(raw_rows[raw_i]):
+            return ""
+        return str(raw_rows[raw_i][col]).strip()
+
+    ids = [cell(i, id_col) for i in raw_indices]
+    names = [cell(i, name_col) for i in raw_indices]
+    table = report.get("table") or {}
+    table["job_ids"] = ids
+    table["job_names"] = names
+    if isinstance(table.get("rows"), list):
+        for i, row in enumerate(table["rows"]):
+            row["job_id"] = ids[i] if i < len(ids) else ""
+            row["job_name"] = names[i] if i < len(names) else ""
+    for i, job in enumerate((report.get("analysis") or {}).get("jobs") or []):
+        job["job_id"] = ids[i] if i < len(ids) else ""
+        job["job_name"] = names[i] if i < len(names) else ""
 
 
 def tables_node(state: DocState) -> dict:
@@ -181,6 +256,7 @@ def tables_node(state: DocState) -> dict:
                 "extraction_attempts": [], "_metrics": metrics,
             })
             rep = final.get("report", {})
+            _attach_job_identity(rep, sec["rows"], sec["headers"])
             _attach_pages(rep, sec["row_prov"])
             entry["sections"].append({
                 "type": sec["type"],
@@ -215,6 +291,19 @@ def route_after_tables(state: DocState) -> str:
 
 def emit_doc_node(state: DocState) -> dict:
     tables = state.get("tables") or []
+    period = {
+        "reporting_date": state.get("reporting_date"),
+        "reporting_date_error": state.get("reporting_date_error"),
+    }
+    if not period["reporting_date"] and not period["reporting_date_error"]:
+        texts = [f.get("reporting_period_text") for f in
+                 (state.get("fragments") or [])
+                 if f.get("reporting_period_text")]
+        period = extract_period_end(texts, state.get("source_name", ""))
+    schedule_types = sorted({
+        s.get("type") for t in tables for s in (t.get("sections") or [])
+        if s.get("type")
+    })
     return {"report": {
         "source": state.get("source_name", ""),
         "document": {
@@ -226,6 +315,8 @@ def emit_doc_node(state: DocState) -> dict:
             "reextract_count": state.get("reextract_count", 0),
             "unresolved_chunks": state.get("bad_chunks") or [],
             "concordance": state.get("concordance", {}),
+            **period,
+            "schedule_types": schedule_types,
         },
         "tables": tables,
     }}
