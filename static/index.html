@@ -65,10 +65,12 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .batch-card .btn{align-self:flex-start}
 .batch-validation{display:flex;align-items:center;gap:9px;border-radius:9px;padding:10px 11px;font-size:13px;font-weight:600}
 .batch-validation .validation-icon{display:grid;place-items:center;width:23px;height:23px;border-radius:999px;flex:none;font-size:13px}
+.batch-validation-copy{display:flex;flex-direction:column;gap:2px;line-height:1.35}
+.batch-validation-note{font-size:11px;font-weight:500;color:var(--amber)}
 .batch-validation.ok{background:#E7EDE4;color:var(--sage-deep)}
 .batch-validation.ok .validation-icon{background:var(--sage-deep);color:white}
-.batch-validation.corrected{background:#F3E8D1;color:var(--amber)}
-.batch-validation.corrected .validation-icon{background:var(--amber);color:white}
+.batch-validation.corrected{background:#E7EDE4;color:var(--sage-deep)}
+.batch-validation.corrected .validation-icon{background:var(--sage-deep);color:white}
 .batch-validation.review{background:#F4DFD8;color:var(--brick)}
 .batch-validation.review .validation-icon{background:var(--brick);color:white}
 .batch-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto}
@@ -239,7 +241,7 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 
 /* certificate */
 #certificate{padding:9vh 0 12vh}
-.cert{max-width:780px;margin:0 auto;background:var(--surface);
+.cert{max-width:960px;margin:0 auto;background:var(--surface);
   border:1px solid var(--line);border-radius:4px;padding:8px}
 .cert-inner{border:1px solid var(--line);padding:44px 40px;text-align:center}
 .cert .kicker{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
@@ -791,20 +793,22 @@ function batchValidation(item){
       if(correction.confidence==="high"&&(correction.checks||0)>=1)supported++;
     });
   });
-  const otherErrors=reps.reduce((n,r)=>{
+  const totalsProblems=reps.reduce((n,r)=>{
     const td=totalsDetail(r);
-    const totalsProblem=td&&td.present&&!td.allMatch&&!td.allExplained?1:0;
-    const structural=(r._extra||[]).filter(x=>x.st==="bad").length;
-    return n+totalsProblem+structural;
+    return n+(td&&td.present&&!td.allMatch&&!td.allExplained?1:0);
   },0);
-  const errors=findings+otherErrors;
+  const structuralErrors=reps.reduce((n,r)=>
+    n+(r._extra||[]).filter(x=>x.st==="bad").length,0);
+  const errors=findings+totalsProblems+structuralErrors;
   const incomplete=reps.some(r=>["unmapped","llm_mapped_unverified"].includes(r.overall_status));
   if(incomplete)return{kind:"review",icon:"!",text:"Validation needs review"};
   if(!errors)return{kind:"ok",icon:"✓",text:"All checks passed"};
-  const fullyCorrected=!otherErrors&&findings>0&&corrections===findings
+  const fullyCorrected=!structuralErrors&&findings>0&&corrections===findings
     &&applied===corrections&&supported===corrections;
   if(fullyCorrected)return{kind:"corrected",icon:"✓",
-    text:`${findings} error${findings===1?"":"s"} detected and corrected`};
+    text:"Validated after corrections",
+    note:`${findings} transcription error${findings===1?"":"s"} caught and corrected`
+      +(totalsProblems?" · printed total discrepancy isolated":"")};
   return{kind:"review",icon:"!",text:`${errors} error${errors===1?"":"s"} need review`};
 }
 async function scanBatch(files){
@@ -908,7 +912,8 @@ function batchCardHTML(item,i){
     <div class="batch-top"><span class="batch-name" title="${htmlEsc(item.name)}">${htmlEsc(item.name)}</span>
       <span class="batch-state">ready</span></div>
     <div class="batch-validation ${validation.kind}"><span class="validation-icon">${validation.icon}</span>
-      <span>${validation.text}</span></div>
+      <span class="batch-validation-copy"><span>${validation.text}</span>
+        ${validation.note?`<span class="batch-validation-note">${validation.note}</span>`:""}</span></div>
     <p class="batch-meta">${batchDocSummary(item.doc)}</p>
     <div class="batch-fields">
       <div class="batch-field ${item.periodEnd?"":"missing"}"><label>Reporting date</label>
