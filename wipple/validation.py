@@ -230,7 +230,8 @@ def serialize_validation(r: ValidationResult) -> dict:
                  g.classification, g.classification.replace("_", " ")),
              "classification_detail": g.classification_detail,
              "transplant_sources": [list(t) for t in g.transplant_sources],
-             "failing_relations": list(g.failing_relations)}
+             "failing_relations": list(g.failing_relations),
+             "proof_kind": g.proof_kind}
             for g in r.findings
         ],
         "competing_mapping": (None if r.competing_mapping is None

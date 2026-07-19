@@ -679,18 +679,24 @@ function totalsDetail(rep){
   const tc=rep.totals_check;
   if(!tc)return rep._doc_totals_detail||null;
   const map=(rep.parse&&rep.parse.numeric_col_map)||[];
+  const after=(rep.analysis&&rep.analysis.totals_after_corrections)||{};
   const out=[];
   for(const[j,c]of Object.entries(tc.columns||{})){
-    if(c.matches)continue;
+    const resolved=after[j]||after[+j]||null;
+    if(c.matches&&(!resolved||resolved.matches_after_corrections))continue;
     const mcol=map.indexOf(+j);
     const header=(rep.table&&rep.table.columns[mcol]&&rep.table.columns[mcol].header)||("column "+j);
-    const explained=(rep.findings||[]).some(f=>f.culprit_column===mcol
-      &&f.proposed_correction!=null
-      &&Math.abs(Math.abs(f.observed-f.proposed_correction)-Math.abs(c.difference))
-        <=Math.max(2,.01*Math.abs(c.difference)));
-    out.push({header,stated:c.stated,computed:c.computed,diff:c.difference,explained});
+    const explained=resolved?resolved.matches_after_corrections:
+      (rep.findings||[]).some(f=>f.culprit_column===mcol
+        &&f.proposed_correction!=null
+        &&Math.abs(Math.abs(f.observed-f.proposed_correction)-Math.abs(c.difference))
+          <=Math.max(2,.01*Math.abs(c.difference)));
+    out.push({header,stated:c.stated,
+      computed:resolved?resolved.computed_after_corrections:c.computed,
+      diff:resolved?resolved.difference_after_corrections:c.difference,
+      explained});
   }
-  return{present:true,allMatch:tc.all_match,mismatches:out,
+  return{present:true,allMatch:out.length===0,mismatches:out,
     allExplained:out.length>0&&out.every(m=>m.explained)};
 }
 let REPORT=null;          /* the ACTIVE section's v2-shaped report */
@@ -772,10 +778,19 @@ function batchDocSummary(doc){
   const schedules=reps.length;
   return `${jobs} job${jobs===1?"":"s"} across ${schedules} table${schedules===1?"":"s"}`;
 }
-function batchValidation(doc){
-  const reps=documentSections(doc).map(s=>s.rep);
+function batchValidation(item){
+  const sections=documentSections(item.doc),reps=sections.map(s=>s.rep);
   const findings=reps.reduce((n,r)=>n+(r.findings||[]).length,0);
   const corrections=reps.reduce((n,r)=>n+(r.analysis?.corrections||[]).length,0);
+  let applied=0,supported=0;
+  sections.forEach((section,si)=>{
+    const corrs=section.rep.analysis?.corrections||[];
+    const selected=item.reviewState?.states?.[si]||new Set(corrs.map((_,ci)=>ci));
+    corrs.forEach((correction,ci)=>{
+      if(selected.has(ci))applied++;
+      if(correction.confidence==="high"&&(correction.checks||0)>=1)supported++;
+    });
+  });
   const otherErrors=reps.reduce((n,r)=>{
     const td=totalsDetail(r);
     const totalsProblem=td&&td.present&&!td.allMatch&&!td.allExplained?1:0;
@@ -786,10 +801,11 @@ function batchValidation(doc){
   const incomplete=reps.some(r=>["unmapped","llm_mapped_unverified"].includes(r.overall_status));
   if(incomplete)return{kind:"review",icon:"!",text:"Validation needs review"};
   if(!errors)return{kind:"ok",icon:"✓",text:"All checks passed"};
-  if(!otherErrors&&corrections>=findings)return{kind:"corrected",icon:"✓",
-    text:`${corrections} correction${corrections===1?"":"s"} applied`};
-  const unresolved=Math.max(1,errors-corrections);
-  return{kind:"review",icon:"!",text:`${unresolved} error${unresolved===1?"":"s"} need review`};
+  const fullyCorrected=!otherErrors&&findings>0&&corrections===findings
+    &&applied===corrections&&supported===corrections;
+  if(fullyCorrected)return{kind:"corrected",icon:"✓",
+    text:`${findings} error${findings===1?"":"s"} detected and corrected`};
+  return{kind:"review",icon:"!",text:`${errors} error${errors===1?"":"s"} need review`};
 }
 async function scanBatch(files){
   resetBatch();clearSourceFile();BATCH_MODE=true;
@@ -887,7 +903,7 @@ function batchCardHTML(item,i){
     <div class="batch-top"><span class="batch-name" title="${htmlEsc(item.name)}">${htmlEsc(item.name)}</span>
       <span class="batch-state">needs attention</span></div>
     <p class="batch-meta">${htmlEsc(item.error||"Could not process this schedule.")}</p></article>`;
-  const validation=batchValidation(item.doc);
+  const validation=batchValidation(item);
   return`<article class="batch-card ${validation.kind==="review"?"needs-review":""}">
     <div class="batch-top"><span class="batch-name" title="${htmlEsc(item.name)}">${htmlEsc(item.name)}</span>
       <span class="batch-state">ready</span></div>
@@ -1728,19 +1744,24 @@ function renderCertificate(rep){
       :`<td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name" title="${label}">${label}</span></div><small>${htmlEsc(col)}</small></td>`;
     const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""} aria-label="include suggested value for ${f.row_label}">`
                :`<span style="color:var(--muted);font-size:12px">review</span>`;
+    const confirmation=!c?"\u2014":c.proof_kind==="joint"?"joint proof":
+      c.proof_kind==="inherited"?"validated inputs":
+      `${c.checks} way${c.checks===1?"":"s"}`;
     const ev=c?`<tr class="evrow hidden" data-ev="${ci}"><td colspan="6">
         <p class="evtitle">Formulas used</p>
         <div class="evgrid">
           ${(c.basis||[]).map(b=>`<div class="eq"><span class="eqname">${formulaHeading(b)}</span><div class="eqline"><span>${b}</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div></div>`).join("")}
           ${c.corroborated?`<div class="eq"><span class="eqname">Stated total</span><div class="eqline"><span>stated total \u2212 the other rows</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div></div>`:""}
         </div>
-        <p class="evnote">every check lands on the same number; the printed $${fmt$(c.printed)} satisfies none of them</p>
+        <p class="evnote">${c.proof_kind==="joint"?"this is part of the unique smallest repair that makes every applicable formula pass":
+          c.proof_kind==="inherited"?"the other values in this formula are independently pinned down; changing any of them breaks another formula":
+          `every independent check lands on the same number; the printed $${fmt$(c.printed)} satisfies none of them`}</p>
       </td></tr>`:"";
     return `<tr>${jobCell}
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
       <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
       <td>${causeText(f.classification,f.observed,f.proposed_correction,f.classification_label)}</td>
-      <td>${c?`${c.checks} way${c.checks===1?"":"s"}${c.corroborated?"<small>plus the totals row</small>":""}`:"\u2014"}</td>
+      <td>${c?`${confirmation}${c.corroborated?"<small>plus the totals row</small>":""}`:"\u2014"}</td>
       <td style="text-align:right">${use}</td></tr>${ev}`;
   };
   const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Corrections automatically applied. Uncheck any correction to keep the document as printed.</p>
@@ -1778,7 +1799,10 @@ function renderCertificate(rep){
     <section class="validation-corrections"><h3>Errors and corrections</h3>
       ${excHTML||'<p class="empty" style="text-align:left">No errors or corrections for this schedule.</p>'}
     </section>
-    <div class="go"><button class="btn primary" onclick="${BATCH_MODE?`renderBatchItemAnalysis(${BATCH_ACTIVE})`:"VIEW='dash';renderDash(REPORT);show('dash');window.scrollTo(0,0)"}">View underwriting analysis</button></div>
+    <div class="go" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap">
+      ${BATCH_MODE?'<button class="btn" onclick="renderBatch()">← All validations</button>':""}
+      <button class="btn primary" onclick="${BATCH_MODE?`renderBatchItemAnalysis(${BATCH_ACTIVE})`:"VIEW='dash';renderDash(REPORT);show('dash');window.scrollTo(0,0)"}">View underwriting analysis</button>
+    </div>
     ${detail}
   </div></div>`;
   const ua=$("#useAll"),st=$("#applyStatus"),ap=$("#applySel"),src=$("#reviewSource");
@@ -2395,13 +2419,24 @@ function printSummary(rep){
   const trends=BATCH_ANALYSIS_MODE?timeSeriesData():null;
   const trendHtml=trends?`<section class="print-trends">
     <h2 class="section-title">Across reporting periods</h2>
-    <p class="section-sub">Material profit fade, cost-estimate changes, and stalled jobs.</p>
-    <table><thead><tr><th>Job</th><th>Periods</th><th>Cost change</th><th>Profit change</th><th>Stalled</th></tr></thead>
-      <tbody>${trends.rows.map(row=>`<tr><td>${htmlEsc(row.name||row.id||"—")}</td>
+    <p class="section-sub">Profit fade is the primary cross-period concern; cost-estimate changes and stalled jobs provide supporting context.</p>
+    <div class="print-trend-kpis">
+      <div class="print-trend-kpi fade"><span>Profit fade</span><strong>${htmlEsc(fmtM(trends.fade))}</strong>
+        <small>${trends.fadeJobs} job${trends.fadeJobs===1?"":"s"} lost expected profit</small></div>
+      <div class="print-trend-kpi"><span>Cost estimate increases</span><strong>${htmlEsc(fmtM(trends.totalCostIncrease))}</strong>
+        <small>${trends.costIncreaseJobs} job${trends.costIncreaseJobs===1?"":"s"} revised upward</small></div>
+    </div>
+    <table><thead><tr><th>Job</th><th>Signal</th><th>Periods</th><th>Cost change</th><th>Profit change</th><th>Stalled</th></tr></thead>
+      <tbody>${trends.rows.map(row=>{const flags=[
+        row.materialFade?'<span class="profit-fade-badge">Profit fade</span>':"",
+        row.materialCost?"Cost increase":"",
+        row.stalled?"Stalled":""
+      ].filter(Boolean).join(" · ");return`<tr class="${row.materialFade?"profit-fade-row":""}"><td>${htmlEsc(row.name||row.id||"—")}</td>
+        <td>${flags||"—"}</td>
         <td>${htmlEsc(`${row.from.slice(0,4)} → ${row.to.slice(0,4)}`)}</td>
         <td>${htmlEsc(row.cost==null?"—":fmtM(row.cost))}</td>
-        <td>${htmlEsc(row.fade==null?"—":fmtM(row.fade))}</td>
-        <td>${row.stalled?"Yes":"—"}</td></tr>`).join("")}</tbody></table>
+        <td class="${row.materialFade?"fade-value":""}">${htmlEsc(row.fade==null?"—":fmtM(row.fade))}</td>
+        <td>${row.stalled?"Yes":"—"}</td></tr>`}).join("")}</tbody></table>
     </section>`:"";
 
   const corrections=(a.corrections||[]).filter((_,i)=>ACCEPTED.has(i)).length;
@@ -2447,9 +2482,19 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 .signal-why strong{color:var(--ink);font-weight:600}
 .print-signal + .print-signal{margin-top:4px}
 .print-trends{margin-top:24px;break-inside:avoid}
+.print-trend-kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 12px}
+.print-trend-kpi{border:1px solid var(--line);border-radius:6px;padding:8px}
+.print-trend-kpi.fade{background:#FBF0EC;border-color:#D8AA9D}
+.print-trend-kpi span{display:block;color:var(--muted);font-size:8px;letter-spacing:.07em;text-transform:uppercase}
+.print-trend-kpi strong{display:block;font-size:17px;margin-top:2px}
+.print-trend-kpi.fade strong{color:var(--brick)}
+.print-trend-kpi small{display:block;color:var(--muted);font-size:8px;margin-top:1px}
 .print-trends table{width:100%;border-collapse:collapse;font-size:9px}
 .print-trends th,.print-trends td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right}
 .print-trends th:first-child,.print-trends td:first-child{text-align:left}
+.print-trends .profit-fade-row td{background:#FFF8F5}
+.profit-fade-badge{display:inline-block;border-radius:999px;padding:1px 5px;background:#F2DDD6;color:var(--brick);font-size:7px;font-weight:700;text-transform:uppercase}
+.print-trends .fade-value{color:var(--brick);font-weight:700}
 .chart-block h2,.schedule-page h2{font-family:Georgia,serif;font-size:18px;font-weight:500;margin:0 0 3px}
 .chart-block .sub,.schedule-page .sub{font-size:10px;color:var(--muted);margin:0 0 12px}
 .chart-block .card{border:0;padding:0;margin:0;background:white;break-inside:avoid;page-break-inside:avoid}

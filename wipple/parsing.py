@@ -367,7 +367,14 @@ def parse_table(
             if stated_v is None:
                 continue
             computed = float(np.nansum(parsed[body, j]))
-            tol = max(1.0, 0.005 * abs(computed))
+            # Identification of a totals row is deliberately loose above;
+            # validation of a stated total is not. Accumulate at most one
+            # half-dollar of display rounding per body row, plus a dollar of
+            # slack and negligible floating-point noise. A 0.5% tolerance on
+            # a multi-million-dollar schedule can otherwise bless errors in
+            # the tens of thousands.
+            tol = max(1.0, 0.51 * len(body) + 1.0,
+                      1e-9 * abs(computed))
             plain = abs(stated_v - computed) <= tol
             with_subs = abs(stated_v - (computed + subtotal_sum.get(j, 0.0))) <= tol
             per_col[j] = {

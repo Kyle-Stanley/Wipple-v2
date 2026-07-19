@@ -388,6 +388,7 @@ class Finding:
     classification_detail: str
     transplant_sources: list        # [(row_index, col)] cells equal to observed
     failing_relations: list
+    proof_kind: str = "direct"       # direct | inherited | joint
 
 
 @dataclass
@@ -877,20 +878,28 @@ def _anchor_candidates(cols_m, Vm, Cm, used, cfg):
     """Joint candidate sets for the progress anchors D and B (pruned by
     robust priors; the final choice is made jointly by evidence, never
     greedily)."""
-    frac = cfg.prior_robust_frac
     m = Vm.size
+    # Keep the economic-prior pruning at least as tolerant as structural
+    # identification. Otherwise one extreme OCR error in an 8-row schedule
+    # satisfies 7/8 = 87.5%, misses a nominal 90% cutoff, and causes the bad
+    # physical D/B column to be silently reinterpreted as a different role
+    # before diagnosis ever gets a chance to repair it.
+    required = min(
+        int(np.ceil(cfg.prior_robust_frac * m)),
+        m - _allowed_bad(m, cfg),
+    )
     d_c, b_c = [], []
     for j, x in enumerate(cols_m):
         if j in used:
             continue
-        nonneg = int((x >= -cfg.money_obs_tol).sum()) >= frac * m
+        nonneg = int((x >= -cfg.money_obs_tol).sum()) >= required
         if not nonneg:
             continue
-        if (int((x <= Cm * cfg.d_over_c_slack + 1.0).sum()) >= frac * m
+        if (int((x <= Cm * cfg.d_over_c_slack + 1.0).sum()) >= required
                 and float(np.median(x / np.maximum(Cm, 1e-9)))
                 >= cfg.anchor_live_med):
             d_c.append(j)
-        if (int((x <= Vm * cfg.b_over_v_slack + 1.0).sum()) >= frac * m
+        if (int((x <= Vm * cfg.b_over_v_slack + 1.0).sum()) >= required
                 and float(np.median(x / np.maximum(Vm, 1e-9)))
                 >= cfg.anchor_live_med):
             b_c.append(j)
@@ -1213,6 +1222,299 @@ def _family_consensus(implied):
     return center, agreeing, basis
 
 
+def _row_value(vv, r):
+    """Semantic value of one observed/derived cell at a hypothesis row."""
+    value = float(vv.values[r])
+    return abs(value) if vv.var in MAGNITUDE_PRESENTATION_VARS else value
+
+
+def _rule_prediction(rule, values):
+    args = [np.array([values[v]], dtype=float) for v in rule.ins]
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        pred = float(rule.fn(*args)[0])
+    return pred if np.isfinite(pred) else None
+
+
+def _candidate_clusters(candidates):
+    """Return one agreed candidate plus its proof, or None on conflict.
+
+    Re-arrangements inside one algebraic family count once.  A candidate may
+    still be used when only one family reaches it: uniqueness is established
+    later by testing every competing minimal repair and re-checking the whole
+    row, which is the inherited-proof rule.
+    """
+    grouped = {}
+    for c in candidates:
+        grouped.setdefault(c["family"], []).append(c)
+
+    reps = []
+    for family, votes in grouped.items():
+        for i, a in enumerate(votes):
+            for b in votes[i + 1:]:
+                if abs(a["value"] - b["value"]) > max(
+                        2.0, a["tol"], b["tol"]):
+                    return None
+        money = [v for v in votes if v["kind"] == "money"]
+        used = money if money else votes
+        reps.append({
+            "value": float(np.median([v["value"] for v in used])),
+            "tol": max(v["tol"] for v in used),
+            "kind": "money" if money else used[0]["kind"],
+            "family": family,
+            "basis": sorted({name for v in votes for name in v["basis"]}),
+            "families": frozenset().union(
+                *[v["families"] for v in votes], {family}),
+        })
+
+    primary = [v for v in reps if v["kind"] == "money"] or reps
+    if not primary:
+        return None
+    center = float(np.median([v["value"] for v in primary]))
+    if any(abs(v["value"] - center) > max(2.0, v["tol"])
+           for v in reps):
+        return None
+    return {
+        "value": center,
+        "tol": max(v["tol"] for v in reps),
+        "basis": sorted({name for v in reps for name in v["basis"]}),
+        "families": frozenset().union(*[v["families"] for v in reps]),
+    }
+
+
+def _repair_row(hyp, r, suspects, cfg):
+    """Solve one proposed one- or two-cell repair without using its print.
+
+    All non-suspect physical cells remain observations. Missing/virtual
+    variables and the suspect cells are then propagated from the formula
+    graph. A solution is accepted only when every applicable rule whose
+    output is physically printed passes after the repair. This turns
+    independently checked inputs into inherited proof and prevents a repair
+    from hiding a second error elsewhere in the row.
+    """
+    suspects = frozenset(suspects)
+    physical = {var: vv for var, vv in hyp.known.items()
+                if vv.col is not None}
+    values, tols, proofs, families = {}, {}, {}, {}
+    for var, vv in physical.items():
+        if var in suspects:
+            continue
+        values[var] = _row_value(vv, r)
+        tols[var] = float(vv.tol[r])
+        proofs[var] = []
+        families[var] = frozenset()
+
+    # Constraint propagation. A two-cell repair is intentionally allowed to
+    # be topological (A independently proves, then A helps prove B), but a
+    # circular pair has no seed and therefore never materializes.
+    for _ in range(len(VAR_NAMES) * 3):
+        pending = {}
+        for rule in RULES_ORDERED:
+            # Forward implication: inputs -> output.
+            if rule.out not in values and all(v in values for v in rule.ins):
+                pred = _rule_prediction(rule, values)
+                if pred is not None:
+                    in_tols = [np.array([tols[v]]) for v in rule.ins]
+                    in_vals = [np.array([values[v]]) for v in rule.ins]
+                    _, ptol = _prop_tol(rule.fn, in_vals, in_tols)
+                    pending.setdefault(rule.out, []).append({
+                        "value": pred, "tol": max(float(ptol[0]), 1e-9),
+                        "kind": rule.kind, "family": rule.family,
+                        "basis": [rule.name]
+                                 + [p for v in rule.ins for p in proofs[v]],
+                        "families": frozenset().union(
+                            *[families[v] for v in rule.ins]),
+                    })
+
+            # Inverse implication: observed/derived output + all but one
+            # input -> the missing input.
+            if rule.out not in values:
+                continue
+            missing = [v for v in rule.ins if v not in values]
+            if len(missing) != 1:
+                continue
+            target_var = missing[0]
+            target = values[rule.out]
+            if rule.clipped and abs(target) <= max(
+                    2.0, tols.get(rule.out, 0.0)):
+                continue                    # inverse is a range, not a value
+            args = [values.get(v, 0.0) for v in rule.ins]
+            i = rule.ins.index(target_var)
+            vv = hyp.known.get(target_var)
+            x0 = _row_value(vv, r) if vv is not None else 0.0
+            sol = _solve_input(rule.fn, args, i, target, x0)
+            if sol is None or not np.isfinite(sol):
+                continue
+            target_tol = max(tols.get(rule.out, 0.0), 1e-9)
+            solp = _solve_input(rule.fn, args, i, target + target_tol, x0)
+            implied_tol = abs(solp - sol) if solp is not None else target_tol
+            source_vars = [rule.out] + [
+                v for v in rule.ins if v != target_var]
+            pending.setdefault(target_var, []).append({
+                "value": float(sol), "tol": max(float(implied_tol), 1e-9),
+                "kind": rule.kind, "family": rule.family,
+                "basis": [rule.name]
+                         + [p for v in source_vars for p in proofs[v]],
+                "families": frozenset().union(
+                    *[families[v] for v in source_vars]),
+            })
+
+        made = False
+        for var, candidates in pending.items():
+            if var in values:
+                continue
+            agreed = _candidate_clusters(candidates)
+            if agreed is None:
+                continue
+            value = agreed["value"]
+            if var not in PCT_VARS:
+                value = round(value, 2)
+            else:
+                vv = hyp.known.get(var)
+                if vv is not None and vv.grid is not None:
+                    value = round(value / vv.grid) * vv.grid
+            values[var] = value
+            # Once a printed suspect receives a concrete replacement, it is
+            # a proposed observation at that column's display precision. Do
+            # not carry a coarse inverse tolerance (notably from a rounded
+            # percent column) into final certification or it can mask a
+            # contradictory dollar identity.
+            tols[var] = (float(physical[var].tol[r])
+                         if var in suspects and var in physical
+                         else agreed["tol"])
+            proofs[var] = agreed["basis"]
+            families[var] = agreed["families"]
+            made = True
+        if not made:
+            break
+
+    if not suspects <= values.keys():
+        return None
+
+    # Every proposed member must materially change. Otherwise this is a
+    # larger repair set disguising a smaller one.
+    for var in suspects:
+        observed = _row_value(physical[var], r)
+        material = (max(1e-9, float(physical[var].tol[r]))
+                    if var in PCT_VARS else
+                    max(1.0, float(physical[var].tol[r])
+                        + cfg.cert_slack))
+        if abs(values[var] - observed) <= material:
+            return None
+
+    # Re-check all printed outputs, including alternate spellings that the
+    # mapping phase merged into one evidence family. This is load-bearing for
+    # multi-cell errors: correcting one failed edge must not break a second
+    # physical identity that happened to fit before the repair.
+    for rule in RULES_ORDERED:
+        out_vv = physical.get(rule.out)
+        if out_vv is None or rule.out not in values \
+                or not all(v in values for v in rule.ins):
+            continue
+        pred = _rule_prediction(rule, values)
+        if pred is None:
+            return None
+        in_vals = [np.array([values[v]]) for v in rule.ins]
+        in_tols = [np.array([tols[v]]) for v in rule.ins]
+        _, ptol = _prop_tol(rule.fn, in_vals, in_tols)
+        compared = (abs(values[rule.out])
+                    if rule.out in MAGNITUDE_PRESENTATION_VARS
+                    else values[rule.out])
+        if rule.kind == "money":
+            strict = (float(ptol[0]) + tols[rule.out] + cfg.cert_slack
+                      + cfg.cert_money_rel * abs(pred))
+        else:
+            strict = float(ptol[0]) + tols[rule.out] + 1e-9
+        if abs(compared - pred) > max(strict, 1e-8):
+            return None
+
+    return [{
+        "variable": var,
+        "column": physical[var].col,
+        "observed": _row_value(physical[var], r),
+        "proposed": values[var],
+        "basis": proofs[var],
+        "families": sorted(families[var]),
+    } for var in sorted(suspects)]
+
+
+def _minimal_row_repair(hyp, r, cfg):
+    """Find the unique smallest repair (one cell, then two cells)."""
+    physical_vars = sorted(
+        var for var, vv in hyp.known.items() if vv.col is not None)
+    levels = [[(v,) for v in physical_vars]]
+    levels.append([
+        (physical_vars[i], physical_vars[j])
+        for i in range(len(physical_vars))
+        for j in range(i + 1, len(physical_vars))
+    ])
+    for sets in levels:
+        solutions = []
+        for suspects in sets:
+            solution = _repair_row(hyp, r, suspects, cfg)
+            if solution is not None:
+                solutions.append(solution)
+        if len(solutions) == 1:
+            return "resolved", solutions[0]
+        if len(solutions) > 1:
+            choices = sorted({
+                item["variable"] for solution in solutions
+                for item in solution})
+            return "ambiguous", choices
+    return "none", []
+
+
+def _shadow_column_mapping(failures):
+    """Return unambiguous physical-column recoveries from shadow audits."""
+    recovered, conflicts = {}, set()
+    for failure in failures:
+        if (not failure.relation.startswith("column ")
+                or failure.column is None):
+            continue
+        col = int(failure.column)
+        prior = recovered.get(col)
+        if prior is not None and prior != failure.variable:
+            conflicts.add(col)
+        else:
+            recovered[col] = failure.variable
+    for col in conflicts:
+        recovered.pop(col, None)
+    return recovered
+
+
+def _repair_hypothesis_with_shadow_columns(hyp, cols, failures, cfg):
+    """Expose consistently identified shadow columns to the repair solver.
+
+    Identification deliberately tolerates a badly corrupted physical column
+    by routing through a virtual value. Once the shadow audit identifies what
+    that physical column represents, however, every row identity should be
+    allowed to use it while solving a repair. This is particularly important
+    for penny-exact identities such as D = E - H and D = C - Q.
+    """
+    known = dict(hyp.known)
+    occupied = {
+        vv.col: var for var, vv in known.items() if vv.col is not None}
+    used_vars = set(occupied.values())
+    for col, var in sorted(_shadow_column_mapping(failures).items()):
+        if col in occupied or var in used_vars:
+            continue
+        known[var] = VarVal(
+            var=var,
+            values=np.asarray(cols[col][hyp.row_index], dtype=float),
+            tol=np.full(len(hyp.row_index), cfg.money_obs_tol, dtype=float),
+            support=frozenset({col}), col=col,
+            derivation="physical column recovered by shadow audit",
+            deps=frozenset({var}))
+        occupied[col] = var
+        used_vars.add(var)
+    return Hypothesis(
+        v_col=hyp.v_col, x_col=hyp.x_col,
+        orientation=hyp.orientation, d_col=hyp.d_col, b_col=hyp.b_col,
+        key=hyp.key, known=known, edges=hyp.edges, families=hyp.families,
+        corr_d=hyp.corr_d, corr_b=hyp.corr_b, evidence=hyp.evidence,
+        score=hyp.score, n_assigned=hyp.n_assigned,
+        row_index=hyp.row_index)
+
+
 def _diagnose(hyp, cols, labels, cfg, failures):
     """Distill relation-level failures into cell-level findings.
 
@@ -1226,6 +1528,8 @@ def _diagnose(hyp, cols, labels, cfg, failures):
     grid-coarse and serve only as corroboration) and classify the
     observed/implied pair; (5) scan for neighbor transplants."""
     findings = []
+    repair_hyp = _repair_hypothesis_with_shadow_columns(
+        hyp, cols, failures, cfg)
     edge_data = []
     for e in hyp.edges:
         rule = e.rule
@@ -1275,6 +1579,70 @@ def _diagnose(hyp, cols, labels, cfg, failures):
         common = dict(row_index=int(orig_r), row_label=labels[orig_r],
                       exonerated_variables=sorted(exonerated),
                       failing_relations=[f[1].name for f in failing])
+
+        repair_status, repair = _minimal_row_repair(repair_hyp, r, cfg)
+        if repair_status == "resolved":
+            suspect_vars = {item["variable"] for item in repair}
+            physical_vars = {var for var, vv in repair_hyp.known.items()
+                             if vv.col is not None}
+            proof_kind = "joint" if len(repair) > 1 else (
+                "direct" if len(repair[0]["families"]) >=
+                cfg.correction_min_families else "inherited")
+            if len(repair) == 1:
+                culprits_by_row[int(orig_r)] = repair[0]["variable"]
+            for item in repair:
+                vv = repair_hyp.known[item["variable"]]
+                observed = item["observed"] * vv.interp_scale
+                proposed = item["proposed"] * vv.interp_scale
+                cls, detail = _classify_error(observed, proposed)
+                if proof_kind == "inherited":
+                    detail += (
+                        "; replacement is uniquely determined after every "
+                        "alternative one-cell repair is rejected by the "
+                        "row's other validated identities"
+                    )
+                elif proof_kind == "joint":
+                    detail += (
+                        "; this value is part of the unique smallest "
+                        f"{len(repair)}-cell repair that makes every "
+                        "applicable identity pass"
+                    )
+                transplant = _transplant_sources(
+                    cols, orig_r, item["column"], observed)
+                if transplant and cls in ("unexplained_substitution",
+                                           "digit_transposition"):
+                    cls = "neighbor_transplant"
+                    detail = (
+                        "observed value equals a neighboring cell; the "
+                        "unique minimal repair implies the replacement")
+                findings.append(Finding(
+                    row_index=int(orig_r), row_label=labels[orig_r],
+                    culprit_column=item["column"],
+                    culprit_variable=item["variable"],
+                    candidate_variables=[item["variable"]],
+                    exonerated_variables=sorted(
+                        physical_vars - suspect_vars),
+                    observed=observed, proposed_correction=proposed,
+                    correction_basis=item["basis"],
+                    confidence="high", classification=cls,
+                    classification_detail=detail,
+                    transplant_sources=transplant,
+                    failing_relations=[f[1].name for f in failing],
+                    proof_kind=proof_kind))
+            continue
+
+        if repair_status == "ambiguous":
+            findings.append(Finding(
+                **common, culprit_column=None, culprit_variable=None,
+                candidate_variables=repair, observed=None,
+                proposed_correction=None, correction_basis=[],
+                confidence="low", classification="ambiguous_multi_cell",
+                classification_detail=(
+                    "more than one equally small repair makes every "
+                    "applicable identity pass; the document does not "
+                    "mathematically distinguish the alternatives"),
+                transplant_sources=[]))
+            continue
 
         cands = set(frozenset.intersection(*[f[-1] for f in failing])) \
             - exonerated
@@ -1361,17 +1729,56 @@ def _diagnose(hyp, cols, labels, cfg, failures):
             else frozenset()
         if culprits_by_row.get(f.row_index) in vdeps:
             continue
-        expected = (round(f.expected) if f.variable not in PCT_VARS
+        expected = (round(f.expected, 2) if f.variable not in PCT_VARS
                     else f.expected)
-        cls, detail = _classify_error(f.observed, expected)
         proposed = None
         basis = [f.relation]
         confidence = "low"
-        detail += (
-            f"; 1 independent validation family supports this value, "
-            f"but {cfg.correction_min_families} are required before "
-            "suggesting a replacement"
-        )
+        proof_kind = "direct"
+
+        # The shadow audit has already established that this unassigned
+        # physical column realizes the virtual variable on a majority of
+        # rows. Promote it in a temporary hypothesis and run the same unique
+        # minimal-repair search used for normally mapped columns. This is the
+        # inherited-proof path for sparse columns such as Cost to Complete:
+        # one direct equation is enough when every alternative repair breaks
+        # another independently observed identity.
+        orig_to_m = {int(orig): m
+                     for m, orig in enumerate(hyp.row_index)}
+        mr = orig_to_m.get(f.row_index)
+        if mr is not None and f.variable in repair_hyp.known:
+            repair_status, repair = _minimal_row_repair(
+                repair_hyp, mr, cfg)
+            if repair_status == "resolved":
+                item = next((x for x in repair
+                             if x["variable"] == f.variable), None)
+                if item is not None:
+                    proposed = item["proposed"]
+                    basis = item["basis"]
+                    confidence = "high"
+                    proof_kind = "joint" if len(repair) > 1 else (
+                        "direct" if len(item["families"]) >=
+                        cfg.correction_min_families else "inherited")
+
+        cls, detail = _classify_error(
+            f.observed, proposed if proposed is not None else expected)
+        if proposed is None:
+            detail += (
+                f"; the column is identified by its fit on the other rows, "
+                "but the replacement is not unique under the row's "
+                "available identities"
+            )
+        elif proof_kind == "inherited":
+            detail += (
+                "; replacement is uniquely determined after every "
+                "alternative repair is rejected by the row's other "
+                "validated identities"
+            )
+        elif proof_kind == "joint":
+            detail += (
+                "; this value is part of the unique smallest joint repair "
+                "that makes every applicable identity pass"
+            )
 
         tr = _transplant_sources(cols, f.row_index, f.column, f.observed)
         if tr and cls in ("unexplained_substitution", "digit_transposition"):
@@ -1379,9 +1786,10 @@ def _diagnose(hyp, cols, labels, cfg, failures):
             detail = ("observed value equals neighboring cell(s) "
                       + ", ".join(f"(row {a}, col {b})" for a, b in tr)
                       + " -- extractor likely grabbed the wrong cell"
-                      + ("" if proposed is not None else
-                         f"; fewer than {cfg.correction_min_families} "
-                         "independent validations support a replacement"))
+                      + ("; the unique minimal repair supplies the "
+                         "replacement" if proposed is not None else
+                         "; the replacement remains mathematically "
+                         "ambiguous"))
         findings.append(Finding(
             row_index=f.row_index, row_label=f.row_label,
             culprit_column=f.column, culprit_variable=f.variable,
@@ -1390,7 +1798,8 @@ def _diagnose(hyp, cols, labels, cfg, failures):
             correction_basis=basis, confidence=confidence,
             classification=cls, classification_detail=detail,
             transplant_sources=tr,
-            failing_relations=[f.relation]))
+            failing_relations=[f.relation],
+            proof_kind=proof_kind))
     return findings
 
 
@@ -1610,6 +2019,16 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
             diag["rivals_refuted_by_certification"] = refuted
 
     mapping = {int(c): v for c, v in sorted(_mapping_of(best).items())}
+    recovered_by_col = _shadow_column_mapping(failures)
+    occupied_vars = set(mapping.values())
+    for col, var in sorted(recovered_by_col.items()):
+        if col not in mapping and var not in occupied_vars:
+            mapping[col] = var
+            occupied_vars.add(var)
+    if recovered_by_col:
+        diag["shadow_columns_promoted"] = {
+            int(col): var for col, var in recovered_by_col.items()
+            if mapping.get(int(col)) == var}
     other = "G" if best.orientation == "C" else "C"
     orientation = (
         f"estimate column (col {best.x_col}) read as "
@@ -1619,7 +2038,7 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
            if best.known[other].col is not None
            else f"constructed virtually as V - {best.orientation}"))
     virtuals = {var: vv.derivation for var, vv in best.known.items()
-                if vv.col is None}
+                if vv.col is None and var not in occupied_vars}
     diag["winning_score"] = round(best.score, 3)
     diag["evidence_units"] = round(best.evidence, 3)
     diag["corroboration"] = {"D": best.corr_d, "B": best.corr_b}
