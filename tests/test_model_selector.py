@@ -119,3 +119,31 @@ def test_claude_json_request_requires_a_schema():
     with pytest.raises(ValueError, match="explicit output_schema"):
         client.generate("return JSON", model_override="claude-sonnet-4-6",
                         json_only=True)
+
+
+def test_haiku_gets_bounded_manual_thinking():
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            content=[SimpleNamespace(text='{"ok":true}')],
+            usage=SimpleNamespace(input_tokens=7, output_tokens=3),
+        )
+
+    client = ModelClient()
+    client._anthropic = SimpleNamespace(
+        messages=SimpleNamespace(create=create))
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    client.generate("return JSON", model_override="claude-haiku-4-5",
+                    json_only=True, output_schema=schema)
+
+    assert captured["thinking"] == {
+        "type": "enabled", "budget_tokens": 16_384}
+    assert captured["max_tokens"] == 65_536
