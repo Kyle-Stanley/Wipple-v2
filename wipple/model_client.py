@@ -1,13 +1,15 @@
 """
-Slim model client: two providers, three tiers, one method.
+Wipple model client.
 
-The deterministic validator remains the escalation trigger:
-- primary: fast, capable extraction
-- escalated: stronger second pass
-- fallback: cheap text-only disambiguation
-
-Explicit UI selections are strict. An unsupported model raises an error instead
-of silently falling back to Gemini.
+Important routing rules:
+- Auto keeps the proven Gemini-only path:
+    primary   -> Gemini 3.1 Flash-Lite
+    escalated -> Gemini 3.1 Pro Preview
+    fallback  -> Gemini 3.1 Flash-Lite
+- An explicit UI selection stays pinned for every call that shares the same
+  Metrics object, including validator-triggered retries.
+- Invalid explicit model IDs raise instead of silently becoming another model.
+- Metrics report configured and provider-returned model IDs per call.
 """
 
 from __future__ import annotations
@@ -19,7 +21,6 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import date
 from typing import Any, Optional
 
 
@@ -30,51 +31,50 @@ class TierConfig:
     input_per_m: float
     output_per_m: float
     display_name: str = ""
+    thinking_level: Optional[str] = None
+    disable_adaptive_thinking: bool = False
 
 
-def _sonnet_5_prices() -> tuple[float, float]:
-    """Anthropic launch pricing runs through 2026-08-31."""
-    if date.today() <= date(2026, 8, 31):
-        return 2.0, 10.0
-    return 3.0, 15.0
-
-
-_sonnet5_input, _sonnet5_output = _sonnet_5_prices()
-
-
-# Current production-facing models for document extraction.
-# Pricing is standard synchronous API pricing per million tokens.
+# Current selectable models. Pricing is standard synchronous API pricing
+# per million tokens. Claude remains manually selectable but is not used by Auto.
 MODEL_REGISTRY: dict[str, TierConfig] = {
     "gemini-3.1-flash-lite": TierConfig(
         "gemini-3.1-flash-lite", "google", 0.25, 1.50,
-        "Gemini 3.1 Flash-Lite"),
+        "Gemini 3.1 Flash-Lite", thinking_level="minimal"),
+    "gemini-3-flash-preview": TierConfig(
+        "gemini-3-flash-preview", "google", 0.50, 3.00,
+        "Gemini 3 Flash Preview", thinking_level="minimal"),
     "gemini-3.5-flash": TierConfig(
         "gemini-3.5-flash", "google", 1.50, 9.00,
-        "Gemini 3.5 Flash"),
+        "Gemini 3.5 Flash", thinking_level="minimal"),
     "gemini-3.1-pro-preview": TierConfig(
         "gemini-3.1-pro-preview", "google", 2.00, 12.00,
-        "Gemini 3.1 Pro Preview"),
+        "Gemini 3.1 Pro Preview", thinking_level="low"),
     "claude-haiku-4-5": TierConfig(
         "claude-haiku-4-5", "anthropic", 1.00, 5.00,
         "Claude Haiku 4.5"),
+    "claude-haiku-4-5-20251001": TierConfig(
+        "claude-haiku-4-5-20251001", "anthropic", 1.00, 5.00,
+        "Claude Haiku 4.5"),
+    "claude-sonnet-4-6": TierConfig(
+        "claude-sonnet-4-6", "anthropic", 3.00, 15.00,
+        "Claude Sonnet 4.6", disable_adaptive_thinking=True),
     "claude-sonnet-5": TierConfig(
-        "claude-sonnet-5", "anthropic",
-        _sonnet5_input, _sonnet5_output,
-        "Claude Sonnet 5"),
+        "claude-sonnet-5", "anthropic", 3.00, 15.00,
+        "Claude Sonnet 5", disable_adaptive_thinking=True),
+    "claude-opus-4-6": TierConfig(
+        "claude-opus-4-6", "anthropic", 5.00, 25.00,
+        "Claude Opus 4.6", disable_adaptive_thinking=True),
     "claude-opus-4-8": TierConfig(
         "claude-opus-4-8", "anthropic", 5.00, 25.00,
-        "Claude Opus 4.8"),
+        "Claude Opus 4.8", disable_adaptive_thinking=True),
 }
 
 
-# Gracefully migrate old config values to current canonical model IDs.
-# These aliases are accepted, but metrics always report the actual canonical ID.
+# Only genuinely retired IDs are redirected. Distinct working models are never
+# silently aliased to Gemini 3.5 Flash or a newer Claude family.
 MODEL_ALIASES: dict[str, str] = {
     "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview": "gemini-3.5-flash",
-    "claude-haiku-4-5-20251001": "claude-haiku-4-5",
-    "claude-sonnet-4-6": "claude-sonnet-5",
-    "claude-opus-4-6": "claude-opus-4-8",
 }
 
 
@@ -82,7 +82,7 @@ def canonical_model_id(model_id: str) -> str:
     raw = (model_id or "").strip()
     canonical = MODEL_ALIASES.get(raw, raw)
     if canonical not in MODEL_REGISTRY:
-        supported = ", ".join(MODEL_REGISTRY)
+        supported = ", ".join(sorted(MODEL_REGISTRY))
         raise ValueError(
             f"Unsupported model selection {raw!r}. Supported models: {supported}")
     return canonical
@@ -93,18 +93,17 @@ def model_config(model_id: str) -> TierConfig:
 
 
 def _tier_from_env(env_name: str, default_model: str) -> TierConfig:
-    configured = os.environ.get(env_name, default_model)
-    return model_config(configured)
+    # Environment overrides inherit the selected model's real provider/pricing.
+    return model_config(os.environ.get(env_name, default_model))
 
 
-# Auto mode now matches the UI:
-# Gemini 3.5 Flash first, Claude Sonnet 5 when validation triggers escalation.
+# Preserve the fast, accurate architecture that existed before the selector
+# cleanup. Claude is never entered automatically.
 TIERS: dict[str, TierConfig] = {
     "primary": _tier_from_env(
-        "WIPPLE_PRIMARY_MODEL", "gemini-3.5-flash"),
+        "WIPPLE_PRIMARY_MODEL", "gemini-3.1-flash-lite"),
     "escalated": _tier_from_env(
-        "WIPPLE_ESCALATED_MODEL", "claude-sonnet-5"),
-    # Small, cheap text-only tier for header fallback / disambiguation.
+        "WIPPLE_ESCALATED_MODEL", "gemini-3.1-pro-preview"),
     "fallback": _tier_from_env(
         "WIPPLE_FALLBACK_MODEL", "gemini-3.1-flash-lite"),
 }
@@ -123,6 +122,7 @@ class CallRecord:
     output_per_m: float = 0.0
     requested_model_id: Optional[str] = None
     response_model_id: Optional[str] = None
+    thinking_level: Optional[str] = None
 
     @property
     def cost_usd(self) -> float:
@@ -134,11 +134,48 @@ class CallRecord:
 class Metrics:
     calls: list[CallRecord] = field(default_factory=list)
 
+    # An explicit selection is pinned to this run. The same Metrics instance is
+    # already passed through Wipple's model calls, so retries cannot jump tiers.
+    pinned_model_id: Optional[str] = None
+    originally_requested_model_id: Optional[str] = None
+
+    def pin(self, model_id: str) -> str:
+        canonical = canonical_model_id(model_id)
+        if self.pinned_model_id and self.pinned_model_id != canonical:
+            raise RuntimeError(
+                "Conflicting explicit model selections in one Wipple run: "
+                f"{self.pinned_model_id!r} and {canonical!r}")
+        self.pinned_model_id = canonical
+        if self.originally_requested_model_id is None:
+            self.originally_requested_model_id = model_id
+        return canonical
+
     def record(self, rec: CallRecord) -> None:
         self.calls.append(rec)
 
     def summary(self) -> dict:
+        by_call = [
+            {
+                "purpose": c.purpose,
+                "tier": c.tier,
+                "provider": c.provider,
+                # Backward-compatible field used by existing frontends.
+                "model": c.model_id,
+                "configured_model": c.model_id,
+                "requested_model": c.requested_model_id,
+                "response_model": c.response_model_id or c.model_id,
+                "thinking_level": c.thinking_level,
+                "in": c.input_tokens,
+                "out": c.output_tokens,
+                "cost_usd": round(c.cost_usd, 6),
+                "seconds": round(c.seconds, 2),
+            }
+            for c in self.calls
+        ]
         return {
+            "selection_mode": "pinned" if self.pinned_model_id else "auto",
+            "requested_model": self.originally_requested_model_id,
+            "pinned_model": self.pinned_model_id,
             "api_calls": len(self.calls),
             "input_tokens": sum(c.input_tokens for c in self.calls),
             "output_tokens": sum(c.output_tokens for c in self.calls),
@@ -146,22 +183,7 @@ class Metrics:
             "models_used": sorted({
                 c.response_model_id or c.model_id for c in self.calls
             }),
-            "by_call": [
-                {
-                    "purpose": c.purpose,
-                    "tier": c.tier,
-                    "provider": c.provider,
-                    # Keep "model" for backward-compatible frontend display.
-                    "model": c.model_id,
-                    "requested_model": c.requested_model_id,
-                    "response_model": c.response_model_id or c.model_id,
-                    "in": c.input_tokens,
-                    "out": c.output_tokens,
-                    "cost_usd": round(c.cost_usd, 6),
-                    "seconds": round(c.seconds, 2),
-                }
-                for c in self.calls
-            ],
+            "by_call": by_call,
         }
 
 
@@ -182,13 +204,37 @@ def extract_json(text: str) -> Any:
 
 
 class ModelClient:
-    """Lazy provider init; one generate() that both nodes share."""
+    """Lazy provider init; one generate() shared by extraction nodes."""
 
     def __init__(self) -> None:
         self._google = None
         self._anthropic = None
         self._google_lock = threading.Lock()
         self._anthropic_lock = threading.Lock()
+
+    def _resolve_config(
+        self,
+        tier: str,
+        model_override: Optional[str],
+        metrics: Optional[Metrics],
+    ) -> tuple[TierConfig, Optional[str]]:
+        if tier not in TIERS:
+            raise ValueError(
+                f"Unknown model tier {tier!r}; expected one of {tuple(TIERS)}")
+
+        requested = (model_override or "").strip() or None
+
+        # The first explicit selection pins the entire run. A validator retry
+        # that omits model_override therefore cannot jump to another provider.
+        if requested:
+            canonical = metrics.pin(requested) if metrics else canonical_model_id(requested)
+            return MODEL_REGISTRY[canonical], requested
+
+        if metrics and metrics.pinned_model_id:
+            return MODEL_REGISTRY[metrics.pinned_model_id], (
+                metrics.originally_requested_model_id or metrics.pinned_model_id)
+
+        return TIERS[tier], None
 
     def generate(
         self,
@@ -202,15 +248,8 @@ class ModelClient:
         purpose: str = "",
         model_override: Optional[str] = None,
     ) -> str:
-        if tier not in TIERS:
-            raise ValueError(
-                f"Unknown model tier {tier!r}; expected one of {tuple(TIERS)}")
-
-        requested_model = (model_override or "").strip() or None
-        if requested_model:
-            cfg = model_config(requested_model)
-        else:
-            cfg = TIERS[tier]
+        cfg, requested_model = self._resolve_config(
+            tier, model_override, metrics)
 
         t0 = time.time()
         if cfg.provider == "google":
@@ -235,6 +274,7 @@ class ModelClient:
                 output_per_m=cfg.output_per_m,
                 requested_model_id=requested_model,
                 response_model_id=response_model,
+                thinking_level=cfg.thinking_level,
             ))
         return text
 
@@ -268,12 +308,22 @@ class ModelClient:
                 data=pdf_bytes, mime_type=media_type))
         contents.append(prompt)
 
-        # Gemini 3.5 Flash supports up to 65,536 output tokens.
         kw: dict[str, Any] = {
             "max_output_tokens": min(max_tokens * 4, 65_536)
         }
         if json_only:
             kw["response_mime_type"] = "application/json"
+
+        # Extraction is a literal transcription task, not a reasoning benchmark.
+        # Constrain Gemini's dynamic thinking so 3.5 Flash does not unexpectedly
+        # become much slower and more expensive than Flash-Lite.
+        if cfg.thinking_level:
+            try:
+                kw["thinking_config"] = gt.ThinkingConfig(
+                    thinking_level=cfg.thinking_level)
+            except (AttributeError, TypeError):
+                # Compatible with an older google-genai SDK; routing still works.
+                pass
 
         resp = client.models.generate_content(
             model=cfg.model_id,
@@ -327,11 +377,15 @@ class ModelClient:
             })
         content.append({"type": "text", "text": prompt})
 
-        resp = client.messages.create(
-            model=cfg.model_id,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": content}],
-        )
+        request: dict[str, Any] = {
+            "model": cfg.model_id,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": content}],
+        }
+        if cfg.disable_adaptive_thinking:
+            request["thinking"] = {"type": "disabled"}
+
+        resp = client.messages.create(**request)
         text = "".join(getattr(block, "text", "") for block in resp.content)
         response_model = getattr(resp, "model", None) or cfg.model_id
         return (
