@@ -32,7 +32,8 @@ class TierConfig:
     output_per_m: float
     display_name: str = ""
     thinking_level: Optional[str] = None
-    disable_adaptive_thinking: bool = False
+    adaptive_thinking: bool = False
+    effort: Optional[str] = None
 
 
 # Current selectable models. Pricing is standard synchronous API pricing
@@ -58,18 +59,17 @@ MODEL_REGISTRY: dict[str, TierConfig] = {
         "Claude Haiku 4.5"),
     "claude-sonnet-4-6": TierConfig(
         "claude-sonnet-4-6", "anthropic", 3.00, 15.00,
-        "Claude Sonnet 4.6", disable_adaptive_thinking=True),
+        "Claude Sonnet 4.6", adaptive_thinking=True, effort="low"),
     "claude-sonnet-5": TierConfig(
         "claude-sonnet-5", "anthropic", 3.00, 15.00,
-        "Claude Sonnet 5", disable_adaptive_thinking=True),
+        "Claude Sonnet 5", effort="low"),
     "claude-opus-4-6": TierConfig(
         "claude-opus-4-6", "anthropic", 5.00, 25.00,
-        "Claude Opus 4.6", disable_adaptive_thinking=True),
+        "Claude Opus 4.6", adaptive_thinking=True, effort="low"),
     "claude-opus-4-8": TierConfig(
         "claude-opus-4-8", "anthropic", 5.00, 25.00,
-        "Claude Opus 4.8", disable_adaptive_thinking=True),
+        "Claude Opus 4.8", adaptive_thinking=True, effort="low"),
 }
-
 
 # Only genuinely retired IDs are redirected. Distinct working models are never
 # silently aliased to Gemini 3.5 Flash or a newer Claude family.
@@ -380,7 +380,9 @@ class ModelClient:
         content.append({"type": "text", "text": prompt})
         request: dict[str, Any] = {
             "model": cfg.model_id,
-            "max_tokens": max_tokens,
+            # Match Gemini's existing effective ceiling without changing the
+            # known-good Gemini request path.
+            "max_tokens": min(max_tokens * 4, 65_536),
             "messages": [{"role": "user", "content": content}],
         }
         if json_only:
@@ -389,8 +391,10 @@ class ModelClient:
                     "Claude JSON requests require an explicit output_schema")
             request["output_config"] = {"format": {
                 "type": "json_schema", "schema": output_schema}}
-        if cfg.disable_adaptive_thinking:
-            request["thinking"] = {"type": "disabled"}
+        if cfg.effort:
+            request.setdefault("output_config", {})["effort"] = cfg.effort
+        if cfg.adaptive_thinking:
+            request["thinking"] = {"type": "adaptive"}
 
         resp = client.messages.create(**request)
         text = "".join(getattr(block, "text", "") for block in resp.content)

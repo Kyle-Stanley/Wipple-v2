@@ -47,6 +47,11 @@ def test_chunk_extraction_forwards_pinned_model_and_schema(monkeypatch):
     assert fake.kwargs["output_schema"] == extraction.CHUNK_OUTPUT_SCHEMA
 
 
+def test_chunk_prompt_is_strictly_one_page():
+    assert "continue the same rows array across pages" not in extraction.CHUNK_PROMPT
+    assert "never infer, repeat, or carry over rows" in extraction.CHUNK_PROMPT
+
+
 def test_claude_json_request_uses_structured_output_config():
     captured = {}
 
@@ -73,8 +78,38 @@ def test_claude_json_request_uses_structured_output_config():
 
     assert result == '{"ok":true}'
     assert captured["model"] == "claude-sonnet-4-6"
+    assert captured["max_tokens"] == 65_536
     assert captured["output_config"] == {
-        "format": {"type": "json_schema", "schema": schema}}
+        "format": {"type": "json_schema", "schema": schema},
+        "effort": "low",
+    }
+    assert captured["thinking"] == {"type": "adaptive"}
+
+
+def test_gemini_request_path_remains_unchanged():
+    captured = {}
+
+    def generate_content(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            text='{"ok":true}', usage_metadata=None,
+            model_version="gemini-3.1-flash-lite")
+
+    client = ModelClient()
+    client._google = SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content))
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    client.generate("return JSON", model_override="gemini-3.1-flash-lite",
+                    json_only=True, output_schema=schema)
+
+    assert captured["config"].max_output_tokens == 65_536
+    assert captured["config"].response_json_schema is None
 
 
 def test_claude_json_request_requires_a_schema():

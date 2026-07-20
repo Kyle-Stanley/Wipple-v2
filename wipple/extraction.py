@@ -138,11 +138,21 @@ _V3_SHAPE = (
     'column count. If the page holds TWO separate tables (e.g. contracts in\n'
     'progress and completed contracts), return both, in reading order.')
 
+_MULTIPAGE_RULE = (
+    '4. If the table spans multiple pages, the columns are the same on every\n'
+    '   page: continue the same rows array across pages in reading order.\n'
+    '   Do not repeat header rows as data rows.')
+_ONE_PAGE_RULE = (
+    '4. This input contains only one page or image slice. Transcribe only the\n'
+    '   rows visible in this input; never infer, repeat, or carry over rows\n'
+    '   from pages you cannot see. Do not include a repeated header as data.')
+
 CHUNK_PROMPT = EXTRACTION_PROMPT.replace(
     'Return ONLY a JSON object with this exact shape:',
     'This is ONE PAGE (or one slice) of a possibly longer document. '
     'Return ONLY a JSON object with this exact shape:').replace(
-    _V2_SHAPE, _V3_SHAPE) + """
+    _V2_SHAPE, _V3_SHAPE).replace(
+    _MULTIPAGE_RULE, _ONE_PAGE_RULE) + """
 
 For reporting_period_text, copy the exact printed phrase that states the
 schedule's reporting or period-end date (for example, "Year ended December
