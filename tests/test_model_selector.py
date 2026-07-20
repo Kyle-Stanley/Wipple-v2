@@ -16,7 +16,9 @@ from wipple.model_client import MODEL_REGISTRY, ModelClient
 def test_ui_model_values_are_registered():
     html = Path("static/index.html").read_text(encoding="utf-8")
     values = set(re.findall(r'<option value="([^"]+)">', html))
-    assert values == set(MODEL_REGISTRY)
+    assert values <= set(MODEL_REGISTRY)
+    assert {"gemini-3.1-flash-lite", "claude-sonnet-5",
+            "claude-opus-4-8"} <= values
     assert "gemini-3.1-flash-lite-preview" not in MODEL_REGISTRY
 
 

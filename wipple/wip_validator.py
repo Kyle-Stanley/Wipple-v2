@@ -202,6 +202,19 @@ class Config:
     anchor_live_med: float = 0.02
     prior_robust_frac: float = 0.90
     max_anchor_pairs: int = 80
+    # Wide-table anchor ranking. These controls are used ONLY when the broad
+    # economic priors leave more anchor pairs than max_anchor_pairs. Rich WIPs
+    # rank D and B independently, cross only the strongest candidates, and
+    # defer pair-dependent work unless the cheap independent evidence fails.
+    anchor_rank_axis_keep: int = 6
+    anchor_rank_matches_per_rule: int = 4
+    anchor_rank_d_min_families: int = 2
+    anchor_rank_b_min_families: int = 1
+    # Full peeling is the expensive stage.  Wide-table pair rankings from all
+    # plausible V/estimate contexts are pooled globally, then only this many
+    # top-ranked placements are peeled initially.  The search widens only if
+    # that batch fails to produce a validatable hypothesis.
+    anchor_rank_global_keep: int = 8
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +287,7 @@ def _rules() -> list:
 
 
 RULES = _rules()
+RULE_BY_NAME = {r.name: r for r in RULES}
 # Money rules first: dollar-precise matches must claim columns before percent
 # matches can steal one on a low-dimensional coincidence.
 RULES_ORDERED = sorted(RULES, key=lambda r: 0 if r.kind == "money" else 1)
@@ -906,6 +920,363 @@ def _anchor_candidates(cols_m, Vm, Cm, used, cfg):
     return d_c, b_c
 
 
+
+
+def _rank_workspace(cols_m, cfg):
+    """Precompute physical-column interpretations for cheap anchor ranking.
+
+    The full matcher builds rich VarVal objects one prediction at a time.  The
+    ranker only needs fit statistics, so it compares each predicted vector to
+    every physical column in one NumPy operation.  Percent interpretations and
+    display-grid tolerances are calculated once per (V, estimate) context.
+    """
+    matrix = np.vstack(cols_m)
+    m = matrix.shape[1]
+    pct_values, pct_valid, pct_tol = [], [], []
+    for scale in (1.0, 100.0):
+        vals = matrix / scale
+        valid = ((vals >= -0.25) & (vals <= 2.0)).sum(axis=1) >= 0.9 * m
+        tols = np.empty(matrix.shape[0], dtype=float)
+        for j, row in enumerate(vals):
+            if not valid[j]:
+                tols[j] = np.inf
+                continue
+            grid = detect_grid(row)
+            tols[j] = (grid * cfg.pct_grid_mult if grid is not None
+                       else cfg.pct_default_tol)
+        pct_values.append(vals)
+        pct_valid.append(valid)
+        pct_tol.append(tols)
+    return {
+        "matrix": matrix,
+        "abs_matrix": np.abs(matrix),
+        "pct_values": pct_values,
+        "pct_valid": pct_valid,
+        "pct_tol": pct_tol,
+    }
+
+
+def _rank_predict(rule, known):
+    vals = [known[i][0] for i in rule.ins]
+    tols = [known[i][1] for i in rule.ins]
+    return _prop_tol(rule.fn, vals, tols)
+
+
+def _rank_best_indices(strict_bad, bad, residual, qualifies, keep):
+    idx = np.nonzero(qualifies)[0]
+    if idx.size == 0:
+        return idx
+    order = np.lexsort((residual[idx], bad[idx], strict_bad[idx]))
+    return idx[order[:keep]]
+
+
+def _rank_match_records(pred, ptol, rule, candidate_cols, ws, cfg, ab):
+    """Return only the best few physical matches for one predicted vector.
+
+    This mirrors the robust matching semantics but avoids Python loops over
+    columns and avoids constructing VarVal objects.  The output is used only
+    to order anchor hypotheses; the ordinary peel and strict certification
+    remain the authority.
+    """
+    if not candidate_cols:
+        return []
+    col_idx = np.asarray(candidate_cols, dtype=int)
+    keep = cfg.anchor_rank_matches_per_rule
+    m = pred.size
+
+    if rule.kind == "money":
+        data = (ws["abs_matrix"] if rule.out in MAGNITUDE_PRESENTATION_VARS
+                else ws["matrix"])[col_idx]
+        strict = _money_strict(pred, ptol, cfg)
+        loose = strict + np.maximum(cfg.ident_abs,
+                                    cfg.ident_rel * np.abs(pred))
+        resid = np.abs(data - pred[None, :])
+        bad = (resid > loose[None, :]).sum(axis=1)
+        strict_bad = (resid > strict[None, :]).sum(axis=1)
+        clipped = np.minimum(resid, loose[None, :]).sum(axis=1)
+        denom = max(1.0, float(np.abs(pred).sum()))
+        norm = clipped / denom
+        informative = int((np.abs(pred) > strict + 1e-9).sum())
+        chosen = _rank_best_indices(
+            strict_bad, bad, norm,
+            (bad <= ab) & (informative > 0), keep)
+        out = []
+        for k in chosen:
+            st = {"bad": int(bad[k]),
+                  "strict_bad": int(strict_bad[k]),
+                  "informative": informative,
+                  "norm_resid": float(norm[k])}
+            out.append(((st["strict_bad"], st["bad"], st["norm_resid"]),
+                        rule, int(col_idx[k]), st))
+        return out
+
+    # Percent columns can be stored as ratios or whole percents.  Evaluate
+    # both precomputed interpretations and retain the lexicographically best
+    # one for each physical column.
+    n = col_idx.size
+    best_strict = np.full(n, m + 1, dtype=int)
+    best_bad = np.full(n, m + 1, dtype=int)
+    best_norm = np.full(n, np.inf, dtype=float)
+    best_info = np.zeros(n, dtype=int)
+
+    for s in range(2):
+        valid = ws["pct_valid"][s][col_idx]
+        if not valid.any():
+            continue
+        vals = ws["pct_values"][s][col_idx]
+        coltol = ws["pct_tol"][s][col_idx]
+        strict = ptol[None, :] + coltol[:, None] + 1e-9
+        loose = strict + cfg.pct_ident_slack
+        resid = np.abs(vals - pred[None, :])
+        bad = (resid > loose).sum(axis=1)
+        strict_bad = (resid > strict).sum(axis=1)
+        clipped = np.minimum(resid, loose).sum(axis=1)
+        denom = max(1.0, float(np.abs(pred).sum()))
+        norm = clipped / denom
+        informative = (np.abs(pred)[None, :] > strict + 1e-9).sum(axis=1)
+
+        better = valid & (
+            (strict_bad < best_strict)
+            | ((strict_bad == best_strict) & (bad < best_bad))
+            | ((strict_bad == best_strict) & (bad == best_bad)
+               & (norm < best_norm))
+        )
+        best_strict[better] = strict_bad[better]
+        best_bad[better] = bad[better]
+        best_norm[better] = norm[better]
+        best_info[better] = informative[better]
+
+    chosen = _rank_best_indices(
+        best_strict, best_bad, best_norm,
+        (best_bad <= ab) & (best_info > 0), keep)
+    out = []
+    for k in chosen:
+        st = {"bad": int(best_bad[k]),
+              "strict_bad": int(best_strict[k]),
+              "informative": int(best_info[k]),
+              "norm_resid": float(best_norm[k])}
+        out.append(((st["strict_bad"], st["bad"], st["norm_resid"]),
+                    rule, int(col_idx[k]), st))
+    return out
+
+
+def _rank_select_records(records, m, cfg):
+    """Greedy one-to-one fit summary for search ordering only.
+
+    A physical column and a predicted variable may each be claimed once.  A
+    global assignment solver is unnecessary here because the ranker is not a
+    certificate and high-dimensional true matches normally dominate; the full
+    peel resolves any remaining conflicts.
+    """
+    records = sorted(records, key=lambda x: x[0])
+    chosen, used_cols, used_out = [], set(), set()
+    for sortkey, rule, col, st in records:
+        if col in used_cols or rule.out in used_out:
+            continue
+        chosen.append((sortkey, rule, col, st))
+        used_cols.add(col)
+        used_out.add(rule.out)
+
+    fam_info = {}
+    norm_resid = 0.0
+    for _, rule, _, st in chosen:
+        norm_resid += st["norm_resid"]
+        item = fam_info.setdefault(rule.family, {
+            "informative": 0, "unclipped": False,
+            "strict_rows": 0, "robust_rows": 0,
+        })
+        item["informative"] += st["informative"]
+        item["unclipped"] = item["unclipped"] or not rule.clipped
+        item["strict_rows"] = max(item["strict_rows"],
+                                  m - st["strict_bad"])
+        item["robust_rows"] = max(item["robust_rows"],
+                                  m - st["bad"])
+
+    families, strict_rows, robust_rows = set(), 0, 0
+    for family, item in fam_info.items():
+        if (not item["unclipped"]
+                and item["informative"] < cfg.min_informative_rows):
+            continue
+        families.add(family)
+        strict_rows += item["strict_rows"]
+        robust_rows += item["robust_rows"]
+    return chosen, families, strict_rows, robust_rows, norm_resid
+
+
+def _rank_axis_score(records, allowed_families, m, cfg):
+    chosen, families, strict_rows, robust_rows, residual = \
+        _rank_select_records(records, m, cfg)
+    relevant = families & allowed_families
+    return (len(relevant), len(chosen), strict_rows,
+            robust_rows, -residual)
+
+
+def _rank_prepare_axes(cols_m, Vm, Cm, vcol, xcol, orient,
+                       d_candidates, b_candidates, cfg):
+    """Score D and B candidates independently and cache their predictions."""
+    m = Vm.size
+    ab = _allowed_bad(m, cfg)
+    ws = _rank_workspace(cols_m, cfg)
+    base_used = {vcol, xcol}
+    obs_tol = np.full(m, cfg.money_obs_tol)
+
+    shared = {"V": (Vm, obs_tol)}
+    if orient == "C":
+        shared["C"] = (cols_m[xcol], obs_tol)
+        shared["G"] = _rank_predict(RULE_BY_NAME["G = V - C"], shared)
+    else:
+        shared["G"] = (cols_m[xcol], obs_tol)
+        shared["C"] = _rank_predict(RULE_BY_NAME["C = V - G"], shared)
+
+    d_rule_names = ("E = V x D / C", "Q = C - D", "H = E - D",
+                    "P = D / C", "R = V - E")
+    d_touch = {"earned", "cost_complete", "earned_profit",
+               "pct_complete", "backlog"}
+    d_cache, d_scores = {}, []
+    for dcol in d_candidates:
+        known = dict(shared)
+        known["D"] = (cols_m[dcol], obs_tol)
+        candidates = [j for j in range(len(cols_m))
+                      if j not in base_used | {dcol}]
+        records = []
+        for name in d_rule_names:
+            rule = RULE_BY_NAME[name]
+            pred, ptol = _rank_predict(rule, known)
+            known[rule.out] = (pred, ptol)
+            records += _rank_match_records(
+                pred, ptol, rule, candidates, ws, cfg, ab)
+        d_cache[dcol] = (known, records)
+        d_scores.append((_rank_axis_score(records, d_touch, m, cfg), dcol))
+
+    b_rule_names = ("RB = V - B", "PB = B / V")
+    b_touch = {"rem_billing", "pct_billed"}
+    b_cache, b_scores = {}, []
+    for bcol in b_candidates:
+        known = dict(shared)
+        known["B"] = (cols_m[bcol], obs_tol)
+        candidates = [j for j in range(len(cols_m))
+                      if j not in base_used | {bcol}]
+        records = []
+        for name in b_rule_names:
+            rule = RULE_BY_NAME[name]
+            pred, ptol = _rank_predict(rule, known)
+            known[rule.out] = (pred, ptol)
+            records += _rank_match_records(
+                pred, ptol, rule, candidates, ws, cfg, ab)
+        b_cache[bcol] = records
+        b_scores.append((_rank_axis_score(records, b_touch, m, cfg), bcol))
+
+    d_scores.sort(reverse=True)
+    b_scores.sort(reverse=True)
+    return ws, shared, d_cache, b_cache, d_scores, b_scores
+
+
+def _rank_shortlist(scored, strong, keep):
+    if not strong:
+        return {col for _, col in scored}
+    # Once an axis has genuine downstream support, zero-evidence candidates
+    # are not useful fallbacks -- retaining them would recreate the original
+    # arbitrary 80-pair search.  Keep the best supported candidates and exact
+    # positive-evidence ties at the boundary.
+    supported = [(score, col) for score, col in scored if score[0] > 0]
+    if len(supported) <= keep:
+        return {col for _, col in supported}
+    cutoff = supported[keep - 1][0]
+    return {col for score, col in supported if score >= cutoff}
+
+
+def _rank_pair_score(records, dcol, bcol, m, cfg):
+    records = [r for r in records if r[2] not in {dcol, bcol}]
+    chosen, families, strict_rows, robust_rows, residual = \
+        _rank_select_records(records, m, cfg)
+    d_touch = {"earned", "cost_complete", "earned_profit",
+               "pct_complete", "backlog", "billing_pos"}
+    b_touch = {"rem_billing", "pct_billed", "billing_pos"}
+    d_fams = families & d_touch
+    b_fams = families & b_touch
+    rank = (int(bool(d_fams) and bool(b_fams)),
+            min(len(d_fams), len(b_fams)),
+            len(families), len(chosen), strict_rows, robust_rows, -residual)
+    detail = {
+        "d": int(dcol), "b": int(bcol),
+        "rank": [float(x) for x in rank],
+        "families": sorted(families),
+        "matched_columns": sorted(int(j) for _, _, j, _ in chosen),
+    }
+    return rank, detail
+
+
+def _rank_anchor_context(cols_m, Vm, Cm, vcol, xcol, orient,
+                         d_candidates, b_candidates, pairs, cfg):
+    """Prepare fast initial pairs and a correctness fallback for a wide WIP.
+
+    When both anchors independently regenerate downstream columns, the initial
+    search is only the small cross-product of the best axis candidates.  Pair-
+    dependent billing-position ranking is deferred and computed only if the
+    initial search produces no validatable hypothesis.
+    """
+    (ws, shared, d_cache, b_cache, d_scores, b_scores) = _rank_prepare_axes(
+        cols_m, Vm, Cm, vcol, xcol, orient,
+        d_candidates, b_candidates, cfg)
+    d_strong = bool(d_scores and
+                    d_scores[0][0][0] >= cfg.anchor_rank_d_min_families)
+    b_strong = bool(b_scores and
+                    b_scores[0][0][0] >= cfg.anchor_rank_b_min_families)
+    d_keep = _rank_shortlist(
+        d_scores, d_strong, cfg.anchor_rank_axis_keep)
+    b_keep = _rank_shortlist(
+        b_scores, b_strong, cfg.anchor_rank_axis_keep)
+    filtered = [(d, b) for d, b in pairs
+                if d in d_keep and b in b_keep]
+    d_score_map = {col: score for score, col in d_scores}
+    b_score_map = {col: score for score, col in b_scores}
+
+    initial = []
+    if d_strong and b_strong:
+        initial = sorted(
+            filtered,
+            key=lambda p: (d_score_map[p[0]], b_score_map[p[1]]),
+            reverse=True)[:cfg.max_anchor_pairs]
+
+    return {
+        "ws": ws, "shared": shared,
+        "d_cache": d_cache, "b_cache": b_cache,
+        "d_scores": d_scores, "b_scores": b_scores,
+        "d_strong": d_strong, "b_strong": b_strong,
+        "filtered": filtered, "all_pairs": pairs,
+        "initial": initial,
+    }
+
+
+def _rank_context_fallback(ctx, cols_m, Vm, Cm, vcol, xcol, cfg):
+    """Rank pair-dependent billing evidence only when the cheap stage failed."""
+    m = Vm.size
+    ab = _allowed_bad(m, cfg)
+    ws = ctx["ws"]
+    base_used = {vcol, xcol}
+    obs_tol = np.full(m, cfg.money_obs_tol)
+    pairs = ctx["filtered"] if ctx["filtered"] else ctx["all_pairs"]
+    ranked = []
+    for dcol, bcol in pairs:
+        known, d_records = ctx["d_cache"][dcol]
+        known = dict(known)
+        known["B"] = (cols_m[bcol], obs_tol)
+        candidates = [j for j in range(len(cols_m))
+                      if j not in base_used | {dcol, bcol}]
+        pair_records = []
+        for name in ("N = E - B", "U = max(E - B, 0)",
+                     "O = max(B - E, 0)"):
+            rule = RULE_BY_NAME[name]
+            pred, ptol = _rank_predict(rule, known)
+            pair_records += _rank_match_records(
+                pred, ptol, rule, candidates, ws, cfg, ab)
+        records = list(d_records) + list(ctx["b_cache"][bcol]) + pair_records
+        rank, detail = _rank_pair_score(records, dcol, bcol, m, cfg)
+        detail["stage"] = "pair_fallback"
+        ranked.append((rank, dcol, bcol, detail))
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    return ranked
+
 def _build_hypothesis(cols_m, row_index, vcol, xcol, orient, dcol, bcol, cfg):
     m = cols_m[0].size
 
@@ -934,6 +1305,24 @@ def _build_hypothesis(cols_m, row_index, vcol, xcol, orient, dcol, bcol, cfg):
 
 def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
     by_key = {}
+    wide_contexts = []
+
+    def evaluate(context, pairs):
+        for dcol, bcol in pairs:
+            hyp = _build_hypothesis(
+                context["cols_m"], context["row_index"],
+                context["vcol"], context["xcol"], context["orient"],
+                dcol, bcol, cfg)
+            diag["hypotheses_examined"] = \
+                diag.get("hypotheses_examined", 0) + 1
+            old = by_key.get(hyp.key)
+            if old is None or hyp.score > old.score:
+                by_key[hyp.key] = hyp
+
+    def has_validatable():
+        return any(h.corr_d >= 1 and h.corr_b >= 1
+                   for h in by_key.values())
+
     for vcol in _v_candidates(cols, finite, cfg, shortlist):
         for xcol, orient in _x_candidates(cols, vcol, finite, cfg, diag):
             Vfull = cols[vcol]
@@ -949,22 +1338,99 @@ def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
                 continue
             cols_m = [c[mask] for c in cols]
             row_index = np.nonzero(mask)[0]
+            Vm, Cm = Vfull[mask], Cfull[mask]
             d_c, b_c = _anchor_candidates(
-                cols_m, Vfull[mask], Cfull[mask], {vcol, xcol}, cfg)
+                cols_m, Vm, Cm, {vcol, xcol}, cfg)
             pairs = [(d, b) for d in d_c for b in b_c if d != b]
-            if len(pairs) > cfg.max_anchor_pairs:
-                diag["notes"].append(
-                    f"anchor pair cap hit for V=col {vcol}/X=col {xcol} "
-                    f"({len(pairs)} pairs)")
-                pairs = pairs[:cfg.max_anchor_pairs]
-            for dcol, bcol in pairs:
-                hyp = _build_hypothesis(cols_m, row_index, vcol, xcol,
-                                        orient, dcol, bcol, cfg)
-                diag["hypotheses_examined"] = \
-                    diag.get("hypotheses_examined", 0) + 1
-                old = by_key.get(hyp.key)
-                if old is None or hyp.score > old.score:
-                    by_key[hyp.key] = hyp
+            context = {
+                "cols_m": cols_m, "row_index": row_index,
+                "vcol": vcol, "xcol": xcol, "orient": orient,
+                "Vm": Vm, "Cm": Cm,
+            }
+            if len(pairs) <= cfg.max_anchor_pairs:
+                evaluate(context, pairs)
+                continue
+
+            ranked_ctx = _rank_anchor_context(
+                cols_m, Vm, Cm, vcol, xcol, orient,
+                d_c, b_c, pairs, cfg)
+            context["ranked"] = ranked_ctx
+            wide_contexts.append(context)
+            diag["notes"].append(
+                f"anchor pair cap hit for V=col {vcol}/X=col {xcol} "
+                f"({len(pairs)} pairs); D/B axes ranked by downstream "
+                "full-vector support")
+            diag.setdefault("anchor_rankings", []).append({
+                "v_col": int(vcol), "x_col": int(xcol),
+                "orientation": orient,
+                "candidate_pairs": int(len(pairs)),
+                "d_strong": bool(ranked_ctx["d_strong"]),
+                "b_strong": bool(ranked_ctx["b_strong"]),
+                "initial_pairs": int(len(ranked_ctx["initial"])),
+                "top_d": [
+                    {"column": int(col), "rank": [float(x) for x in score]}
+                    for score, col in ranked_ctx["d_scores"][:5]],
+                "top_b": [
+                    {"column": int(col), "rank": [float(x) for x in score]}
+                    for score, col in ranked_ctx["b_scores"][:5]],
+            })
+
+    if not wide_contexts:
+        return by_key
+
+    # Pair-dependent N/U/O scoring is inexpensive compared with a full peel.
+    # Pool every wide V/estimate context into ONE ranking so a wrong context
+    # cannot consume its own 80-hypothesis allowance.  This is the key runtime
+    # distinction: max_anchor_pairs is now a global widening budget, not a
+    # per-context tax.
+    global_ranked = []
+    for context in wide_contexts:
+        ranked = _rank_context_fallback(
+            context["ranked"], context["cols_m"],
+            context["Vm"], context["Cm"],
+            context["vcol"], context["xcol"], cfg)
+        for rank, dcol, bcol, detail in ranked:
+            global_ranked.append(
+                (rank, context, dcol, bcol, detail))
+    global_ranked.sort(key=lambda x: x[0], reverse=True)
+
+    diag["anchor_global_ranking"] = {
+        "ranked_pairs": int(len(global_ranked)),
+        "initial_budget": int(cfg.anchor_rank_global_keep),
+        "top": [
+            dict(item[4], v_col=int(item[1]["vcol"]),
+                 x_col=int(item[1]["xcol"]),
+                 orientation=item[1]["orient"])
+            for item in global_ranked[:5]
+        ],
+    }
+
+    if not global_ranked:
+        return by_key
+
+    # Progressive deepening.  Eight globally ranked hypotheses is enough for
+    # the ordinary wide-table case; 80 preserves the old cap as the second
+    # line of defence; only a genuinely unresolved table pays for the rest.
+    budgets = []
+    for n in (cfg.anchor_rank_global_keep, cfg.max_anchor_pairs,
+              len(global_ranked)):
+        n = min(int(n), len(global_ranked))
+        if n > 0 and n not in budgets:
+            budgets.append(n)
+
+    done = 0
+    for target in budgets:
+        grouped = {}
+        for _, context, dcol, bcol, _ in global_ranked[done:target]:
+            grouped.setdefault(id(context), (context, []))[1].append(
+                (dcol, bcol))
+        for context, pairs in grouped.values():
+            evaluate(context, pairs)
+        done = target
+        if has_validatable():
+            break
+
+    diag["anchor_global_ranking"]["peeled_pairs"] = int(done)
     return by_key
 
 
