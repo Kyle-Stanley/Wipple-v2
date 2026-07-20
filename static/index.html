@@ -459,14 +459,13 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
     <div style="margin-top:14px;font-size:12.5px;color:var(--muted)">
       <label for="model">Model</label>
       <select id="model" style="margin-left:6px;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:4px 8px">
-        <option value="">Auto (Gemini 3.5 Flash, then Claude Sonnet 4.6)</option>
-        <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-        <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
-        <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
-        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
-        <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-        <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-        <option value="claude-opus-4-8">Claude Opus 4.8</option>
+        <option value="">Auto (Gemini 3.5 Flash, then Claude Sonnet 5)</option>
+        <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite · economy</option>
+        <option value="gemini-3.5-flash">Gemini 3.5 Flash · recommended</option>
+        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview · strongest Gemini</option>
+        <option value="claude-haiku-4-5">Claude Haiku 4.5 · fast</option>
+        <option value="claude-sonnet-5">Claude Sonnet 5 · recommended Claude</option>
+        <option value="claude-opus-4-8">Claude Opus 4.8 · strongest Claude</option>
       </select>
     </div>
   </div>
@@ -590,7 +589,12 @@ $("#file").onchange=e=>{
   e.target.value="";
   if(files.length)scanFiles(files);
 };
-$("#sample").onclick=()=>{resetBatch();clearSourceFile();stream(API+"/api/sample")};
+$("#sample").onclick=()=>{
+  resetBatch();clearSourceFile();
+  const model=$("#model")?.value||"";
+  const qs=model?`?model=${encodeURIComponent(model)}`:"";
+  stream(API+"/api/sample"+qs);
+};
 const dz=$("#drop");
 ["dragover","dragenter"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add("on")}));
 ["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("on")}));
@@ -1874,7 +1878,10 @@ function renderCertificate(rep){
   const detail=witnesses.length?`
     <details class="more"><summary>Identities verified</summary><ul>
       ${witnesses.map(w=>`<li><span class="num">${w.business_form}</span> (${w.n_rows} rows, max residual ${(+w.max_abs_residual).toFixed(2)})</li>`).join("")}
-      ${m.api_calls?`<li>${m.api_calls} model call(s), $${(+m.cost_usd).toFixed(4)}</li>`:""}
+      ${m.api_calls?`<li>${m.api_calls} model call(s)${
+        (m.by_call||[]).length?` using ${[...new Set((m.by_call||[]).map(c=>
+          c.response_model||c.model).filter(Boolean))].join(", ")}`:""
+      }, $${(+m.cost_usd).toFixed(4)}</li>`:""}
     </ul></details>`:"";
   $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
     <div class="kicker">validation results${SECTIONS.length>1?" \u00b7 "+secLabel(SECTIONS[ACTIVE]).name.toLowerCase()+" \u00b7 "+secLabel(SECTIONS[ACTIVE]).pg:""}</div>
@@ -2177,8 +2184,17 @@ function footMeta(rep){
   const m=rep.metrics||{};const bits=[];
   if(m.elapsed_seconds!=null)bits.push(`${m.elapsed_seconds}s`);
   if(m.api_calls){
-    const models=[...new Set((m.by_call||[]).map(c=>c.model))].join(", ");
-    bits.push(`${m.api_calls} model call${m.api_calls>1?"s":""}${models?` (${models})`:""}`);
+    const calls=m.by_call||[];
+    const models=[...new Set(calls.map(c=>c.response_model||c.model).filter(Boolean))].join(", ");
+    const providers=[...new Set(calls.map(c=>c.provider).filter(Boolean))].join(", ");
+    const used=[providers,models].filter(Boolean).join(": ");
+    const mismatches=calls.filter(c=>c.requested_model&&
+      c.requested_model!==(c.response_model||c.model));
+    bits.push(`${m.api_calls} model call${m.api_calls>1?"s":""}${used?` (${used})`:""}`);
+    if(mismatches.length){
+      const requested=[...new Set(mismatches.map(c=>c.requested_model))].join(", ");
+      bits.push(`requested ${requested}`);
+    }
     bits.push(`$${(+m.cost_usd).toFixed(4)}`);
   }
   return bits.length?bits.join(" · ")+" · ":"";
