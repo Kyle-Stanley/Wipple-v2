@@ -169,6 +169,14 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .trend-card .val{font:500 24px Inter;margin-top:5px}
 .trend-card.emphasis{background:#F8ECE7;border-color:#E4B8A8}
 .trend-card.emphasis .lab,.trend-card.emphasis .val{color:var(--brick)}
+.trend-card.borrow{background:#F6F0E2;border-color:#D9C28F}
+.trend-card.borrow .lab,.trend-card.borrow .val{color:var(--amber)}
+.trend-card.anomaly{background:#F6F0E2;border-color:#D9C28F}
+.trend-card.anomaly .lab,.trend-card.anomaly .val{color:var(--amber)}
+.anomaly-badge,.cost-badge{display:inline-block;border-radius:999px;padding:1px 6px;font-size:9px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;vertical-align:1px}
+.anomaly-badge{background:#F2E7CF;color:var(--amber)}
+.cost-badge{background:#E4E9E1;color:var(--sage-deep)}
+.time-series-section tr.anomaly-row td{background:#FFFCF5}
 .time-series-section{border-top:1px solid var(--line-soft);margin-top:18px;padding-top:18px}
 .time-series-section h4{font:500 16px Inter;margin-bottom:12px}
 .time-series-section h4 small{display:block;color:var(--muted);font-size:11.5px;font-weight:400;margin-top:3px}
@@ -1488,6 +1496,12 @@ function groupPeriodSnapshots(g){
   return[...by.entries()].sort(([a],[b])=>a.localeCompare(b))
     .map(([period,obs])=>({period,...mergePeriodObservations(obs)}));
 }
+function medianNumber(values){
+  const x=values.filter(Number.isFinite).sort((a,b)=>a-b);
+  if(!x.length)return null;
+  const m=Math.floor(x.length/2);
+  return x.length%2?x[m]:(x[m-1]+x[m])/2;
+}
 function timeSeriesData(){
   if(!MATCH_STATE){
     if(!batchMetadataReady())return null;
@@ -1495,10 +1509,19 @@ function timeSeriesData(){
   }
   const series=MATCH_STATE.groups.map(g=>groupPeriodSnapshots(g)).filter(x=>x.length>1);
   if(!series.length)return null;
-  const rows=series.map(s=>{
+
+  /* Build every linked job first. Anomaly detection is deliberately hybrid:
+     a large absolute + margin swing always flags, while a robust median/MAD
+     comparison catches contractor-specific outliers that miss the fixed gate. */
+  const allRows=series.map(s=>{
     const first=s[0],last=s[s.length-1],profit=x=>
       x.vars.G??(x.vars.V!=null&&x.vars.C!=null?x.vars.V-x.vars.C:null);
     const p0=profit(first),p1=profit(last);
+    const v0=first.vars.V,v1=last.vars.V;
+    const scale=Math.max(Math.abs(v0||0),Math.abs(v1||0),1);
+    const margin0=p0!=null&&v0? p0/v0:null;
+    const margin1=p1!=null&&v1? p1/v1:null;
+    const marginChange=margin0!=null&&margin1!=null?margin1-margin0:null;
     const cost=first.vars.C!=null&&last.vars.C!=null?last.vars.C-first.vars.C:null;
     const fade=p0!=null&&p1!=null?p1-p0:null;
     const stalled=first.vars.D!=null&&last.vars.D!=null&&first.vars.B!=null&&last.vars.B!=null
@@ -1506,42 +1529,102 @@ function timeSeriesData(){
     const materialCost=cost!=null&&cost>Math.max(10000,.03*Math.abs(first.vars.C||0));
     const materialFade=fade!=null&&fade<-Math.max(10000,.03*Math.abs(p0||0));
     return{name:last.name||first.name,id:last.id||first.id,from:first.period,to:last.period,
-      contract:first.vars.V!=null&&last.vars.V!=null?last.vars.V-first.vars.V:null,
+      fromType:first.type,toType:last.type,contract:v0!=null&&v1!=null?v1-v0:null,
+      scale,priorProfit:p0,currentProfit:p1,margin0,margin1,marginChange,
       cost,fade,stalled,materialCost,materialFade};
-  }).filter(r=>r.materialCost||r.materialFade||r.stalled);
+  });
+
+  const marginChanges=allRows.map(r=>r.marginChange).filter(Number.isFinite);
+  const marginMedian=medianNumber(marginChanges);
+  const marginMad=marginMedian==null?null:
+    medianNumber(marginChanges.map(x=>Math.abs(x-marginMedian)));
+  const robustReady=marginChanges.length>=5&&marginMad!=null&&marginMad>.002;
+
+  for(const r of allRows){
+    if(r.fade==null||r.marginChange==null){
+      r.estimateAnomaly=false;r.anomalyZ=null;r.swingMultiple=null;continue;
+    }
+    const absoluteSwing=Math.abs(r.fade);
+    const marginSwing=Math.abs(r.marginChange);
+    const fixedMaterial=absoluteSwing>=Math.max(50000,.05*r.scale);
+    const fixedExtreme=fixedMaterial&&marginSwing>=.10;
+    const base=Math.max(Math.abs(r.priorProfit||0),.01*r.scale);
+    r.swingMultiple=absoluteSwing/base;
+    const multipleExtreme=fixedMaterial&&r.swingMultiple>=5;
+    r.anomalyZ=robustReady
+      ?0.6745*Math.abs(r.marginChange-marginMedian)/marginMad:null;
+    const portfolioExtreme=r.anomalyZ!=null&&r.anomalyZ>=4
+      &&absoluteSwing>=Math.max(50000,.03*r.scale)&&marginSwing>=.05;
+    r.estimateAnomaly=fixedExtreme||multipleExtreme||portfolioExtreme;
+    r.anomalyDirection=r.fade>=0?"profit gain":"profit loss";
+    r.anomalyReason=fixedExtreme
+      ?`${pct1(marginSwing)} margin swing on ${fmtM(absoluteSwing)} of gross profit`
+      :multipleExtreme
+        ?`${r.swingMultiple.toFixed(r.swingMultiple>=10?0:1)}× the prior expected-profit base`
+        :portfolioExtreme
+          ?`${r.anomalyZ.toFixed(1)} robust deviations from the contractor's typical margin change`
+          :"";
+  }
+
+  const rows=allRows.filter(r=>
+    r.materialCost||r.materialFade||r.stalled||r.estimateAnomaly);
   if(!rows.length)return null;
+
   const costIncreases=rows.filter(r=>r.materialCost);
   const totalCostIncrease=costIncreases.reduce((s,r)=>s+r.cost,0);
   const fading=rows.filter(r=>r.materialFade);
   const fade=fading.reduce((s,r)=>s-r.fade,0);
-  const fadeJobs=fading.length;
+  const anomalies=rows.filter(r=>r.estimateAnomaly)
+    .sort((a,b)=>Math.abs(b.fade||0)-Math.abs(a.fade||0));
   const stalls=rows.filter(r=>r.stalled).length;
-  return{rows,totalCostIncrease,costIncreaseJobs:costIncreases.length,fade,fadeJobs,stalls};
+  return{rows,totalCostIncrease,costIncreaseJobs:costIncreases.length,
+    fade,fadeJobs:fading.length,stalls,anomalyJobs:anomalies.length,
+    largestAnomaly:anomalies[0]||null};
 }
-function timeSeriesSectionHTML(){
+function timeSeriesSectionHTML(rep){
   const data=timeSeriesData();
-  if(!data)return"";
-  const{rows,totalCostIncrease,costIncreaseJobs,fade,fadeJobs,stalls}=data;
+  const jobBorrow=computeSignals(rep).find(s=>s.id==="job_borrow")||null;
+  if(!data&&!jobBorrow)return"";
+  const{rows=[],totalCostIncrease=0,costIncreaseJobs=0,fade=0,fadeJobs=0,
+    stalls=0,anomalyJobs=0,largestAnomaly=null}=data||{};
   const cards=[
     fadeJobs?`<div class="trend-card emphasis"><div class="lab">Profit fade</div><div class="val">${fmtM(fade)}</div>
         <p class="match-source">${fadeJobs} job${fadeJobs===1?"":"s"} lost expected profit</p></div>
       `:"",
     costIncreaseJobs?`<div class="trend-card"><div class="lab">Cost estimate increases</div><div class="val">${fmtM(totalCostIncrease)}</div>
-        <p class="match-source">${costIncreaseJobs} job${costIncreaseJobs===1?"":"s"} revised upward</p></div>`:""
+        <p class="match-source">${costIncreaseJobs} job${costIncreaseJobs===1?"":"s"} revised upward</p></div>`:"",
+    `<div class="trend-card${jobBorrow?" borrow":""}"><div class="lab">Job borrow</div>
+        <div class="val">${fmtM(jobBorrow?.dollars||0)}</div>
+        <p class="match-source">${jobBorrow
+          ?`${jobBorrow.count} job${jobBorrow.count===1?"":"s"} require outside funding`
+          :"No remaining-work funding shortfall"}</p></div>`,
+    `<div class="trend-card${anomalyJobs?" anomaly":""}"><div class="lab">Estimate anomalies</div>
+        <div class="val">${anomalyJobs}</div>
+        <p class="match-source">${largestAnomaly
+          ?`Largest GP swing ${fmtM(Math.abs(largestAnomaly.fade))}`
+          :"No extreme cross-period estimate changes"}</p></div>`
   ].join("");
   return`<div class="time-series-section"><h4>Across reporting periods
-      <small>Only material changes and stalled jobs are shown; missing years are allowed</small></h4>
+      <small>Material changes, stalled jobs, and extreme estimate movements are shown; anomalies use both fixed materiality gates and the contractor’s own history</small></h4>
     ${cards?`<div class="trend-cards">${cards}</div>`:""}
-    <div class="tablewrap"><table><thead><tr><th>Job ID</th><th>Job name</th><th>Signal</th><th>Periods</th>
-      <th>Contract change</th><th>Cost estimate change</th><th>Profit change</th><th>Stalled</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr><td>${htmlEsc(r.id||"—")}</td><td>${htmlEsc(r.name||"—")}</td>
-        <td>${r.materialFade?'<span class="fade-badge" style="margin-left:0">Profit fade</span>':"—"}</td>
+    ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Job ID</th><th>Job name</th><th>Signal</th><th>Periods</th>
+      <th>Contract change</th><th>Cost estimate change</th><th>Prior GP</th><th>Latest GP</th>
+      <th>GP change</th><th>Margin change</th><th>Stalled</th></tr></thead><tbody>
+      ${rows.map(r=>{const flags=[
+        r.estimateAnomaly?`<span class="anomaly-badge" title="${htmlEsc(r.anomalyReason)}">${r.fade>=0?"Profit gain anomaly":"Profit loss anomaly"}</span>`:"",
+        r.materialFade?'<span class="fade-badge" style="margin-left:0">Profit fade</span>':"",
+        r.materialCost?'<span class="cost-badge">Cost increase</span>':""
+      ].filter(Boolean).join(" ");return`<tr class="${r.estimateAnomaly?"anomaly-row":""}"><td>${htmlEsc(r.id||"—")}</td><td>${htmlEsc(r.name||"—")}</td>
+        <td>${flags||"—"}</td>
         <td>${r.from.slice(0,4)} → ${r.to.slice(0,4)}</td>
         <td class="num">${r.contract==null?"—":fmtM(r.contract)}</td>
         <td class="num">${r.cost==null?"—":fmtM(r.cost)}</td>
+        <td class="num">${r.priorProfit==null?"—":fmtM(r.priorProfit)}</td>
+        <td class="num">${r.currentProfit==null?"—":fmtM(r.currentProfit)}</td>
         <td class="num" style="${r.fade<0?"color:var(--brick)":""}">${r.fade==null?"—":fmtM(r.fade)}</td>
-        <td>${r.stalled?'<span class="conflict-pill">yes</span>':"—"}</td></tr>`).join("")}
-      </tbody></table></div>
+        <td class="num">${r.marginChange==null?"—":`${r.marginChange>=0?"+":""}${pct1(r.marginChange)}`}</td>
+        <td>${r.stalled?'<span class="conflict-pill">yes</span>':"—"}</td></tr>`}).join("")}
+      </tbody></table></div>`:""}
       ${stalls?`<p class="batch-needed" style="margin-top:10px">${stalls} linked job${stalls===1?" has":"s have"} no cost or billing movement across the available periods.</p>`:""}
     </div>`;
 }
@@ -1857,7 +1940,7 @@ function renderDash(rep){
       ${body}
       <details class="why"><summary>Why this matters</summary><p>${s.why}</p></details>
     </div>`}).join("");
-  const timeSignals=BATCH_ANALYSIS_MODE?timeSeriesSectionHTML():"";
+  const timeSignals=BATCH_ANALYSIS_MODE?timeSeriesSectionHTML(rep):"";
   const signalBody=(sigs||timeSignals)
     ?sigs+timeSignals
     :`<p class="empty">Nothing above threshold in this book.</p>`;
@@ -1947,13 +2030,22 @@ function computeSignals(rep){
      cols:["Complete","Underbilled","Of remaining revenue"],
      jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(U[r[1]]),cells:[pct0(P[r[1]]),sMoney(U[r[1]]),pct0(r[2])],detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`})),
      why:"Earned revenue the contractor has not billed. On nearly-finished work this usually means unapproved change orders or receivables that may not convert to cash."});}}
-  if(O){const rows=[];for(let i=0;i<n;i++){if(O[i]<T.min_flag_dollars)continue;const ctc=C[i]-D[i];const ratio=ctc>0?O[i]/ctc:Infinity;const sev=clamp01((ratio-T.ob_ratio_floor)/(T.ob_ratio_full-T.ob_ratio_floor));if(sev>T.min_signal_severity)rows.push([sev,i,Math.min(ratio,99)]);}
-   if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+O[r[1]],0);
+  if(hasEB){const rows=[];for(let i=0;i<n;i++){
+    const ctc=Math.max(C[i]-D[i],0),remainingBillings=V[i]-B[i];
+    const borrow=Math.max(ctc-remainingBillings,0);
+    if(borrow<T.min_flag_dollars||ctc<=0)continue;
+    const ratio=borrow/ctc;
+    const sev=clamp01((ratio-T.ob_ratio_floor)/(T.ob_ratio_full-T.ob_ratio_floor));
+    if(sev>T.min_signal_severity)rows.push([sev,i,borrow,ctc,remainingBillings,ratio]);
+   }
+   if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+r[2],0);
     out.push({id:"job_borrow",count:rows.length,severity:rows[0][0],dollars,
-     headline:"Significant over billings vs. Cost to Complete",
-     cols:["Complete","Overbilled","Of cost to finish"],
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(O[r[1]]),cells:[pct0(P[r[1]]),sMoney(O[r[1]]),pct0(r[2])],detail:`${pct0(P[r[1]])} complete, ${sMoney(O[r[1]])} overbilled = ${pct0(r[2])} of cost to finish`})),
-     why:"Cash collected for work not yet performed is typically already spent on other jobs. The remaining work must be financed from elsewhere, a quiet dependency on everything finishing clean."});}}
+     headline:`${rows.length} job${rows.length>1?"s":""} require ${sMoney(dollars)} of outside funding`,
+     cols:["Complete","Cost to finish","Left to bill","Funding shortfall"],
+     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(r[2]),
+       cells:[pct0(P[r[1]]),sMoney(r[3]),sMoney(r[4]),sMoney(r[2])],
+       detail:`${sMoney(r[3])} to finish, ${sMoney(r[4])} left to bill, ${sMoney(r[2])} short`})),
+     why:"The estimated cost to finish exceeds the amount left to bill. The job cannot fund its own remaining work, so the shortfall must come from cash, credit, or another project."});}}
   {const rows=[];for(let i=0;i<n;i++)if(m[i]<0){const sev=clamp01(-m[i]/T.loss_margin_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(C[r[1]]-V[r[1]]),0);
     out.push({id:"loss_jobs",count:rows.length,severity:rows[0][0],dollars,
@@ -2095,7 +2187,7 @@ function footMeta(rep){
    brick = money at risk, amber = leverage / estimate quality */
 const SIG_MARK={
   trapped_cash:{color:"brick",vars:["U"],name:"Trapped cash"},
-  job_borrow:{color:"amber",vars:["O"],name:"Job borrow"},
+  job_borrow:{color:"amber",vars:["Q","RB","B"],name:"Job borrow"},
   loss_jobs:{color:"brick",vars:["G","M"],name:"Loss job"},
   cost_overrun:{color:"amber",vars:["D"],name:"Cost overrun"},
   early_concentration:{color:"amber",vars:["P"],name:"Early stage"},
@@ -2255,7 +2347,7 @@ function printSignalTitle(s){
   const jobs=`${n} job${n===1?"":"s"}`;
   const titles={
     trapped_cash:"Significant under billings with limited time to recover",
-    job_borrow:"Significant over billings vs. Cost to Complete",
+    job_borrow:`${jobs} with job borrow`,
     loss_jobs:`${jobs} losing money`,
     cost_overrun:`${jobs} over estimated cost`,
     early_concentration:"Significant contract value remains in early-stage work",
@@ -2270,7 +2362,7 @@ function printSignalTitle(s){
 function printSignalWhy(s){
   const why={
     trapped_cash:"Late-stage underbillings can indicate unapproved change orders or receivables that may not convert to cash.",
-    job_borrow:"Overbillings are cash collected for work not yet performed; completing that work requires funding from elsewhere.",
+    job_borrow:"The estimated cost to finish exceeds remaining billings, so the project requires funding from cash, credit, or another job.",
     loss_jobs:"Expected job losses reduce the contractor's net worth and should be recognized immediately.",
     cost_overrun:"Costs above the current estimate indicate that the estimate is stale and reported profit may be overstated.",
     early_concentration:"Early-stage margins are less proven and carry greater estimate risk.",
@@ -2422,26 +2514,37 @@ function printSummary(rep){
     </section>`;
   }).join(""):'<p class="empty-print">No underwriting signals exceeded the reporting threshold.</p>';
   const trends=BATCH_ANALYSIS_MODE?timeSeriesData():null;
-  const trendHtml=trends?`<section class="print-trends">
+  const printJobBorrow=signals.find(s=>s.id==="job_borrow")||null;
+  const trendHtml=(trends||printJobBorrow)?`<section class="print-trends">
     <h2 class="section-title">Across reporting periods</h2>
-    <p class="section-sub">Profit fade is the primary cross-period concern; cost-estimate changes and stalled jobs provide supporting context.</p>
+    <p class="section-sub">Cross-period flags include profit fade, cost changes, job borrow, and estimate anomalies. Anomalies combine fixed materiality thresholds with robust comparison to the contractor’s linked job history.</p>
     <div class="print-trend-kpis">
-      <div class="print-trend-kpi fade"><span>Profit fade</span><strong>${htmlEsc(fmtM(trends.fade))}</strong>
-        <small>${trends.fadeJobs} job${trends.fadeJobs===1?"":"s"} lost expected profit</small></div>
-      <div class="print-trend-kpi"><span>Cost estimate increases</span><strong>${htmlEsc(fmtM(trends.totalCostIncrease))}</strong>
-        <small>${trends.costIncreaseJobs} job${trends.costIncreaseJobs===1?"":"s"} revised upward</small></div>
+      <div class="print-trend-kpi fade"><span>Profit fade</span><strong>${htmlEsc(fmtM(trends?.fade||0))}</strong>
+        <small>${trends?.fadeJobs||0} job${(trends?.fadeJobs||0)===1?"":"s"} lost expected profit</small></div>
+      <div class="print-trend-kpi"><span>Cost estimate increases</span><strong>${htmlEsc(fmtM(trends?.totalCostIncrease||0))}</strong>
+        <small>${trends?.costIncreaseJobs||0} job${(trends?.costIncreaseJobs||0)===1?"":"s"} revised upward</small></div>
+      <div class="print-trend-kpi${printJobBorrow?" borrow":""}"><span>Job borrow</span><strong>${htmlEsc(fmtM(printJobBorrow?.dollars||0))}</strong>
+        <small>${printJobBorrow
+          ?`${printJobBorrow.count} job${printJobBorrow.count===1?"":"s"} require outside funding`
+          :"No remaining-work funding shortfall"}</small></div>
+      <div class="print-trend-kpi${trends?.anomalyJobs?" anomaly":""}"><span>Estimate anomalies</span><strong>${trends?.anomalyJobs||0}</strong>
+        <small>${trends?.largestAnomaly
+          ?`Largest GP swing ${htmlEsc(fmtM(Math.abs(trends.largestAnomaly.fade)))}`
+          :"No extreme cross-period estimate changes"}</small></div>
     </div>
-    <table><thead><tr><th>Job</th><th>Signal</th><th>Periods</th><th>Cost change</th><th>Profit change</th><th>Stalled</th></tr></thead>
+    ${trends?.rows?.length?`<table><thead><tr><th>Job</th><th>Signal</th><th>Periods</th><th>Prior GP</th><th>Latest GP</th><th>GP change</th><th>Margin change</th></tr></thead>
       <tbody>${trends.rows.map(row=>{const flags=[
+        row.estimateAnomaly?`<span class="estimate-anomaly-badge">${row.fade>=0?"Profit gain anomaly":"Profit loss anomaly"}</span>`:"",
         row.materialFade?'<span class="profit-fade-badge">Profit fade</span>':"",
         row.materialCost?"Cost increase":"",
         row.stalled?"Stalled":""
-      ].filter(Boolean).join(" · ");return`<tr class="${row.materialFade?"profit-fade-row":""}"><td>${htmlEsc(row.name||row.id||"—")}</td>
+      ].filter(Boolean).join(" · ");return`<tr class="${row.estimateAnomaly?"estimate-anomaly-row":row.materialFade?"profit-fade-row":""}"><td>${htmlEsc(row.name||row.id||"—")}</td>
         <td>${flags||"—"}</td>
         <td>${htmlEsc(`${row.from.slice(0,4)} → ${row.to.slice(0,4)}`)}</td>
-        <td>${htmlEsc(row.cost==null?"—":fmtM(row.cost))}</td>
+        <td>${htmlEsc(row.priorProfit==null?"—":fmtM(row.priorProfit))}</td>
+        <td>${htmlEsc(row.currentProfit==null?"—":fmtM(row.currentProfit))}</td>
         <td class="${row.materialFade?"fade-value":""}">${htmlEsc(row.fade==null?"—":fmtM(row.fade))}</td>
-        <td>${row.stalled?"Yes":"—"}</td></tr>`}).join("")}</tbody></table>
+        <td>${htmlEsc(row.marginChange==null?"—":`${row.marginChange>=0?"+":""}${pct1(row.marginChange)}`)}</td></tr>`}).join("")}</tbody></table>`:""}
     </section>`:"";
 
   const corrections=(a.corrections||[]).filter((_,i)=>ACCEPTED.has(i)).length;
@@ -2487,18 +2590,25 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 .signal-why strong{color:var(--ink);font-weight:600}
 .print-signal + .print-signal{margin-top:4px}
 .print-trends{margin-top:24px;break-inside:avoid}
-.print-trend-kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 12px}
+.print-trend-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 0 12px}
 .print-trend-kpi{border:1px solid var(--line);border-radius:6px;padding:8px}
 .print-trend-kpi.fade{background:#FBF0EC;border-color:#D8AA9D}
 .print-trend-kpi span{display:block;color:var(--muted);font-size:8px;letter-spacing:.07em;text-transform:uppercase}
 .print-trend-kpi strong{display:block;font-size:17px;margin-top:2px}
 .print-trend-kpi.fade strong{color:var(--brick)}
+.print-trend-kpi.borrow{background:#FAF5E8;border-color:#D9C28F}
+.print-trend-kpi.borrow strong{color:var(--amber)}
+.print-trend-kpi.anomaly{background:#FAF5E8;border-color:#D9C28F}
+.print-trend-kpi.anomaly strong{color:var(--amber)}
 .print-trend-kpi small{display:block;color:var(--muted);font-size:8px;margin-top:1px}
 .print-trends table{width:100%;border-collapse:collapse;font-size:9px}
 .print-trends th,.print-trends td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right}
 .print-trends th:first-child,.print-trends td:first-child{text-align:left}
 .print-trends .profit-fade-row td{background:#FFF8F5}
-.profit-fade-badge{display:inline-block;border-radius:999px;padding:1px 5px;background:#F2DDD6;color:var(--brick);font-size:7px;font-weight:700;text-transform:uppercase}
+.print-trends .estimate-anomaly-row td{background:#FFFCF5}
+.profit-fade-badge,.estimate-anomaly-badge{display:inline-block;border-radius:999px;padding:1px 5px;font-size:7px;font-weight:700;text-transform:uppercase}
+.profit-fade-badge{background:#F2DDD6;color:var(--brick)}
+.estimate-anomaly-badge{background:#F2E7CF;color:var(--amber)}
 .print-trends .fade-value{color:var(--brick);font-weight:700}
 .chart-block h2,.schedule-page h2{font-family:Georgia,serif;font-size:18px;font-weight:500;margin:0 0 3px}
 .chart-block .sub,.schedule-page .sub{font-size:10px;color:var(--muted);margin:0 0 12px}
