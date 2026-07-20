@@ -47,6 +47,31 @@ def test_chunk_extraction_forwards_pinned_model_and_schema(monkeypatch):
     assert fake.kwargs["output_schema"] == extraction.CHUNK_OUTPUT_SCHEMA
 
 
+def test_haiku_chunk_extraction_uses_concise_prompt(monkeypatch):
+    class FakeClient:
+        def __init__(self):
+            self.prompt = None
+
+        def generate(self, prompt, **_kwargs):
+            self.prompt = prompt
+            return json.dumps({"reporting_period_text": None, "tables": []})
+
+    fake = FakeClient()
+    monkeypatch.setattr(extraction, "get_client", lambda: fake)
+    extraction.extract_chunks_node({
+        "chunks": [{"chunk_id": 0, "bytes": b"pdf", "pages": [1],
+                    "media_type": "application/pdf"}],
+        "fragments": [],
+        "model_override": "claude-haiku-4-5",
+        "extraction_tier": "primary",
+        "extraction_attempts": [],
+        "_metrics": None,
+    })
+
+    assert fake.prompt == extraction.HAIKU_CHUNK_PROMPT
+    assert "Extract every visible table" in fake.prompt
+
+
 def test_chunk_prompt_is_strictly_one_page():
     assert "continue the same rows array across pages" not in extraction.CHUNK_PROMPT
     assert "never infer, repeat, or carry over rows" in extraction.CHUNK_PROMPT
@@ -149,5 +174,4 @@ def test_haiku_gets_bounded_manual_thinking():
     assert captured["thinking"] == {
         "type": "enabled", "budget_tokens": 16_384}
     assert captured["max_tokens"] == 65_536
-    assert "inspect the entire attached page" in captured["system"]
-    assert "Do not require the phrase \"WIP\"" in captured["system"]
+    assert "system" not in captured

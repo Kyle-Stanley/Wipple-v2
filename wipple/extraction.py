@@ -159,6 +159,25 @@ schedule's reporting or period-end date (for example, "Year ended December
 31, 2025"). If this page does not print one, return null. Do not guess a date
 from the table values or page number."""
 
+# Haiku performs this task more reliably with the same terse instruction used
+# in Claude.ai. The output schema already communicates the JSON shape, so do
+# not make the smaller model spend its attention re-reading that contract.
+HAIKU_CHUNK_PROMPT = """Extract every visible table from the attached PDF page.
+Transcribe every header and every row exactly as printed, including blank
+cells. Tables may be untitled and may use aligned columns instead of borders.
+If any aligned header/data rows are visible, the tables array must not be
+empty. For reporting_period_text, copy the printed reporting-date phrase or
+return null. Use position for each table's top-to-bottom reading order and put
+any uncertainty in notes."""
+
+_HAIKU_MODEL_IDS = {"claude-haiku-4-5", "claude-haiku-4-5-20251001"}
+
+
+def _chunk_prompt(model_override: str | None) -> str:
+    if (model_override or "").strip() in _HAIKU_MODEL_IDS:
+        return HAIKU_CHUNK_PROMPT
+    return CHUNK_PROMPT
+
 CHUNK_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -197,7 +216,8 @@ def extract_chunks_node(state) -> dict:
             continue
         try:
             text = get_client().generate(
-                CHUNK_PROMPT, tier=tier, pdf_bytes=ch["bytes"],
+                _chunk_prompt(state.get("model_override")), tier=tier,
+                pdf_bytes=ch["bytes"],
                 media_type=ch["media_type"], json_only=True,
                 model_override=state.get("model_override") or None,
                 output_schema=CHUNK_OUTPUT_SCHEMA,
