@@ -74,7 +74,7 @@ def test_claude_json_request_uses_structured_output_config():
 
     result = client.generate(
         "return JSON", model_override="claude-sonnet-4-6",
-        json_only=True, output_schema=schema)
+        pdf_bytes=b"%PDF-fake", json_only=True, output_schema=schema)
 
     assert result == '{"ok":true}'
     assert captured["model"] == "claude-sonnet-4-6"
@@ -84,6 +84,7 @@ def test_claude_json_request_uses_structured_output_config():
         "effort": "low",
     }
     assert captured["thinking"] == {"type": "adaptive"}
+    assert "system" not in captured
 
 
 def test_gemini_request_path_remains_unchanged():
@@ -142,8 +143,11 @@ def test_haiku_gets_bounded_manual_thinking():
     }
 
     client.generate("return JSON", model_override="claude-haiku-4-5",
-                    json_only=True, output_schema=schema)
+                    pdf_bytes=b"%PDF-fake", json_only=True,
+                    output_schema=schema)
 
     assert captured["thinking"] == {
         "type": "enabled", "budget_tokens": 16_384}
     assert captured["max_tokens"] == 65_536
+    assert "inspect the entire attached page" in captured["system"]
+    assert "Do not require the phrase \"WIP\"" in captured["system"]
