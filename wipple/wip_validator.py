@@ -210,6 +210,11 @@ class Config:
     anchor_rank_matches_per_rule: int = 4
     anchor_rank_d_min_families: int = 2
     anchor_rank_b_min_families: int = 1
+    # Full peeling is the expensive stage.  Wide-table pair rankings from all
+    # plausible V/estimate contexts are pooled globally, then only this many
+    # top-ranked placements are peeled initially.  The search widens only if
+    # that batch fails to produce a validatable hypothesis.
+    anchor_rank_global_keep: int = 8
 
 
 # ---------------------------------------------------------------------------
@@ -1300,7 +1305,7 @@ def _build_hypothesis(cols_m, row_index, vcol, xcol, orient, dcol, bcol, cfg):
 
 def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
     by_key = {}
-    deferred = []
+    wide_contexts = []
 
     def evaluate(context, pairs):
         for dcol, bcol in pairs:
@@ -1313,6 +1318,10 @@ def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
             old = by_key.get(hyp.key)
             if old is None or hyp.score > old.score:
                 by_key[hyp.key] = hyp
+
+    def has_validatable():
+        return any(h.corr_d >= 1 and h.corr_b >= 1
+                   for h in by_key.values())
 
     for vcol in _v_candidates(cols, finite, cfg, shortlist):
         for xcol, orient in _x_candidates(cols, vcol, finite, cfg, diag):
@@ -1346,6 +1355,7 @@ def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
                 cols_m, Vm, Cm, vcol, xcol, orient,
                 d_c, b_c, pairs, cfg)
             context["ranked"] = ranked_ctx
+            wide_contexts.append(context)
             diag["notes"].append(
                 f"anchor pair cap hit for V=col {vcol}/X=col {xcol} "
                 f"({len(pairs)} pairs); D/B axes ranked by downstream "
@@ -1364,33 +1374,63 @@ def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
                     {"column": int(col), "rank": [float(x) for x in score]}
                     for score, col in ranked_ctx["b_scores"][:5]],
             })
-            if ranked_ctx["initial"]:
-                evaluate(context, ranked_ctx["initial"])
-            deferred.append(context)
 
-    # Do not pay for pair-dependent N/U/O ranking on every wrong V/X reading.
-    # Only widen the ranked search when the cheap independent-axis pass failed
-    # to produce any validatable hypothesis.
-    if not any(h.corr_d >= 1 and h.corr_b >= 1 for h in by_key.values()):
-        for context in deferred:
-            ranked = _rank_context_fallback(
-                context["ranked"], context["cols_m"],
-                context["Vm"], context["Cm"],
-                context["vcol"], context["xcol"], cfg)
-            initial_set = set(context["ranked"]["initial"])
-            fallback = [(d, b) for _, d, b, _ in ranked
-                        if (d, b) not in initial_set][:cfg.max_anchor_pairs]
-            if fallback:
-                evaluate(context, fallback)
-            if ranked:
-                diag.setdefault("anchor_pair_fallbacks", []).append({
-                    "v_col": int(context["vcol"]),
-                    "x_col": int(context["xcol"]),
-                    "orientation": context["orient"],
-                    "evaluated": int(len(fallback)),
-                    "top": [x[3] for x in ranked[:5]],
-                })
+    if not wide_contexts:
+        return by_key
 
+    # Pair-dependent N/U/O scoring is inexpensive compared with a full peel.
+    # Pool every wide V/estimate context into ONE ranking so a wrong context
+    # cannot consume its own 80-hypothesis allowance.  This is the key runtime
+    # distinction: max_anchor_pairs is now a global widening budget, not a
+    # per-context tax.
+    global_ranked = []
+    for context in wide_contexts:
+        ranked = _rank_context_fallback(
+            context["ranked"], context["cols_m"],
+            context["Vm"], context["Cm"],
+            context["vcol"], context["xcol"], cfg)
+        for rank, dcol, bcol, detail in ranked:
+            global_ranked.append(
+                (rank, context, dcol, bcol, detail))
+    global_ranked.sort(key=lambda x: x[0], reverse=True)
+
+    diag["anchor_global_ranking"] = {
+        "ranked_pairs": int(len(global_ranked)),
+        "initial_budget": int(cfg.anchor_rank_global_keep),
+        "top": [
+            dict(item[4], v_col=int(item[1]["vcol"]),
+                 x_col=int(item[1]["xcol"]),
+                 orientation=item[1]["orient"])
+            for item in global_ranked[:5]
+        ],
+    }
+
+    if not global_ranked:
+        return by_key
+
+    # Progressive deepening.  Eight globally ranked hypotheses is enough for
+    # the ordinary wide-table case; 80 preserves the old cap as the second
+    # line of defence; only a genuinely unresolved table pays for the rest.
+    budgets = []
+    for n in (cfg.anchor_rank_global_keep, cfg.max_anchor_pairs,
+              len(global_ranked)):
+        n = min(int(n), len(global_ranked))
+        if n > 0 and n not in budgets:
+            budgets.append(n)
+
+    done = 0
+    for target in budgets:
+        grouped = {}
+        for _, context, dcol, bcol, _ in global_ranked[done:target]:
+            grouped.setdefault(id(context), (context, []))[1].append(
+                (dcol, bcol))
+        for context, pairs in grouped.values():
+            evaluate(context, pairs)
+        done = target
+        if has_validatable():
+            break
+
+    diag["anchor_global_ranking"]["peeled_pairs"] = int(done)
     return by_key
 
 
