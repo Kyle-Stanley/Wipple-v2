@@ -34,6 +34,7 @@ class TierConfig:
     thinking_level: Optional[str] = None
     adaptive_thinking: bool = False
     effort: Optional[str] = None
+    thinking_budget_tokens: Optional[int] = None
 
 
 # Current selectable models. Pricing is standard synchronous API pricing
@@ -53,10 +54,10 @@ MODEL_REGISTRY: dict[str, TierConfig] = {
         "Gemini 3.1 Pro Preview", thinking_level="low"),
     "claude-haiku-4-5": TierConfig(
         "claude-haiku-4-5", "anthropic", 1.00, 5.00,
-        "Claude Haiku 4.5"),
+        "Claude Haiku 4.5", thinking_budget_tokens=16_384),
     "claude-haiku-4-5-20251001": TierConfig(
         "claude-haiku-4-5-20251001", "anthropic", 1.00, 5.00,
-        "Claude Haiku 4.5"),
+        "Claude Haiku 4.5", thinking_budget_tokens=16_384),
     "claude-sonnet-4-6": TierConfig(
         "claude-sonnet-4-6", "anthropic", 3.00, 15.00,
         "Claude Sonnet 4.6", adaptive_thinking=True, effort="low"),
@@ -395,6 +396,11 @@ class ModelClient:
             request.setdefault("output_config", {})["effort"] = cfg.effort
         if cfg.adaptive_thinking:
             request["thinking"] = {"type": "adaptive"}
+        elif cfg.thinking_budget_tokens:
+            request["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": cfg.thinking_budget_tokens,
+            }
 
         resp = client.messages.create(**request)
         text = "".join(getattr(block, "text", "") for block in resp.content)
