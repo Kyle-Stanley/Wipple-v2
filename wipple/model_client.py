@@ -27,29 +27,35 @@ class TierConfig:
 
 # Pinnable models for the UI selector. Pricing per million tokens.
 MODEL_REGISTRY: dict[str, TierConfig] = {
-    "gemini-3.1-flash-lite-preview": TierConfig("gemini-3.1-flash-lite-preview", "google", 0.25, 1.50),
+    "gemini-3.1-flash-lite": TierConfig("gemini-3.1-flash-lite", "google", 0.25, 1.50),
     "gemini-3-flash-preview": TierConfig("gemini-3-flash-preview", "google", 0.50, 3.00),
     "gemini-3.5-flash": TierConfig("gemini-3.5-flash", "google", 1.50, 9.00),
     "gemini-3.1-pro-preview": TierConfig("gemini-3.1-pro-preview", "google", 2.00, 12.00),
     "claude-haiku-4-5-20251001": TierConfig("claude-haiku-4-5-20251001", "anthropic", 1.00, 5.00),
     "claude-sonnet-4-6": TierConfig("claude-sonnet-4-6", "anthropic", 3.00, 15.00),
-    "claude-opus-4-6": TierConfig("claude-opus-4-6", "anthropic", 5.00, 25.00),
+    "claude-opus-4-8": TierConfig("claude-opus-4-8", "anthropic", 5.00, 25.00),
 }
 
+
+def _tier_config(env_name: str, default_model: str,
+                 input_per_m: float, output_per_m: float) -> TierConfig:
+    """Resolve env-configured tiers without losing the model's provider."""
+    model_id = os.environ.get(env_name, default_model)
+    registered = MODEL_REGISTRY.get(model_id)
+    if registered is not None:
+        return registered
+    provider = "anthropic" if model_id.startswith("claude-") else "google"
+    return TierConfig(model_id, provider, input_per_m, output_per_m)
+
+
 TIERS: dict[str, TierConfig] = {
-    "primary": TierConfig(
-        model_id=os.environ.get("WIPPLE_PRIMARY_MODEL",
-                                "gemini-3.1-flash-lite-preview"),
-        provider="google", input_per_m=0.25, output_per_m=1.50),
-    "escalated": TierConfig(
-        model_id=os.environ.get("WIPPLE_ESCALATED_MODEL",
-                                "gemini-3.1-pro-preview"),
-        provider="google", input_per_m=2.00, output_per_m=12.00),
+    "primary": _tier_config("WIPPLE_PRIMARY_MODEL",
+                            "gemini-3.1-flash-lite", 0.25, 1.50),
+    "escalated": _tier_config("WIPPLE_ESCALATED_MODEL",
+                              "gemini-3.1-pro-preview", 2.00, 12.00),
     # Small, cheap text-only tier for the header fallback / disambiguator.
-    "fallback": TierConfig(
-        model_id=os.environ.get("WIPPLE_FALLBACK_MODEL",
-                                "gemini-3.1-flash-lite-preview"),
-        provider="google", input_per_m=0.25, output_per_m=1.50),
+    "fallback": _tier_config("WIPPLE_FALLBACK_MODEL",
+                             "gemini-3.1-flash-lite", 0.25, 1.50),
 }
 
 
@@ -126,6 +132,7 @@ class ModelClient:
         metrics: Optional[Metrics] = None,
         purpose: str = "",
         model_override: Optional[str] = None,
+        output_schema: Optional[dict[str, Any]] = None,
     ) -> str:
         cfg = MODEL_REGISTRY.get(model_override) if model_override else None
         if cfg is None:
@@ -136,7 +143,8 @@ class ModelClient:
                                              media_type, json_only, max_tokens)
         else:
             text, ti, to = self._call_anthropic(cfg, prompt, pdf_bytes,
-                                                media_type, max_tokens)
+                                                media_type, json_only,
+                                                max_tokens, output_schema)
         if metrics is not None:
             metrics.record(CallRecord(tier, cfg.model_id, ti, to,
                                       time.time() - t0, purpose,
@@ -181,7 +189,8 @@ class ModelClient:
             text = "".join(getattr(p, "text", "") for p in parts)
         return text, ti, to
 
-    def _call_anthropic(self, cfg, prompt, pdf_bytes, media_type, max_tokens):
+    def _call_anthropic(self, cfg, prompt, pdf_bytes, media_type, json_only,
+                        max_tokens, output_schema):
         if self._anthropic is None:
             import anthropic
             key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -195,9 +204,18 @@ class ModelClient:
                 "type": "base64", "media_type": media_type,
                 "data": base64.standard_b64encode(pdf_bytes).decode()}})
         content.append({"type": "text", "text": prompt})
-        resp = self._anthropic.messages.create(
-            model=cfg.model_id, max_tokens=max_tokens,
-            messages=[{"role": "user", "content": content}])
+        request: dict[str, Any] = {
+            "model": cfg.model_id,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": content}],
+        }
+        if json_only:
+            if output_schema is None:
+                raise ValueError(
+                    "Claude JSON requests require an explicit output_schema")
+            request["output_config"] = {"format": {
+                "type": "json_schema", "schema": output_schema}}
+        resp = self._anthropic.messages.create(**request)
         text = "".join(getattr(b, "text", "") for b in resp.content)
         return text, int(resp.usage.input_tokens), int(resp.usage.output_tokens)
 

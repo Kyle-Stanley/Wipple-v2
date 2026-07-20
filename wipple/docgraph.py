@@ -249,6 +249,7 @@ def tables_node(state: DocState) -> dict:
                 "raw_table": {"headers": sec["headers"], "rows": sec["rows"],
                               "page_count": 1, "notes": []},
                 "source_name": state.get("source_name", ""),
+                "model_override": state.get("model_override"),
                 # re-extraction budget pre-spent: the DOCUMENT graph owns
                 # re-extraction (it knows which chunk); the section engine
                 # must never loop back to a perception step it doesn't have.
@@ -350,12 +351,14 @@ def build_doc_graph():
 
 def run_document(doc_bytes: bytes = b"", source_name: str = "",
                  fragments: list | None = None,
-                 media_type: str | None = None) -> tuple[dict, dict]:
+                 media_type: str | None = None,
+                 model_override: str | None = None) -> tuple[dict, dict]:
     graph = build_doc_graph()
     metrics = Metrics()
     final = graph.invoke({
         "doc_bytes": doc_bytes, "source_name": source_name,
         "media_type": media_type, "fragments": fragments or [],
+        "model_override": model_override,
         "extraction_tier": "primary", "reextract_count": 0,
         "extraction_attempts": [], "_metrics": metrics,
     }, {"recursion_limit": 50})
