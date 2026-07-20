@@ -53,8 +53,9 @@ Rules:
 4. Report a confidence ("high"|"medium"|"low") per assignment.
 
 Return ONLY JSON:
-{{"mapping": {{"<col index>": "<VAR or null>", ...}},
-  "confidence": {{"<col index>": "high|medium|low", ...}},
+{{"assignments": [
+    {{"column": <col index>, "variable": "<VAR or null>",
+      "confidence": "high|medium|low"}}, ...],
   "notes": "<one short paragraph on anything ambiguous>"}}"""
 
 DISAMBIGUATION_PROMPT = """A deterministic math engine certified TWO incomparable column mappings for a contractor WIP schedule -- the numbers alone cannot break the tie, but the column headers can.
@@ -72,6 +73,37 @@ The engine suggests the deciding question is: {question}
 
 Using ONLY the headers, decide which mapping is correct.
 Return ONLY JSON: {{"chosen": "A" or "B", "rationale": "<one sentence>"}}"""
+
+FALLBACK_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "assignments": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "column": {"type": "integer"},
+                "variable": {"type": ["string", "null"],
+                             "enum": [*VAR_NAMES.keys(), None]},
+                "confidence": {"type": "string",
+                               "enum": ["high", "medium", "low"]},
+            },
+            "required": ["column", "variable", "confidence"],
+            "additionalProperties": False,
+        }},
+        "notes": {"type": "string"},
+    },
+    "required": ["assignments", "notes"],
+    "additionalProperties": False,
+}
+
+DISAMBIGUATION_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "chosen": {"type": "string", "enum": ["A", "B"]},
+        "rationale": {"type": "string"},
+    },
+    "required": ["chosen", "rationale"],
+    "additionalProperties": False,
+}
 
 
 def _columns_block(state: WippleState) -> str:
@@ -100,10 +132,18 @@ def fallback_node(state: WippleState) -> dict:
     try:
         text = get_client().generate(prompt, tier="fallback", json_only=True,
                                      model_override=state.get("model_override") or None,
+                                     output_schema=FALLBACK_OUTPUT_SCHEMA,
                                      metrics=metrics, purpose="header_fallback")
         obj = extract_json(text)
-        raw_mapping = obj.get("mapping", {}) or {}
-        conf = obj.get("confidence", {}) or {}
+        assignments = obj.get("assignments")
+        if assignments is None:  # backwards-compatible with old/fake output
+            raw_mapping = obj.get("mapping", {}) or {}
+            conf = obj.get("confidence", {}) or {}
+        else:
+            raw_mapping = {str(a.get("column")): a.get("variable")
+                           for a in assignments}
+            conf = {str(a.get("column")): a.get("confidence")
+                    for a in assignments}
         mapping, seen = {}, set()
         for k, var in raw_mapping.items():
             if var is None or var not in VAR_NAMES or var in seen:
@@ -146,6 +186,7 @@ def disambiguate_node(state: WippleState) -> dict:
     try:
         text = get_client().generate(prompt, tier="fallback", json_only=True,
                                      model_override=state.get("model_override") or None,
+                                     output_schema=DISAMBIGUATION_OUTPUT_SCHEMA,
                                      metrics=metrics, purpose="disambiguation")
         obj = extract_json(text)
         chosen = "competing" if str(obj.get("chosen", "A")).upper() == "B" \

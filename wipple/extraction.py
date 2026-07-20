@@ -49,6 +49,20 @@ Rules -- these matter more than anything else:
 Return the JSON object and nothing else."""
 
 
+EXTRACTION_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "headers": {"type": "array", "items": {"type": "string"}},
+        "rows": {"type": "array", "items": {
+            "type": "array", "items": {"type": "string"}}},
+        "page_count": {"type": "integer"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["headers", "rows", "page_count", "notes"],
+    "additionalProperties": False,
+}
+
+
 def extract_node(state: WippleState) -> dict:
     tier = state.get("extraction_tier", "primary")
     metrics: Metrics = state["_metrics"]  # injected by the runner
@@ -62,6 +76,7 @@ def extract_node(state: WippleState) -> dict:
             media_type=state.get("media_type") or "application/pdf",
             model_override=state.get("model_override") or None,
             json_only=True,
+            output_schema=EXTRACTION_OUTPUT_SCHEMA,
             metrics=metrics,
             purpose=f"extraction[{tier}]",
         )
@@ -134,6 +149,27 @@ schedule's reporting or period-end date (for example, "Year ended December
 31, 2025"). If this page does not print one, return null. Do not guess a date
 from the table values or page number."""
 
+CHUNK_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reporting_period_text": {"type": ["string", "null"]},
+        "tables": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "headers": {"type": "array", "items": {"type": "string"}},
+                "rows": {"type": "array", "items": {
+                    "type": "array", "items": {"type": "string"}}},
+                "position": {"type": "integer"},
+                "notes": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["headers", "rows", "position", "notes"],
+            "additionalProperties": False,
+        }},
+    },
+    "required": ["reporting_period_text", "tables"],
+    "additionalProperties": False,
+}
+
 
 def extract_chunks_node(state) -> dict:
     """Extract every pending chunk (all on the first pass; the re-queued
@@ -153,6 +189,8 @@ def extract_chunks_node(state) -> dict:
             text = get_client().generate(
                 CHUNK_PROMPT, tier=tier, pdf_bytes=ch["bytes"],
                 media_type=ch["media_type"], json_only=True,
+                model_override=state.get("model_override") or None,
+                output_schema=CHUNK_OUTPUT_SCHEMA,
                 metrics=metrics,
                 purpose=f"extract[chunk={ch['chunk_id']},{tier}]")
             obj = extract_json(text)

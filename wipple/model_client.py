@@ -247,6 +247,7 @@ class ModelClient:
         metrics: Optional[Metrics] = None,
         purpose: str = "",
         model_override: Optional[str] = None,
+        output_schema: Optional[dict[str, Any]] = None,
     ) -> str:
         cfg, requested_model = self._resolve_config(
             tier, model_override, metrics)
@@ -257,10 +258,10 @@ class ModelClient:
                 cfg, prompt, pdf_bytes, media_type, json_only, max_tokens)
         elif cfg.provider == "anthropic":
             text, ti, to, response_model = self._call_anthropic(
-                cfg, prompt, pdf_bytes, media_type, max_tokens)
+                cfg, prompt, pdf_bytes, media_type, json_only, max_tokens,
+                output_schema)
         else:
             raise RuntimeError(f"Unknown provider {cfg.provider!r}")
-
         if metrics is not None:
             metrics.record(CallRecord(
                 tier=tier,
@@ -361,7 +362,8 @@ class ModelClient:
                         api_key=key, timeout=120.0)
         return self._anthropic
 
-    def _call_anthropic(self, cfg, prompt, pdf_bytes, media_type, max_tokens):
+    def _call_anthropic(self, cfg, prompt, pdf_bytes, media_type, json_only,
+                        max_tokens, output_schema):
         client = self._get_anthropic_client()
         content: list[dict] = []
 
@@ -376,12 +378,17 @@ class ModelClient:
                 },
             })
         content.append({"type": "text", "text": prompt})
-
         request: dict[str, Any] = {
             "model": cfg.model_id,
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": content}],
         }
+        if json_only:
+            if output_schema is None:
+                raise ValueError(
+                    "Claude JSON requests require an explicit output_schema")
+            request["output_config"] = {"format": {
+                "type": "json_schema", "schema": output_schema}}
         if cfg.disable_adaptive_thinking:
             request["thinking"] = {"type": "disabled"}
 

@@ -22,7 +22,7 @@ import queue
 import threading
 import time
 
-from fastapi import FastAPI, Form, UploadFile
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -258,8 +258,10 @@ def sample():
 async def scan(file: UploadFile, model: str = Form("")):
     data = await file.read()
     name = file.filename or "upload"
-    override = (model.strip()
-                if model and model.strip() in MODEL_REGISTRY else None)
+    override = model.strip() if model else ""
+    if override and override not in MODEL_REGISTRY:
+        raise HTTPException(status_code=400,
+                            detail=f"Unknown model selection: {override}")
     # Sniffing (pdf / image / xlsx / csv) now lives in the graph's own
     # ingest node; spreadsheets become fragments with no model call, and
     # their empty chunk list means the re-extract route can never fire on

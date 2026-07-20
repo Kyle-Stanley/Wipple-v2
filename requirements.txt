@@ -5,5 +5,5 @@ uvicorn
 python-multipart
 openpyxl
 google-genai
-anthropic
+anthropic>=0.117.0
 pypdf
