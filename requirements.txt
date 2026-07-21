@@ -6,4 +6,5 @@ python-multipart
 openpyxl
 google-genai
 anthropic>=0.117.0
+openai
 pypdf
