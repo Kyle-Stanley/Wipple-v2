@@ -35,6 +35,24 @@ class TierConfig:
     adaptive_thinking: bool = False
     effort: Optional[str] = None
     thinking_budget_tokens: Optional[int] = None
+    document_system_prompt: Optional[str] = None
+
+
+HAIKU_DOCUMENT_SYSTEM_PROMPT = """You are a high-recall visual document
+transcription engine. Before answering, inspect the entire attached page,
+including small text and landscape-oriented content, and inventory every
+region made of aligned rows and columns.
+
+A contractor schedule may be titled Work in Progress, Contracts in Progress,
+Contract Status, or may have no explicit title. Dense financial rows with
+headings such as contract amount, estimated cost, cost to date, billings,
+earned revenue, backlog, or gross profit count as a table even when borders
+are faint or absent. Do not require the phrase \"WIP\" to recognize one.
+
+When the requested JSON has a tables array, return tables: [] only after you
+have inspected the whole page and found no tabular or column-aligned schedule
+at all. Ambiguous headings are not a reason to omit a visible table: preserve
+them verbatim and mention the ambiguity in notes."""
 
 
 # Current selectable models. Pricing is standard synchronous API pricing
@@ -54,10 +72,12 @@ MODEL_REGISTRY: dict[str, TierConfig] = {
         "Gemini 3.1 Pro Preview", thinking_level="low"),
     "claude-haiku-4-5": TierConfig(
         "claude-haiku-4-5", "anthropic", 1.00, 5.00,
-        "Claude Haiku 4.5", thinking_budget_tokens=16_384),
+        "Claude Haiku 4.5", thinking_budget_tokens=16_384,
+        document_system_prompt=HAIKU_DOCUMENT_SYSTEM_PROMPT),
     "claude-haiku-4-5-20251001": TierConfig(
         "claude-haiku-4-5-20251001", "anthropic", 1.00, 5.00,
-        "Claude Haiku 4.5", thinking_budget_tokens=16_384),
+        "Claude Haiku 4.5", thinking_budget_tokens=16_384,
+        document_system_prompt=HAIKU_DOCUMENT_SYSTEM_PROMPT),
     "claude-sonnet-4-6": TierConfig(
         "claude-sonnet-4-6", "anthropic", 3.00, 15.00,
         "Claude Sonnet 4.6", adaptive_thinking=True, effort="low"),
@@ -386,6 +406,8 @@ class ModelClient:
             "max_tokens": min(max_tokens * 4, 65_536),
             "messages": [{"role": "user", "content": content}],
         }
+        if pdf_bytes and cfg.document_system_prompt:
+            request["system"] = cfg.document_system_prompt
         if json_only:
             if output_schema is None:
                 raise ValueError(
