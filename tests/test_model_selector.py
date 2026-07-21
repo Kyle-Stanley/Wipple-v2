@@ -10,16 +10,23 @@ from types import SimpleNamespace
 import pytest
 
 import wipple.extraction as extraction
-from wipple.model_client import MODEL_REGISTRY, ModelClient
+from wipple.model_client import MODEL_REGISTRY, TIERS, ModelClient
 
 
 def test_ui_model_values_are_registered():
     html = Path("static/index.html").read_text(encoding="utf-8")
     values = set(re.findall(r'<option value="([^"]+)">', html))
     assert values <= set(MODEL_REGISTRY)
-    assert {"gemini-3.1-flash-lite", "claude-sonnet-5",
-            "claude-opus-4-8"} <= values
+    assert {"gemini-3.1-flash-lite", "gemini-3.5-flash-lite",
+            "gemini-3.6-flash", "claude-sonnet-5", "claude-opus-4-8",
+            "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"} <= values
     assert "gemini-3.1-flash-lite-preview" not in MODEL_REGISTRY
+
+
+def test_auto_defaults_remain_on_the_proven_gemini_path():
+    assert TIERS["primary"].model_id == "gemini-3.1-flash-lite"
+    assert TIERS["escalated"].model_id == "gemini-3.1-pro-preview"
+    assert TIERS["fallback"].model_id == "gemini-3.1-flash-lite"
 
 
 def test_chunk_extraction_forwards_pinned_model_and_schema(monkeypatch):
@@ -151,3 +158,75 @@ def test_haiku_gets_bounded_manual_thinking():
     assert captured["max_tokens"] == 65_536
     assert "inspect the entire attached page" in captured["system"]
     assert "Do not require the phrase \"WIP\"" in captured["system"]
+
+
+def test_openai_pdf_request_uses_responses_api_and_structured_output():
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            output_text='{"ok":true}',
+            model="gpt-5.6-terra",
+            usage=SimpleNamespace(input_tokens=11, output_tokens=4),
+        )
+
+    client = ModelClient()
+    client._openai = SimpleNamespace(
+        responses=SimpleNamespace(create=create))
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": False,
+    }
+
+    result = client.generate(
+        "return JSON", model_override="gpt-5.6-terra",
+        pdf_bytes=b"%PDF-fake", json_only=True, output_schema=schema)
+
+    assert result == '{"ok":true}'
+    assert captured["model"] == "gpt-5.6-terra"
+    assert captured["max_output_tokens"] == 65_536
+    assert captured["reasoning"] == {"effort": "medium"}
+    file_part = captured["input"][0]["content"][0]
+    assert file_part["type"] == "input_file"
+    assert file_part["filename"] == "document.pdf"
+    assert file_part["file_data"].startswith(
+        "data:application/pdf;base64,")
+    assert captured["text"] == {"format": {
+        "type": "json_schema",
+        "name": "wipple_extraction",
+        "schema": schema,
+        "strict": True,
+    }}
+
+
+def test_openai_image_request_preserves_original_detail():
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(output_text="done", usage=None)
+
+    client = ModelClient()
+    client._openai = SimpleNamespace(
+        responses=SimpleNamespace(create=create))
+
+    client.generate(
+        "read this", model_override="gpt-5.6-luna",
+        pdf_bytes=b"image", media_type="image/png", json_only=False)
+
+    image_part = captured["input"][0]["content"][0]
+    assert image_part["type"] == "input_image"
+    assert image_part["image_url"].startswith("data:image/png;base64,")
+    assert image_part["detail"] == "original"
+
+
+def test_openai_json_request_requires_a_schema():
+    client = ModelClient()
+    client._openai = SimpleNamespace(responses=SimpleNamespace())
+
+    with pytest.raises(ValueError, match="explicit output_schema"):
+        client.generate("return JSON", model_override="gpt-5.6-sol",
+                        json_only=True)

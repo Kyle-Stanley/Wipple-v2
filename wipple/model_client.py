@@ -27,13 +27,14 @@ from typing import Any, Optional
 @dataclass(frozen=True)
 class TierConfig:
     model_id: str
-    provider: str               # "google" | "anthropic"
+    provider: str               # "google" | "anthropic" | "openai"
     input_per_m: float
     output_per_m: float
     display_name: str = ""
     thinking_level: Optional[str] = None
     adaptive_thinking: bool = False
     effort: Optional[str] = None
+    reasoning_effort: Optional[str] = None
     thinking_budget_tokens: Optional[int] = None
     document_system_prompt: Optional[str] = None
 
@@ -61,9 +62,15 @@ MODEL_REGISTRY: dict[str, TierConfig] = {
     "gemini-3.1-flash-lite": TierConfig(
         "gemini-3.1-flash-lite", "google", 0.25, 1.50,
         "Gemini 3.1 Flash-Lite", thinking_level="minimal"),
+    "gemini-3.5-flash-lite": TierConfig(
+        "gemini-3.5-flash-lite", "google", 0.30, 2.50,
+        "Gemini 3.5 Flash-Lite", thinking_level="minimal"),
     "gemini-3-flash-preview": TierConfig(
         "gemini-3-flash-preview", "google", 0.50, 3.00,
         "Gemini 3 Flash Preview", thinking_level="minimal"),
+    "gemini-3.6-flash": TierConfig(
+        "gemini-3.6-flash", "google", 1.50, 7.50,
+        "Gemini 3.6 Flash", thinking_level="medium"),
     "gemini-3.5-flash": TierConfig(
         "gemini-3.5-flash", "google", 1.50, 9.00,
         "Gemini 3.5 Flash", thinking_level="minimal"),
@@ -90,6 +97,15 @@ MODEL_REGISTRY: dict[str, TierConfig] = {
     "claude-opus-4-8": TierConfig(
         "claude-opus-4-8", "anthropic", 5.00, 25.00,
         "Claude Opus 4.8", adaptive_thinking=True, effort="low"),
+    "gpt-5.6-luna": TierConfig(
+        "gpt-5.6-luna", "openai", 1.00, 6.00,
+        "GPT-5.6 Luna", reasoning_effort="medium"),
+    "gpt-5.6-terra": TierConfig(
+        "gpt-5.6-terra", "openai", 2.50, 15.00,
+        "GPT-5.6 Terra", reasoning_effort="medium"),
+    "gpt-5.6-sol": TierConfig(
+        "gpt-5.6-sol", "openai", 5.00, 30.00,
+        "GPT-5.6 Sol", reasoning_effort="medium"),
 }
 
 # Only genuinely retired IDs are redirected. Distinct working models are never
@@ -230,8 +246,10 @@ class ModelClient:
     def __init__(self) -> None:
         self._google = None
         self._anthropic = None
+        self._openai = None
         self._google_lock = threading.Lock()
         self._anthropic_lock = threading.Lock()
+        self._openai_lock = threading.Lock()
 
     def _resolve_config(
         self,
@@ -279,6 +297,10 @@ class ModelClient:
                 cfg, prompt, pdf_bytes, media_type, json_only, max_tokens)
         elif cfg.provider == "anthropic":
             text, ti, to, response_model = self._call_anthropic(
+                cfg, prompt, pdf_bytes, media_type, json_only, max_tokens,
+                output_schema)
+        elif cfg.provider == "openai":
+            text, ti, to, response_model = self._call_openai(
                 cfg, prompt, pdf_bytes, media_type, json_only, max_tokens,
                 output_schema)
         else:
@@ -431,6 +453,69 @@ class ModelClient:
             text,
             int(resp.usage.input_tokens),
             int(resp.usage.output_tokens),
+            str(response_model),
+        )
+
+    def _get_openai_client(self):
+        if self._openai is None:
+            with self._openai_lock:
+                if self._openai is None:
+                    from openai import OpenAI
+                    key = os.environ.get("OPENAI_API_KEY", "").strip()
+                    if not key:
+                        raise RuntimeError("OPENAI_API_KEY not set")
+                    self._openai = OpenAI(api_key=key, timeout=120.0)
+        return self._openai
+
+    def _call_openai(self, cfg, prompt, pdf_bytes, media_type, json_only,
+                     max_tokens, output_schema):
+        client = self._get_openai_client()
+        content: list[dict[str, Any]] = []
+
+        if pdf_bytes:
+            encoded = base64.standard_b64encode(pdf_bytes).decode()
+            if media_type.startswith("image/"):
+                content.append({
+                    "type": "input_image",
+                    "image_url": f"data:{media_type};base64,{encoded}",
+                    # GPT-5.6 preserves the source dimensions at this setting,
+                    # which matters for small text in dense financial tables.
+                    "detail": "original",
+                })
+            else:
+                content.append({
+                    "type": "input_file",
+                    "filename": "document.pdf",
+                    "file_data": f"data:{media_type};base64,{encoded}",
+                })
+        content.append({"type": "input_text", "text": prompt})
+
+        request: dict[str, Any] = {
+            "model": cfg.model_id,
+            "max_output_tokens": min(max_tokens * 4, 65_536),
+            "input": [{"role": "user", "content": content}],
+        }
+        if cfg.reasoning_effort:
+            request["reasoning"] = {"effort": cfg.reasoning_effort}
+        if json_only:
+            if output_schema is None:
+                raise ValueError(
+                    "OpenAI JSON requests require an explicit output_schema")
+            request["text"] = {"format": {
+                "type": "json_schema",
+                "name": "wipple_extraction",
+                "schema": output_schema,
+                "strict": True,
+            }}
+
+        resp = client.responses.create(**request)
+        usage = getattr(resp, "usage", None)
+        text = getattr(resp, "output_text", "") or ""
+        response_model = getattr(resp, "model", None) or cfg.model_id
+        return (
+            text,
+            int(getattr(usage, "input_tokens", 0) or 0),
+            int(getattr(usage, "output_tokens", 0) or 0),
             str(response_model),
         )
 
