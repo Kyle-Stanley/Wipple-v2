@@ -405,6 +405,18 @@ tr.pulse>td{animation:rowpulse 1.4s ease-out 2}
 .corr-job-cell.has-toggle small{margin-left:28px}
 .validation-corrections{border-top:1px solid var(--line-soft);margin-top:18px;padding-top:16px}
 .validation-corrections h3{font:500 16px Inter;text-align:left;margin-bottom:8px}
+.header-compare{margin:28px 0 0;text-align:left}
+.header-compare h3{font:500 16px Inter,sans-serif;margin:0 0 4px}
+.header-compare .header-note{font-size:12.5px;color:var(--muted);margin:0 0 10px}
+.header-compare-scroll{overflow-x:auto;border:1px solid var(--line-soft);border-radius:8px;background:var(--paper)}
+.header-compare-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px}
+.header-compare-table th,.header-compare-table td{padding:9px 11px;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);vertical-align:top;min-width:145px;max-width:210px}
+.header-compare-table tr:last-child th,.header-compare-table tr:last-child td{border-bottom:none}
+.header-compare-table th:last-child,.header-compare-table td:last-child{border-right:none}
+.header-compare-table th[scope=row]{position:sticky;left:0;z-index:1;min-width:86px;max-width:86px;background:var(--surface);font-weight:600;color:var(--sage-deep)}
+.header-compare-table td{background:var(--paper);overflow-wrap:anywhere}
+.single-validated-table .job-col{text-align:left;min-width:210px;position:sticky;left:0;background:var(--surface);z-index:1}
+.single-validated-table tfoot .job-col{background:#F7F5EF}
 /* receipt */
 .receipt{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:14px 20px}
 .receipt .bar{display:flex;align-items:center;gap:14px}
@@ -564,6 +576,245 @@ const VARIABLE_NAMES={
   PB:"Percent Billed"
 };
 const variableName=code=>VARIABLE_NAMES[code]||code||"Detected variable";
+
+/* Header text is informational only. Numeric validation remains completely
+   header-blind; this registry is used only to recognize familiar terminology
+   and diagnose a clear one-column header association offset in the UI. */
+const HEADER_VARIANT_TEXT={
+  V:[
+    "Contract Value","Total Contract Value","Contract Amount","Total Contract Amount",
+    "Contract Amt","Contract Price","Total Contract Price","Adjusted Contract Price",
+    "Adjusted Contract Amount","Revised Contract Price","Revised Contract Amount",
+    "Current Contract Price","Current Contract Value","Total Estimated Contract",
+    "Estimated Revenue","Estimated Total Revenue","Revenues","Contract Revenue",
+    "Total Contract Revenue","Contract Amount Including Change Orders",
+    "Contract Amount Incl. Change Orders","Contract Price Including Change Orders",
+    "Contract Price Incl. Approved Change Orders","Contract Price Including Approved Change Orders",
+    "Total Contracts","Contract","Original Contract Plus Change Orders",
+    "Original Contract Amount Plus Change Orders","Revised Contract Sum","Contract Sum"
+  ],
+  C:[
+    "Estimated Cost","Estimated Costs","Total Estimated Cost","Total Estimated Costs",
+    "Estimated Total Cost","Estimated Total Costs","Anticipated Contract Cost",
+    "Anticipated Contract Costs","Direct Contract Cost","Direct Contract Costs",
+    "Estimated Contract Cost","Estimated Contract Costs","Total Contract Cost",
+    "Total Contract Costs","Projected Total Cost","Forecast Total Cost",
+    "Forecasted Total Cost","Estimated Cost at Completion","Cost at Completion",
+    "Revised Estimated Cost","Revised Estimated Costs","Latest Estimated Cost"
+  ],
+  G:[
+    "Estimated Gross Profit","Total Estimated Gross Profit","Total Est Gross Profit",
+    "Est Gross Profit","Estimated Profit","Total Estimated Profit","Total Profit",
+    "Projected Gross Profit","Projected Profit","Anticipated Gross Profit",
+    "Forecast Gross Profit","Gross Profit Estimate","Estimated Contract Profit",
+    "Contract Gross Profit","Total Contract Gross Profit","Gross Profit",
+    "Original Estimate of Gross Profit Incl. Change Orders",
+    "Original Estimate of Gross Profit Including Change Orders","Revised Estimate Gross Profit",
+    "Revised Estimated Gross Profit","Revised Estimate of Gross Profit"
+  ],
+  M:[
+    "Estimated Gross Margin %","Estimated Gross Margin","Estimated Gross Margin Percent",
+    "Estimated Gross Margin Percentage","Gross Margin","Gross Margin %",
+    "Gross Margin Percent","Gross Profit %","Gross Profit Percent","GP %",
+    "GP Percent","Profit Margin","Estimated Profit Margin"
+  ],
+  D:[
+    "Cost to Date","Costs to Date","Total Cost to Date","Total Costs to Date",
+    "Cost Incurred to Date","Costs Incurred to Date","Total Cost Incurred to Date",
+    "Total Costs Incurred to Date","Actual Cost to Date","Actual Costs to Date",
+    "Actual Total Costs to Date","Actual Costs Incurred to Date",
+    "Cost of Earned Revenue to Date","Cost of Earned Revenue","Cost of Revenues",
+    "Cost of Revenue","Cost of Construction","Costs of Construction",
+    "Recognized Costs","Earned Cost","Cumulative Costs","Inception to Date Costs"
+  ],
+  Q:[
+    "Cost to Complete","Costs to Complete","Estimated Cost to Complete",
+    "Estimated Costs to Complete","Estimate Cost to Complete","Estimate Costs to Complete",
+    "Estimate Cost to Complete Remaining Work","Estimated Cost to Complete Remaining Work",
+    "Estimated Cost of Remaining Work","Estimated Costs of Remaining Work",
+    "Cost of Remaining Work","Remaining Estimated Cost","Remaining Estimated Costs",
+    "Remaining Cost","Remaining Costs","Cost Remaining","Projected Cost to Complete",
+    "Forecast Cost to Complete","Balance to Complete"
+  ],
+  P:[
+    "Percent Complete","Percentage Complete","% Complete","Completion Percentage",
+    "Percent Completed","Percentage Completed","Pct Complete","Pct Completed",
+    "Current Percent Complete","Current Percentage Complete",
+    "Current Percentage of Completion","Percentage of Completion","Percent of Completion",
+    "Completion Percent"
+  ],
+  E:[
+    "Earned Revenue","Earned Revenues","Revenue Earned","Revenues Earned",
+    "Total Earned Revenue","Total Revenue Earned","Recognized Revenue",
+    "Revenue Recognized","Recognized Revenues","Revenues Recognized",
+    "Earned Revenue to Date","Revenue Earned to Date","Revenue to Date",
+    "Cumulative Earned Revenue","Inception to Date Revenue","Contract Revenue Earned",
+    "Contract Revenues Earned","Percentage of Completion Revenue"
+  ],
+  B:[
+    "Billed to Date","Billings to Date","Total Billed to Date","Total Billings to Date",
+    "Amount Billed to Date","Total Amount Billed to Date","Contract Billings to Date",
+    "Total Contract Billings","Total Contract Billings to Date","Billings",
+    "Cumulative Billings","Inception to Date Billings","Progress Billings",
+    "Total Progress Billings","Total Contract Billings Including Retention",
+    "Total Contract Billings Including Retainage",
+    "Total Amount Billed to Date Incl. Retainage",
+    "Total Amount Billed to Date Including Retainage","Billings Including Retainage"
+  ],
+  H:[
+    "Earned Gross Profit to Date","Earned Gross Profit","Gross Profit Earned",
+    "Gross Profit Earned to Date","Gross Profit Recognized","Recognized Gross Profit",
+    "Gross Profit to Date","Cumulative Gross Profit","Earned Profit",
+    "Earned Profit to Date","Profit Earned","Recognized Profit","Gross Profit"
+  ],
+  N:[
+    "Net Billing Position","Net Billings Position","Billing Position","Billings Position",
+    "Net Over Under Billing","Net Over Under Billings","Net Under Over Billing",
+    "Net Under Over Billings","Underbilled Overbilled","Overbilled Underbilled",
+    "Underbilled (Overbilled)","Overbilled (Underbilled)","Underbilling Overbilling",
+    "Overbilling Underbilling","Contract Asset Liability","Net Contract Asset Liability"
+  ],
+  U:[
+    "Underbillings","Underbilling","Under Billings","Under Billing","Underbilled",
+    "Amount Underbilled","Costs and Estimated Earnings in Excess of Billings",
+    "Cost and Estimated Earnings in Excess of Billings",
+    "Cost and Est. Earnings in Excess of Billing","Cost and Est. Earnings in Excess of Billings",
+    "Costs and Est Earnings in Excess of Billings","Costs and Earnings in Excess of Billings",
+    "Costs in Excess of Billings","Earned Revenue in Excess of Billings",
+    "Contract Asset","Contract Assets","Unbilled Revenue","Underbilled (Overbilled)"
+  ],
+  O:[
+    "Overbillings","Overbilling","Over Billings","Over Billing","Overbilled",
+    "Amount Overbilled","Billings in Excess of Costs and Estimated Earnings",
+    "Billing in Excess of Costs and Estimated Earnings",
+    "Billings in Excess of Cost and Estimated Earnings",
+    "Billings in Excess of Costs and Est Earnings","Billings in Excess of Costs and Earnings",
+    "Billings in Excess of Costs","Billings in Excess of Earned Revenue",
+    "Contract Liability","Contract Liabilities","Deferred Revenue",
+    "Advance Billings","Underbilled (Overbilled)"
+  ],
+  R:[
+    "Remaining Revenue (Backlog)","Remaining Revenue","Revenue Remaining","Backlog",
+    "Revenue Backlog","Remaining Contract Revenue","Contract Revenue Remaining",
+    "Unearned Revenue","Revenue to Complete","Remaining Contract Value"
+  ],
+  RB:[
+    "Remaining Billings","Billings Remaining","Remaining Amount to Bill",
+    "Amount Remaining to Bill","Unbilled Contract Amount","Unbilled Contract Balance",
+    "Remaining Contract Billings","Balance to Bill","Billing Balance","Future Billings"
+  ],
+  PB:[
+    "Percent Billed","Percentage Billed","% Billed","Billing Percentage",
+    "Billed Percent","Billed Percentage","Pct Billed","Percent of Contract Billed",
+    "Percentage of Contract Billed","Billings Percent"
+  ]
+};
+function normalizeHeader(value){
+  return String(value||"").toLowerCase().replace(/&/g," and ").replace(/%/g," percent ")
+    .replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
+}
+const HEADER_VARIANTS=Object.fromEntries(Object.entries(HEADER_VARIANT_TEXT).map(([variable,values])=>[
+  variable,new Set([variableName(variable),...values].map(normalizeHeader))
+]));
+const headerMatches=(variable,header)=>HEADER_VARIANTS[variable]?.has(normalizeHeader(header))||false;
+
+function buildHeaderComparison(table,rep,discordant=[]){
+  const t=table||{};
+  const headers=Array.isArray(t.headers)?t.headers:[];
+  const numericMap=(t.numeric_col_map||rep?.parse?.numeric_col_map||[])
+    .map(value=>Number(value));
+  const tableColumns=rep?.table?.columns||[];
+  const mapping=rep?.mapping||rep?.validation?.mapping||{};
+  const rowsByMatrix=new Map();
+
+  /* The standardized report columns already follow validator matrix order.
+     Preserve that physical index, then use numeric_col_map to get back to the
+     source-table header position. */
+  tableColumns.forEach((column,index)=>{
+    const variable=column?.variable;
+    if(!variable)return;
+    const explicitMatrix=Number(column.matrix_column);
+    const matrixColumn=Number.isInteger(explicitMatrix)?explicitMatrix:index;
+    const mappedSource=numericMap[matrixColumn];
+    const explicitSource=Number(column.source_column??column.source_index);
+    const sourceIndex=Number.isInteger(mappedSource)?mappedSource:
+      (Number.isInteger(explicitSource)?explicitSource:matrixColumn);
+    rowsByMatrix.set(matrixColumn,{
+      matrixColumn,sourceIndex,variable,
+      expected:column.variable_name||variableName(variable),
+      fallbackHeader:column.header||column.name||"—"
+    });
+  });
+
+  /* Some report versions expose the validator mapping directly. Fill any
+     columns not already described by table.columns. */
+  for(const[matrixKey,variable]of Object.entries(mapping||{})){
+    const matrixColumn=Number(matrixKey);
+    if(!Number.isInteger(matrixColumn)||!variable||rowsByMatrix.has(matrixColumn))continue;
+    const mappedSource=numericMap[matrixColumn];
+    rowsByMatrix.set(matrixColumn,{
+      matrixColumn,
+      sourceIndex:Number.isInteger(mappedSource)?mappedSource:matrixColumn,
+      variable,expected:variableName(variable),fallbackHeader:"—"
+    });
+  }
+
+  let rows=[...rowsByMatrix.values()].sort((a,b)=>
+    a.sourceIndex-b.sourceIndex||a.matrixColumn-b.matrixColumn);
+
+  let appliedOffset=0;
+  if(rows.length&&headers.length){
+    const scored=[-1,0,1].map(offset=>({
+      offset,
+      score:rows.reduce((sum,row)=>{
+        const i=row.sourceIndex+offset;
+        return sum+(i>=0&&i<headers.length&&headerMatches(row.variable,headers[i])?1:0);
+      },0)
+    }));
+    const unshifted=scored.find(item=>item.offset===0);
+    const bestScore=Math.max(...scored.map(item=>item.score));
+    const best=scored.filter(item=>item.score===bestScore);
+    if(best.length===1&&best[0].offset!==0&&best[0].score>=4
+      &&best[0].score>=(unshifted?.score||0)+3)
+      appliedOffset=best[0].offset;
+
+    rows=rows.map(row=>{
+      const i=row.sourceIndex+appliedOffset;
+      return {...row,document:
+        (i>=0&&i<headers.length&&headers[i])||row.fallbackHeader||"—"};
+    });
+  }else{
+    rows=rows.map(row=>({...row,document:row.fallbackHeader||"—"}));
+  }
+
+  /* Legacy fallback: older report shapes may expose only discordant terms. */
+  if(!rows.length&&discordant.length){
+    const sectionHeaders=new Set(tableColumns.map(column=>column.header).filter(Boolean));
+    rows=discordant
+      .filter(item=>!sectionHeaders.size||sectionHeaders.has(item.header))
+      .map((item,index)=>({
+        matrixColumn:index,sourceIndex:index,variable:item.variable,
+        expected:item.name||variableName(item.variable),
+        document:item.header||"—"
+      }));
+  }
+
+  return {rows,appliedOffset};
+}
+
+function headerComparisonHTML(rep){
+  const comparison=rep?._headerComparison||buildHeaderComparison(null,rep,[]);
+  if(!comparison.rows.length)return"";
+  const note=comparison.appliedOffset
+    ?"The document headers were consistently offset by one column and were realigned for this display. Numeric validation was unchanged."
+    :"Shown for reference only. Column identification and validation used the values, not the header text.";
+  return `<section class="header-compare"><h3>Column headers</h3><p class="header-note">${note}</p>
+    <div class="header-compare-scroll"><table class="header-compare-table"><tbody>
+      <tr><th scope="row">Expected</th>${comparison.rows.map(row=>`<td>${htmlEsc(row.expected)}</td>`).join("")}</tr>
+      <tr><th scope="row">Document</th>${comparison.rows.map(row=>`<td>${htmlEsc(row.document)}</td>`).join("")}</tr>
+    </tbody></table></div></section>`;
+}
+
 const formulaHeading=formula=>{
   const m=String(formula||"").match(/^\s*([A-Z]{1,2})\s*=/);
   return m?variableName(m[1]):"Validation check";
@@ -781,6 +1032,17 @@ function setFlowNav(active){
     el.style.borderColor=key===active?"var(--sage-deep)":"";
   }
   $("#navCert").classList.add("hidden");$("#navDash").classList.add("hidden");
+}
+
+function setSingleNav(active){
+  for(const id of ["navBatch","navMatch","navTrends"])
+    $("#"+id).classList.add("hidden");
+  const pairs=[["navCert","validation"],["navDash","analysis"],
+    ["navConsolidated","validated"]];
+  for(const[id,key]of pairs){
+    const el=$("#"+id);el.classList.remove("hidden");
+    el.style.borderColor=key===active?"var(--sage-deep)":"";
+  }
 }
 
 function resetBatch(){
@@ -1489,6 +1751,39 @@ function renderConsolidated(){
   show("consolidated");const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
   setFlowNav("consolidated");window.scrollTo(0,0);
 }
+function singleValidatedTableHTML(rep){
+  const count=tableJobCount(rep?.table);
+  const rows=Array.from({length:count},(_,index)=>{
+    const identity=tableIdentity(rep.table,index);
+    return {label:identity.jobName||identity.jobId||identity.label||`Row ${index+1}`,
+      vars:canonicalVars(rep,index,ACCEPTED)};
+  });
+  const columns=PRINT_COLUMN_ORDER.filter(variable=>rows.some(row=>
+    Number.isFinite(+row.vars[variable])));
+  if(!rows.length||!columns.length)return`<p class="empty">No validated schedule is available.</p>`;
+  const pct=new Set(["P","PB","M"]);
+  const cell=(value,variable)=>!Number.isFinite(+value)?"—":pct.has(variable)
+    ?(100*(+value)).toFixed(1)+"%":fmt$(+value);
+  const body=rows.map(row=>`<tr><td class="job-col" title="${htmlEsc(row.label)}">${htmlEsc(row.label)}</td>
+    ${columns.map(variable=>`<td class="num">${cell(row.vars[variable],variable)}</td>`).join("")}</tr>`).join("");
+  const foot=`<tr><td class="job-col">Total</td>${columns.map(variable=>`<td class="num">${pct.has(variable)?"":cell(rows.reduce((sum,row)=>sum+(Number.isFinite(+row.vars[variable])?+row.vars[variable]:0),0),variable)}</td>`).join("")}</tr>`;
+  return `<div class="tablewrap"><table class="consolidated-table scroll-table single-validated-table"><thead><tr>
+    <th class="job-col">Job</th>${columns.map(variable=>`<th>${htmlEsc(PRINT_COLUMN_NAMES[variable]||variableName(variable))}</th>`).join("")}
+    </tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
+}
+function renderSingleValidatedWip(){
+  $("#consolidated").innerHTML=`<div class="flow-head"><div><h2>Validated WIP</h2>
+      <p>The mathematically identified schedule, accepted corrections, and deterministic WIP calculations in one table.</p></div></div>
+    <section class="table-card"><div class="table-card-head"><div><h3>Validated schedule</h3>
+      <p>Standardized column names; document headers are shown on the Validation page.</p></div></div>
+      ${singleValidatedTableHTML(REPORT)}</section>
+    <div class="actions" style="justify-content:flex-end"><button class="btn" id="singleValidation">Review validation</button>
+      <button class="btn primary" id="singleAnalysis">View underwriting analysis</button></div>`;
+  $("#singleValidation").onclick=()=>{VIEW="certificate";renderCertificate(REPORT);show("certificate");setSingleNav("validation");window.scrollTo(0,0)};
+  $("#singleAnalysis").onclick=()=>{VIEW="dash";renderDash(REPORT);show("dash");setSingleNav("analysis");window.scrollTo(0,0)};
+  show("consolidated");const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
+  setSingleNav("validated");window.scrollTo(0,0);
+}
 function openConsolidatedModal(period){
   const m=document.createElement("div");m.className="wipmodal validated-modal";
   m.innerHTML=`<div class="wm-panel" role="dialog" aria-modal="true" aria-label="Full validated WIP">
@@ -1697,14 +1992,7 @@ function adaptV3(doc){
         else if(iss.kind==="hjoin_rowcount_mismatch")rep._extra.push({st:"warn",
           label:"Facing pages carry different row counts",note:iss.note||""});
       }
-      const secHeaders=new Set(((rep.table||{}).columns||[]).map(c=>c.header));
-      for(const d of disc){
-        if(secHeaders.size&&!secHeaders.has(d.header))continue;
-        const provenName=d.name||VARIABLE_NAMES[d.variable]||d.variable;
-        rep._extra.push({st:"ok",
-          label:"Header terminology",
-          note:"Expected: "+provenName+" · Provided: "+d.header+". The column was identified from its values; this may simply be alternate terminology."});
-      }
+      rep._headerComparison=buildHeaderComparison(t,rep,disc);
       /* CC: synthesize the corrections array the reviewer UI drives */
       const a=rep.analysis||{};
       if(a.schema==="cc"&&!(a.corrections||[]).length){
@@ -1769,6 +2057,10 @@ function render(doc,restore=null){
   }
   DOC=doc;
   SECTIONS=doc.tables?adaptV3(doc):[{type:"wip",pages:[],rep:doc}];
+  SECTIONS.forEach(section=>{
+    const rep=section.rep||{};
+    if(!rep._headerComparison)rep._headerComparison=buildHeaderComparison(null,rep,[]);
+  });
   if(!SECTIONS.length){
     $("#errmsg").textContent="No tables were found in that document.";
     show("err");return;
@@ -1783,13 +2075,18 @@ function render(doc,restore=null){
   if(VIEW==="dash"){renderDash(REPORT);show("dash");}
   else{renderCertificate(REPORT);show("certificate");}
   const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
-  $("#navBatch").classList.toggle("hidden",!BATCH_MODE);
-  $("#navMatch").classList.add("hidden");$("#navConsolidated").classList.add("hidden");
-  $("#navTrends").classList.add("hidden");
-  $("#navCert").classList.remove("hidden");$("#navDash").classList.remove("hidden");
-  if(BATCH_MODE)$("#navBatch").onclick=renderBatch;
-  $("#navCert").onclick=()=>{VIEW="certificate";renderCertificate(REPORT);show("certificate");window.scrollTo(0,0)};
-  $("#navDash").onclick=()=>{VIEW="dash";renderDash(REPORT);show("dash");window.scrollTo(0,0)};
+  if(BATCH_MODE){
+    $("#navBatch").classList.remove("hidden");
+    $("#navMatch").classList.add("hidden");$("#navConsolidated").classList.add("hidden");
+    $("#navTrends").classList.add("hidden");
+    $("#navCert").classList.remove("hidden");$("#navDash").classList.remove("hidden");
+    $("#navBatch").onclick=renderBatch;
+  }else{
+    setSingleNav(VIEW==="dash"?"analysis":"validation");
+    $("#navConsolidated").onclick=renderSingleValidatedWip;
+  }
+  $("#navCert").onclick=()=>{VIEW="certificate";renderCertificate(REPORT);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};
+  $("#navDash").onclick=()=>{VIEW="dash";renderDash(REPORT);show("dash");if(!BATCH_MODE)setSingleNav("analysis");window.scrollTo(0,0)};
 }
 
 function renderCertificate(rep){
@@ -1902,6 +2199,7 @@ function renderCertificate(rep){
       const col=c.st==="ok"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
       return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
     }).join("")}</div>
+    ${headerComparisonHTML(rep)}
     <section class="validation-corrections"><h3>Errors and corrections</h3>
       ${excHTML||'<p class="empty" style="text-align:left">No errors or corrections for this schedule.</p>'}
     </section>
