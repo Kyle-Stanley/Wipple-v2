@@ -57,8 +57,13 @@ Architecture
     cannot eject the true column into a virtual node -- anti-bug 1).
     Certification is strict: every accepted relation is re-checked on every
     row at propagated dollar precision (money) or display-grid precision
-    (percents). A ~$37 misprint therefore surfaces as `validation_failed`
-    with the exact row, observed, expected, and signed difference.
+    (percents). Rows containing a non-finite extracted cell are omitted only
+    from identification, then reintroduced for partial-row certification of
+    every witnessed physical relation that can be evaluated. A missing or bad
+    Underbillings/Overbillings/Net-position cell therefore cannot disappear by
+    causing its whole row to be skipped. A ~$37 misprint surfaces as
+    `validation_failed` with the exact row, observed, expected, and signed
+    difference.
 
 Only dependency: numpy.
 """
@@ -1478,6 +1483,155 @@ def _certify(hyp, labels, cfg):
     return witnesses, failures
 
 
+
+def _certify_excluded_rows(hyp, cols, labels, excluded, cfg):
+    """Certify rows omitted from identification because any extracted cell was
+    non-finite.
+
+    Identification still uses complete rows so NaNs cannot poison the global
+    column search.  Once the winning mapping is known, however, each excluded
+    row is reconstructed from its available physical cells and virtual rules,
+    then every physical relation already present in ``hyp.edges`` is checked
+    independently.  This keeps evidence-family merging as a scoring concept
+    only: split U/O columns, a combined N column, or redundant N+U+O columns
+    are each certified whenever they physically exist.
+
+    Returns:
+      failures   -- ordinary numeric identity violations on excluded rows
+      incomplete -- checks that could not run because a mapped physical value
+                    or one of its required inputs was missing/non-finite
+      checked    -- compact per-row diagnostics
+    """
+    excluded_rows = np.nonzero(np.asarray(excluded, dtype=bool))[0]
+    if excluded_rows.size == 0:
+        return [], [], []
+
+    physical = {var: vv for var, vv in hyp.known.items()
+                if vv.col is not None}
+    failures, incomplete, checked = [], [], []
+
+    for orig in excluded_rows:
+        values, tols, supports = {}, {}, {}
+        for var, vv in physical.items():
+            raw = float(cols[vv.col][orig])
+            if not np.isfinite(raw):
+                continue
+            values[var] = raw / vv.interp_scale
+            if vv.tol.size:
+                tols[var] = float(vv.tol[0])
+            else:
+                tols[var] = (cfg.pct_default_tol if var in PCT_VARS
+                             else cfg.money_obs_tol)
+            supports[var] = frozenset({vv.col})
+
+        # Recreate only variables that were virtual in the winning hypothesis.
+        # Physical outputs are never filled in: a missing printed value must
+        # remain visible as an incomplete certification, not be silently
+        # replaced by its implied value.
+        for _ in range(len(VAR_NAMES) * 2):
+            made = False
+            for rule in RULES_ORDERED:
+                vv = hyp.known.get(rule.out)
+                if (vv is None or vv.col is not None or rule.out in values
+                        or not all(v in values for v in rule.ins)):
+                    continue
+                in_vals = [np.array([values[v]], dtype=float)
+                           for v in rule.ins]
+                in_tols = [np.array([tols[v]], dtype=float)
+                           for v in rule.ins]
+                pred, ptol = _prop_tol(rule.fn, in_vals, in_tols)
+                if not np.isfinite(pred[0]):
+                    continue
+                values[rule.out] = float(pred[0])
+                tols[rule.out] = float(ptol[0])
+                supports[rule.out] = frozenset().union(
+                    *[supports[v] for v in rule.ins])
+                made = True
+            if not made:
+                break
+
+        row_checks = 0
+        for e in hyp.edges:
+            rule = e.rule
+            out = physical.get(e.out_var)
+            if out is None:
+                continue
+
+            missing_inputs = [v for v in rule.ins if v not in values]
+            if missing_inputs:
+                incomplete.append({
+                    "row_index": int(orig), "row_label": labels[orig],
+                    "column": int(out.col), "variable": e.out_var,
+                    "relation": rule.name,
+                    "reason": "missing required input(s)",
+                    "missing": missing_inputs,
+                    "expected": None,
+                })
+                continue
+
+            pred_support = frozenset().union(
+                *[supports[v] for v in rule.ins])
+            if out.col in pred_support:
+                # Preserve the validator's no-self-witness invariant.
+                incomplete.append({
+                    "row_index": int(orig), "row_label": labels[orig],
+                    "column": int(out.col), "variable": e.out_var,
+                    "relation": rule.name,
+                    "reason": "independent prediction unavailable",
+                    "missing": [], "expected": None,
+                })
+                continue
+
+            in_vals = [np.array([values[v]], dtype=float)
+                       for v in rule.ins]
+            in_tols = [np.array([tols[v]], dtype=float)
+                       for v in rule.ins]
+            pred, ptol = _prop_tol(rule.fn, in_vals, in_tols)
+            expected = float(pred[0])
+            if rule.kind == "money":
+                strict = float(ptol[0] + out.tol[0] + cfg.cert_slack
+                               + cfg.cert_money_rel * abs(expected))
+            else:
+                strict = float(ptol[0] + out.tol[0] + 1e-9)
+
+            raw_out = float(cols[out.col][orig])
+            scale = out.interp_scale
+            if not np.isfinite(raw_out):
+                incomplete.append({
+                    "row_index": int(orig), "row_label": labels[orig],
+                    "column": int(out.col), "variable": e.out_var,
+                    "relation": rule.name,
+                    "reason": "mapped physical value is missing/non-finite",
+                    "missing": [e.out_var],
+                    "expected": float(expected * scale),
+                })
+                continue
+
+            observed = raw_out / scale
+            compared = (abs(observed)
+                        if e.out_var in MAGNITUDE_PRESENTATION_VARS
+                        else observed)
+            resid = compared - expected
+            row_checks += 1
+            if abs(resid) > strict:
+                failures.append(RowFailure(
+                    relation=rule.name,
+                    business_form=_business_form(rule),
+                    variable=e.out_var, column=out.col,
+                    row_index=int(orig), row_label=labels[orig],
+                    observed=float(raw_out),
+                    expected=float(expected * scale),
+                    difference=float(resid * scale),
+                    tolerance=float(strict * scale)))
+
+        checked.append({
+            "row_index": int(orig), "row_label": labels[orig],
+            "relations_checked": int(row_checks),
+        })
+
+    return failures, incomplete, checked
+
+
 PCT_VARS = {"M", "P", "PB"}
 
 
@@ -2438,9 +2592,17 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
     best = validatable[0]
     # The best hypothesis is certified FIRST and is never abandoned for a
     # rival because of its failures (anti-bug 1: no silent re-routing).
-    witnesses, failures = _certify_full(best, cols, labels, cfg)
-    findings = _diagnose(best, cols, labels, cfg, failures) if failures else []
-    if not failures:
+    witnesses, base_failures = _certify_full(best, cols, labels, cfg)
+    excluded_failures, excluded_incomplete, excluded_checked = \
+        _certify_excluded_rows(best, cols, labels, ~finite, cfg)
+    failures = base_failures + excluded_failures
+    findings = (_diagnose(best, cols, labels, cfg, base_failures)
+                if base_failures else [])
+    if excluded_checked:
+        diag["excluded_row_certification"] = excluded_checked
+    if excluded_incomplete:
+        diag["incomplete_excluded_row_checks"] = excluded_incomplete
+    if not failures and not excluded_incomplete:
         # Ambiguity gate: a rival "remains" only if it disagrees on the
         # SEMANTIC core, scores within the margin, AND survives strict
         # certification itself -- a reading refuted row-by-row by the data
@@ -2464,7 +2626,9 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
                 # incomparable explanations.
                 continue
             _, rf = _certify_full(rival, cols, labels, cfg)
-            if rf:
+            rex, rinc, _ = _certify_excluded_rows(
+                rival, cols, labels, ~finite, cfg)
+            if rf or rex or rinc:
                 refuted += 1
                 continue
             diag["rivals_refuted_by_certification"] = refuted
@@ -2511,11 +2675,23 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
     diag["families_witnessed"] = sorted(
         f for f, (_, w) in best.families.items() if w > 0)
 
+    validation_failed = bool(failures or excluded_incomplete)
+    if not validation_failed:
+        reason = ""
+    else:
+        parts = []
+        if failures:
+            parts.append(f"{len(failures)} row-level identity violation(s)")
+        if excluded_incomplete:
+            parts.append(
+                f"{len(excluded_incomplete)} physical relation check(s) "
+                "could not be completed on rows omitted from identification")
+        reason = ("; ".join(parts)
+                  + "; the schedule is not fully internally certified")
+
     return ValidationResult(
-        status=FAILED if failures else SUCCESS,
-        reason=("" if not failures else
-                f"{len(failures)} row-level identity violation(s); the "
-                "schedule is internally inconsistent at the cells listed"),
+        status=FAILED if validation_failed else SUCCESS,
+        reason=reason,
         mapping=mapping,
         mapping_named={c: VAR_NAMES[v] for c, v in mapping.items()},
         estimate_orientation=orientation,
