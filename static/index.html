@@ -410,11 +410,13 @@ tr.pulse>td{animation:rowpulse 1.4s ease-out 2}
 .header-compare .header-note{font-size:12.5px;color:var(--muted);margin:0 0 10px}
 .header-compare-scroll{overflow-x:auto;border:1px solid var(--line-soft);border-radius:8px;background:var(--paper)}
 .header-compare-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px}
-.header-compare-table th,.header-compare-table td{padding:9px 11px;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);vertical-align:top;min-width:145px;max-width:210px}
+.header-compare-table th,.header-compare-table td{padding:9px 11px;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);vertical-align:top;min-width:155px;max-width:220px;white-space:normal;line-height:1.35}
 .header-compare-table tr:last-child th,.header-compare-table tr:last-child td{border-bottom:none}
 .header-compare-table th:last-child,.header-compare-table td:last-child{border-right:none}
-.header-compare-table th[scope=row]{position:sticky;left:0;z-index:1;min-width:86px;max-width:86px;background:var(--surface);font-weight:600;color:var(--sage-deep)}
-.header-compare-table td{background:var(--paper);overflow-wrap:anywhere}
+.header-compare-table th[scope=row]{position:sticky;left:0;z-index:1;min-width:86px;max-width:86px;background:var(--surface);font-weight:600;color:var(--sage-deep);white-space:nowrap}
+.header-compare-table td{background:var(--paper);overflow-wrap:break-word;word-break:normal}
+.header-compare-table td.header-known{background:#E7EDE4;color:var(--sage-deep)}
+.header-compare-table td.header-unknown{background:#F6F0E2;color:var(--amber)}
 .single-validated-table .job-col{text-align:left;min-width:210px;position:sticky;left:0;background:var(--surface);z-index:1}
 .single-validated-table tfoot .job-col{background:#F7F5EF}
 /* receipt */
@@ -719,85 +721,60 @@ const HEADER_VARIANTS=Object.fromEntries(Object.entries(HEADER_VARIANT_TEXT).map
 const headerMatches=(variable,header)=>HEADER_VARIANTS[variable]?.has(normalizeHeader(header))||false;
 
 function buildHeaderComparison(table,rep,discordant=[]){
-  const t=table||{};
-  const headers=Array.isArray(t.headers)?t.headers:[];
-  const numericMap=(t.numeric_col_map||rep?.parse?.numeric_col_map||[])
-    .map(value=>Number(value));
   const tableColumns=rep?.table?.columns||[];
-  const mapping=rep?.mapping||rep?.validation?.mapping||{};
-  const rowsByMatrix=new Map();
 
-  /* The standardized report columns already follow validator matrix order.
-     Preserve that physical index, then use numeric_col_map to get back to the
-     source-table header position. */
-  tableColumns.forEach((column,index)=>{
-    const variable=column?.variable;
-    if(!variable)return;
-    const explicitMatrix=Number(column.matrix_column);
-    const matrixColumn=Number.isInteger(explicitMatrix)?explicitMatrix:index;
-    const mappedSource=numericMap[matrixColumn];
-    const explicitSource=Number(column.source_column??column.source_index);
-    const sourceIndex=Number.isInteger(mappedSource)?mappedSource:
-      (Number.isInteger(explicitSource)?explicitSource:matrixColumn);
-    rowsByMatrix.set(matrixColumn,{
-      matrixColumn,sourceIndex,variable,
-      expected:column.variable_name||variableName(variable),
-      fallbackHeader:column.header||column.name||"—"
-    });
-  });
-
-  /* Some report versions expose the validator mapping directly. Fill any
-     columns not already described by table.columns. */
-  for(const[matrixKey,variable]of Object.entries(mapping||{})){
-    const matrixColumn=Number(matrixKey);
-    if(!Number.isInteger(matrixColumn)||!variable||rowsByMatrix.has(matrixColumn))continue;
-    const mappedSource=numericMap[matrixColumn];
-    rowsByMatrix.set(matrixColumn,{
-      matrixColumn,
-      sourceIndex:Number.isInteger(mappedSource)?mappedSource:matrixColumn,
-      variable,expected:variableName(variable),fallbackHeader:"—"
-    });
-  }
-
-  let rows=[...rowsByMatrix.values()].sort((a,b)=>
-    a.sourceIndex-b.sourceIndex||a.matrixColumn-b.matrixColumn);
+  /* The report table already carries the two facts this reference view needs:
+     `variable` / `variable_name` is what the numeric validator proved, while
+     `header` is the document header attached to that same displayed column.
+     Do not reinterpret the displayed-column index as a numeric-matrix index:
+     derived/virtual columns can exist in the report without existing in
+     numeric_col_map, which is what caused Billings to Date and every later
+     header to slide in the first implementation. */
+  let rows=tableColumns
+    .filter(column=>column?.variable&&(column.header||column.name))
+    .map((column,index)=>({
+      columnIndex:index,
+      variable:column.variable,
+      expected:column.variable_name||variableName(column.variable),
+      document:column.header||column.name||"—"
+    }));
 
   let appliedOffset=0;
-  if(rows.length&&headers.length){
+  if(rows.length){
+    const documents=rows.map(row=>row.document);
     const scored=[-1,0,1].map(offset=>({
       offset,
-      score:rows.reduce((sum,row)=>{
-        const i=row.sourceIndex+offset;
-        return sum+(i>=0&&i<headers.length&&headerMatches(row.variable,headers[i])?1:0);
+      score:rows.reduce((sum,row,index)=>{
+        const candidate=documents[index+offset];
+        return sum+(candidate&&headerMatches(row.variable,candidate)?1:0);
       },0)
     }));
     const unshifted=scored.find(item=>item.offset===0);
     const bestScore=Math.max(...scored.map(item=>item.score));
     const best=scored.filter(item=>item.score===bestScore);
     if(best.length===1&&best[0].offset!==0&&best[0].score>=4
-      &&best[0].score>=(unshifted?.score||0)+3)
+      &&best[0].score>=(unshifted?.score||0)+3){
       appliedOffset=best[0].offset;
-
-    rows=rows.map(row=>{
-      const i=row.sourceIndex+appliedOffset;
-      return {...row,document:
-        (i>=0&&i<headers.length&&headers[i])||row.fallbackHeader||"—"};
-    });
-  }else{
-    rows=rows.map(row=>({...row,document:row.fallbackHeader||"—"}));
+      rows=rows.map((row,index)=>({
+        ...row,
+        document:documents[index+appliedOffset]||"—"
+      }));
+    }
   }
 
   /* Legacy fallback: older report shapes may expose only discordant terms. */
   if(!rows.length&&discordant.length){
-    const sectionHeaders=new Set(tableColumns.map(column=>column.header).filter(Boolean));
-    rows=discordant
-      .filter(item=>!sectionHeaders.size||sectionHeaders.has(item.header))
-      .map((item,index)=>({
-        matrixColumn:index,sourceIndex:index,variable:item.variable,
-        expected:item.name||variableName(item.variable),
-        document:item.header||"—"
-      }));
+    rows=discordant.map((item,index)=>({
+      columnIndex:index,variable:item.variable,
+      expected:item.name||variableName(item.variable),
+      document:item.header||"—"
+    }));
   }
+
+  rows=rows.map(row=>({
+    ...row,
+    recognized:headerMatches(row.variable,row.document)
+  }));
 
   return {rows,appliedOffset};
 }
@@ -805,13 +782,15 @@ function buildHeaderComparison(table,rep,discordant=[]){
 function headerComparisonHTML(rep){
   const comparison=rep?._headerComparison||buildHeaderComparison(null,rep,[]);
   if(!comparison.rows.length)return"";
-  const note=comparison.appliedOffset
+  const baseNote=comparison.appliedOffset
     ?"The document headers were consistently offset by one column and were realigned for this display. Numeric validation was unchanged."
     :"Shown for reference only. Column identification and validation used the values, not the header text.";
+  const note=baseNote+" Green cells use recognized terminology; yellow cells are not yet in the canonical header list.";
+  const cellClass=row=>row.recognized?"header-known":"header-unknown";
   return `<section class="header-compare"><h3>Column headers</h3><p class="header-note">${note}</p>
     <div class="header-compare-scroll"><table class="header-compare-table"><tbody>
-      <tr><th scope="row">Expected</th>${comparison.rows.map(row=>`<td>${htmlEsc(row.expected)}</td>`).join("")}</tr>
-      <tr><th scope="row">Document</th>${comparison.rows.map(row=>`<td>${htmlEsc(row.document)}</td>`).join("")}</tr>
+      <tr><th scope="row">Expected</th>${comparison.rows.map(row=>`<td class="${cellClass(row)}">${htmlEsc(row.expected)}</td>`).join("")}</tr>
+      <tr><th scope="row">Document</th>${comparison.rows.map(row=>`<td class="${cellClass(row)}">${htmlEsc(row.document)}</td>`).join("")}</tr>
     </tbody></table></div></section>`;
 }
 
