@@ -14,6 +14,15 @@ from .state import WippleState
 from .cc_validator import validate_cc
 from .wip_validator import VAR_NAMES, ValidationResult, validate_wip
 
+# Only money-like variables have meaningful column totals. Percentages are
+# intentionally excluded even when the validator maps them. The period block
+# is also excluded automatically because totals are assessed only for mapped
+# columns; currently-unneeded numeric columns never enter this set.
+ADDITIVE_TOTAL_VARS = frozenset({
+    "V", "C", "G", "D", "Q", "E", "B", "H", "N", "U", "O", "R", "RB",
+})
+MAGNITUDE_TOTAL_VARS = frozenset({"U", "O"})
+
 # Finding classifications that point at the EXTRACTION as the likely culprit
 # (transcription-shaped errors) vs. the document itself. Drives the
 # failed-branch routing: re-extract once for these, emit a finding otherwise.
@@ -119,13 +128,23 @@ def parse_node(state: WippleState) -> dict:
                 "parse_report": {"notes": ["no extracted table"]}}
 
     rows = list(raw["rows"])
-    result = parse_table(rows, headers=raw.get("headers"))
+    full_result = parse_table(rows, headers=raw.get("headers"))
+    result = full_result
 
     # Parse once with every row so the detector can inspect the complete
-    # numeric table. If the final row is proven to be a total, reparse without
-    # it. The original raw table remains untouched for stated-total checks.
-    total_evidence = _trailing_total_evidence(result.matrix)
+    # numeric table. If the final row is proven to be a total, preserve its
+    # parsed values as evidence, then reparse without it. The total is NEVER
+    # supplied to validate_wip and therefore cannot influence cell corrections.
+    total_evidence = _trailing_total_evidence(full_result.matrix)
+    stated_total_row = None
     if total_evidence is not None and rows:
+        total_values = np.asarray(full_result.matrix, dtype=float)[-1]
+        stated_total_row = {
+            **total_evidence,
+            "values": [None if not np.isfinite(v) else float(v)
+                       for v in total_values.tolist()],
+            "numeric_col_map": _np_to_py(full_result.numeric_col_map),
+        }
         rows = rows[:-1]
         result = parse_table(rows, headers=raw.get("headers"))
 
@@ -137,6 +156,7 @@ def parse_node(state: WippleState) -> dict:
             "of their predecessors"
         )
         report["excluded_rows"] = [total_evidence]
+        report["stated_total_row"] = stated_total_row
 
     return {
         "matrix": result.matrix,
@@ -178,6 +198,180 @@ def _safe_float(x) -> float | None:
     except (TypeError, ValueError):
         return None
     return v if np.isfinite(v) else None
+
+
+
+def _total_tolerance(*values: float, n_rows: int) -> float:
+    """Penny/whole-dollar-safe aggregate tolerance, never a percentage gap.
+
+    A relative 0.05% tolerance is appropriate for detecting whether a row looks
+    like a total, but far too loose for certifying one: at $20M it would hide a
+    $10k error. Accumulated display rounding is bounded by roughly half a cent
+    per row for cent-precision schedules and half a dollar for whole-dollar
+    schedules, so $1 plus a tiny float-noise component is a conservative floor.
+    """
+    scale = max((abs(float(v)) for v in values if np.isfinite(v)), default=0.0)
+    return max(1.0, 1e-9 * scale, 0.01 * max(int(n_rows), 1))
+
+
+def _semantic_total(values: np.ndarray, variable: str) -> float:
+    """Sum a mapped column in its accounting semantics.
+
+    Under/overbillings may be printed as signed amounts or positive magnitudes;
+    their semantic totals are the sum of row magnitudes. Other variables retain
+    their signs.
+    """
+    a = np.asarray(values, dtype=float)
+    if variable in MAGNITUDE_TOTAL_VARS:
+        a = np.abs(a)
+    return float(a.sum())
+
+
+def _present_total(semantic_value: float, stated: float, variable: str) -> float:
+    """Preserve the document's U/O sign convention in a proposed total."""
+    if variable in MAGNITUDE_TOTAL_VARS and stated < 0:
+        return round(-abs(float(semantic_value)), 2)
+    return round(float(semantic_value), 2)
+
+
+def _assess_stated_totals(matrix, result: ValidationResult,
+                           stated_total_row: dict | None) -> list[dict]:
+    """Validate a preserved total row against independently validated jobs.
+
+    Scope is deliberately narrow:
+      * only physical columns in result.mapping are considered;
+      * only additive money variables are considered;
+      * row corrections come solely from validator findings already proven
+        without the total row;
+      * an unresolved cell makes that column's total unassessable rather than
+        allowing the total to choose a repair.
+
+    This makes the total a downstream checksum/correction target, never circular
+    evidence for selecting job-level corrections.
+    """
+    if not stated_total_row or not result.mapping:
+        return []
+
+    a = np.asarray(matrix, dtype=float)
+    totals = stated_total_row.get("values") or []
+    if a.ndim != 2:
+        return []
+
+    corrections: dict[tuple[int, int], float] = {}
+    unresolved_by_col: set[int] = set()
+
+    for finding in result.findings:
+        col = finding.culprit_column
+        if col is None:
+            # An ambiguous finding can still implicate a mapped variable. Keep
+            # its total out of auto-correction until the row is resolved.
+            for candidate in finding.candidate_variables:
+                for mapped_col, mapped_var in result.mapping.items():
+                    if mapped_var == candidate:
+                        unresolved_by_col.add(int(mapped_col))
+            continue
+
+        col = int(col)
+        proposed = _safe_float(finding.proposed_correction)
+        if proposed is None:
+            unresolved_by_col.add(col)
+            continue
+        row = int(finding.row_index)
+        if 0 <= row < a.shape[0] and 0 <= col < a.shape[1]:
+            corrections[(row, col)] = proposed
+
+    out = []
+    for col, variable in sorted(result.mapping.items()):
+        col = int(col)
+        if variable not in ADDITIVE_TOTAL_VARS:
+            continue
+        if col < 0 or col >= a.shape[1] or col >= len(totals):
+            continue
+
+        stated = _safe_float(totals[col])
+        raw_col = a[:, col]
+        if stated is None or not np.all(np.isfinite(raw_col)):
+            out.append({
+                "column": col,
+                "variable": variable,
+                "variable_name": VAR_NAMES.get(variable, variable),
+                "status": "unassessed",
+                "reason": "missing or non-finite total/job value",
+                "used_as_cell_correction_evidence": False,
+            })
+            continue
+
+        corrected_col = raw_col.copy()
+        applied = []
+        for (row, correction_col), proposed in sorted(corrections.items()):
+            if correction_col != col:
+                continue
+            observed = float(corrected_col[row])
+            corrected_col[row] = proposed
+            applied.append({
+                "row_index": row,
+                "observed": observed,
+                "corrected": float(proposed),
+            })
+
+        raw_sum = _semantic_total(raw_col, variable)
+        validated_sum = _semantic_total(corrected_col, variable)
+        stated_semantic = abs(stated) if variable in MAGNITUDE_TOTAL_VARS else stated
+        tol = _total_tolerance(stated_semantic, raw_sum, validated_sum,
+                               n_rows=a.shape[0])
+        agrees_raw = abs(stated_semantic - raw_sum) <= tol
+        agrees_validated = abs(stated_semantic - validated_sum) <= tol
+
+        item = {
+            "column": col,
+            "variable": variable,
+            "variable_name": VAR_NAMES.get(variable, variable),
+            "stated_total": float(stated),
+            "raw_row_sum": _present_total(raw_sum, stated, variable),
+            "validated_row_sum": _present_total(validated_sum, stated, variable),
+            "difference_from_raw": float(
+                stated - _present_total(raw_sum, stated, variable)),
+            "difference_from_validated": float(
+                stated - _present_total(validated_sum, stated, variable)),
+            "tolerance": float(tol),
+            "applied_job_corrections": applied,
+            "used_as_cell_correction_evidence": False,
+        }
+
+        if col in unresolved_by_col:
+            item.update({
+                "status": "unassessed",
+                "reason": "one or more job cells in this column remain unresolved",
+                "proposed_correction": None,
+            })
+        elif agrees_validated:
+            item.update({
+                "status": "pass_after_corrections"
+                if applied and not agrees_raw else "pass",
+                "reason": "stated total agrees with the validated job-row sum",
+                "proposed_correction": None,
+            })
+        elif agrees_raw and applied:
+            item.update({
+                "status": "conflicts_with_job_corrections",
+                "reason": (
+                    "stated total corroborates the printed rows but conflicts "
+                    "with independently proposed job corrections"),
+                "proposed_correction": None,
+            })
+        else:
+            item.update({
+                "status": "total_row_error",
+                "reason": (
+                    "stated total agrees with neither the printed row sum nor "
+                    "the independently validated row sum"),
+                "proposed_correction": _present_total(
+                    validated_sum, stated, variable),
+                "correction_basis": "sum of independently validated job rows",
+            })
+        out.append(item)
+
+    return out
 
 
 def serialize_validation(r: ValidationResult) -> dict:
@@ -257,6 +451,24 @@ def validate_node(state: WippleState) -> dict:
     out = serialize_validation(chosen)
     out["schema"] = race["chosen"]
     out.setdefault("diagnostics", {})["schema_race"] = race
+
+    # Totals are assessed only after row-level validation/corrections are fully
+    # determined. Unmapped numeric columns (including currently ignored period
+    # columns) are outside the totals scope by construction.
+    parse_report = state.get("parse_report") or {}
+    stated_total_row = parse_report.get("stated_total_row")
+    if race["chosen"] == "wip":
+        out["totals"] = _assess_stated_totals(
+            matrix, chosen, stated_total_row)
+        mapped = {int(c) for c in chosen.mapping}
+        out["totals_scope"] = {
+            "assessed_columns": sorted(
+                int(c) for c, v in chosen.mapping.items()
+                if v in ADDITIVE_TOTAL_VARS),
+            "unmapped_numeric_columns": sorted(
+                int(c) for c in range(matrix.shape[1]) if c not in mapped),
+            "rule": "mapped additive columns only",
+        }
     return {"validation": out}
 
 
