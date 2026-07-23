@@ -52,6 +52,8 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .batch-intro h2{font:500 32px/1.2 Fraunces,serif}
 .batch-intro p{color:var(--muted);font-size:14px;max-width:52ch;margin-top:6px}
 .batch-intro-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.quiet-btn{background:transparent;border-color:var(--line-soft);color:var(--muted)}
+.quiet-btn:hover{border-color:var(--line);color:var(--ink)}
 .batch-intro .next-arrow{font-size:18px;line-height:0;margin-left:6px}
 .batch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
 .batch-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:15px 18px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -1094,9 +1096,24 @@ function totalsDetail(rep){
     const colFinds=(rep.findings||[]).filter(f=>f.culprit_column===mcol&&f.proposed_correction!=null);
     const deltaSum=colFinds.reduce((sum,f)=>sum+(f.observed-f.proposed_correction),0);
     const tol=Math.max(2,.02*nRows,.005*Math.abs(c.difference));
+    /* Decisive test, independent of where a repair was booked: does the stated
+       total agree with the validated schedule's column sum? Covers corrections
+       recovered through duplicate columns, cross-column identities, or OCR
+       repair, none of which leave a finding on this column. */
+    let agreesWithValidated=false;
+    const varCode=rep.table?.columns?.[mcol]?.variable;
+    if(varCode){
+      const vals=currentJobs(rep).map(job=>+job[varCode]).filter(Number.isFinite);
+      if(vals.length){
+        const validatedSum=vals.reduce((a,b)=>a+b,0);
+        const vTol=Math.max(2,.02*nRows,1e-6*Math.abs(c.stated||0));
+        agreesWithValidated=Math.min(Math.abs(validatedSum-c.stated),Math.abs(validatedSum+c.stated))<=vTol;
+      }
+    }
     const explained=(resolved&&resolved.matches_after_corrections===true)
       ||(residual!=null&&residual<=tol)
-      ||(colFinds.length>0&&Math.min(Math.abs(deltaSum-c.difference),Math.abs(deltaSum+c.difference))<=tol);
+      ||(colFinds.length>0&&Math.min(Math.abs(deltaSum-c.difference),Math.abs(deltaSum+c.difference))<=tol)
+      ||agreesWithValidated;
     out.push({header,stated:c.stated,
       computed:resolved?resolved.computed_after_corrections:c.computed,
       diff:liveDiff,
@@ -1315,14 +1332,13 @@ function renderBatch(){
       <p>Open any underwriting analysis immediately. Job matching is optional and only improves the combined time-series view.</p></div>
     <div class="batch-intro-actions">
       ${failed?`<span class="batch-state" style="background:#F2DDD6;color:var(--brick)">${failed} need${failed===1?"s":""} attention</span>`:""}
+      ${ready?`<button class="btn quiet-btn" id="optionalMatching" ${batchMetadataReady()?"":"disabled"}>Job matching <span style="color:var(--muted)">(optional)</span></button>`:""}
       ${ready?`<button class="btn primary" id="viewCombinedNow" ${batchMetadataReady()?"":"disabled"}>
         View underwriting analysis <span class="next-arrow" aria-hidden="true">→</span></button>`:""}
     </div>
   </div>
   ${groupHTML}${failedHTML}
-  ${ready?`<div class="actions" style="justify-content:flex-end;margin-top:8px">
-    <button class="btn" id="optionalMatching" ${batchMetadataReady()?"":"disabled"}>Job matching <span style="color:var(--muted)">(optional)</span></button>
-  </div>`:""}`;
+`;
   $("#batch").querySelectorAll(".batch-review").forEach(b=>b.onclick=()=>reviewBatchItem(+b.dataset.batch,"certificate"));
   $("#batch").querySelectorAll(".batch-analysis").forEach(b=>b.onclick=()=>renderBatchItemAnalysis(+b.dataset.batch));
   $("#batch").querySelectorAll(".batch-date").forEach(el=>el.onchange=()=>{
