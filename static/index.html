@@ -517,10 +517,20 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
 
 <div id="secnav" class="hidden"></div>
 <style>
-.secnav{display:flex;gap:8px;justify-content:center;margin:0 0 20px;flex-wrap:wrap}
-.secnav button{font:inherit;font-size:13.5px;padding:7px 18px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer}
-.secnav button.on{color:var(--ink);border-color:var(--sage-deep);background:var(--surface)}
-.secnav button .pg{font-size:11px;margin-left:7px;opacity:.75}
+#secnav.secnav{max-width:960px;margin:18px auto 22px;padding:10px;display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;background:#E9E5D9;border:1px solid var(--line);border-radius:13px}
+#secnav .secnav-title{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 7px;white-space:nowrap}
+#secnav button{font:inherit;display:flex;align-items:center;gap:9px;min-width:150px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);cursor:pointer;text-align:left;box-shadow:0 1px 0 rgba(32,37,31,.03)}
+#secnav button:hover{border-color:var(--sage);background:#FFF}
+#secnav button.on{color:#FBFAF7;border-color:var(--sage-deep);background:var(--sage-deep);box-shadow:0 3px 10px rgba(58,76,62,.16)}
+#secnav .sec-dot{display:grid;place-items:center;width:22px;height:22px;border-radius:999px;flex:none;background:#E4E9E1;color:var(--sage-deep);font-size:11px;font-weight:700}
+#secnav button.review .sec-dot{background:#F2E7CF;color:var(--amber)}
+#secnav button.on .sec-dot{background:rgba(255,255,255,.16);color:#FFF}
+#secnav .sec-copy{display:flex;flex-direction:column;min-width:0;line-height:1.2}
+#secnav .sec-name{font-size:12.5px;font-weight:600;white-space:nowrap}
+#secnav .sec-meta{font-size:10.5px;color:var(--muted);margin-top:3px;white-space:nowrap}
+#secnav button.on .sec-meta{color:rgba(255,255,255,.75)}
+.analysis-scope-label{display:inline-flex;align-items:center;min-height:38px;padding:0 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);font-size:12px;color:var(--sage-deep);font-weight:600}
+@media(max-width:620px){#secnav.secnav{justify-content:stretch}#secnav .secnav-title{width:100%;text-align:center}#secnav button{flex:1;min-width:135px}}
 </style>
 
 <section id="certificate" class="hidden"></section>
@@ -1751,15 +1761,17 @@ function singleValidatedTableHTML(rep){
     </tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 function renderSingleValidatedWip(){
+  syncActiveSectionReview();const combined=documentAnalysisReport();
+  const scope=combined._combinedSectionCount>1?` Combined across ${combined._combinedPageLabel}.`:"";
   $("#consolidated").innerHTML=`<div class="flow-head"><div><h2>Validated WIP</h2>
-      <p>The mathematically identified schedule, accepted corrections, and deterministic WIP calculations in one table.</p></div></div>
+      <p>The mathematically identified schedule, accepted corrections, and deterministic WIP calculations in one table.${scope}</p></div></div>
     <section class="table-card"><div class="table-card-head"><div><h3>Validated schedule</h3>
-      <p>Standardized column names; document headers are shown on the Validation page.</p></div></div>
-      ${singleValidatedTableHTML(REPORT)}</section>
+      <p>Standardized column names; document headers remain page-specific on the Validation page.</p></div></div>
+      ${singleValidatedTableHTML(combined)}</section>
     <div class="actions" style="justify-content:flex-end"><button class="btn" id="singleValidation">Review validation</button>
       <button class="btn primary" id="singleAnalysis">View underwriting analysis</button></div>`;
-  $("#singleValidation").onclick=()=>{VIEW="certificate";renderCertificate(REPORT);show("certificate");setSingleNav("validation");window.scrollTo(0,0)};
-  $("#singleAnalysis").onclick=()=>{VIEW="dash";renderDash(REPORT);show("dash");setSingleNav("analysis");window.scrollTo(0,0)};
+  $("#singleValidation").onclick=()=>{VIEW="certificate";REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];renderSecnav();renderCertificate(REPORT);show("certificate");setSingleNav("validation");window.scrollTo(0,0)};
+  $("#singleAnalysis").onclick=renderDocumentAnalysis;
   show("consolidated");const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
   setSingleNav("validated");window.scrollTo(0,0);
 }
@@ -1931,7 +1943,7 @@ function renderTimeSeries(){
 function adaptV3(doc){
   const secs=[];
   const disc=(((doc.document||{}).concordance)||{}).discordant||[];
-  for(const t of (doc.tables||[])){
+  for(const [tableIndex,t] of (doc.tables||[]).entries()){
     /* doc-level grand-totals verdict, explained against pooled findings */
     let dtd=null;
     const tc=t.totals_check;
@@ -1951,7 +1963,7 @@ function adaptV3(doc){
       dtd={present:true,allMatch:tc.all_match,mismatches:mism,
         allExplained:mism.length>0&&mism.every(m=>m.explained),docLevel:true};
     }
-    for(const sec of (t.sections||[])){
+    for(const [sectionIndex,sec] of (t.sections||[]).entries()){
       const rep=sec.report||{};
       rep.metrics=doc.metrics||rep.metrics;
       rep._doc_totals_detail=dtd;
@@ -1999,30 +2011,112 @@ function adaptV3(doc){
           jobs:gs.slice(0,5).map(g=>({label:g.job,detail:g.detail})),
           why:(META[k]||["",""])[1]}));
       }
-      secs.push({type:sec.type,pages:sec.pages||t.pages||[],rep});
+      secs.push({type:sec.type,pages:sec.pages||t.pages||[],rep,
+        tableIndex,sectionIndex,tablePages:t.pages||[]});
     }
   }
   return secs;
 }
 function secLabel(sc){
-  const p=sc.pages||[];
-  const pg=p.length?(p[0]===p[p.length-1]?"p. "+p[0]:"pp. "+p[0]+"\u2013"+p[p.length-1]):"";
-  return {name:sc.type==="cc"?"Completed contracts":"WIP schedule",pg};
+  const p=(sc.pages||[]).filter(x=>x!=null);
+  const pageText=p.length?(p[0]===p[p.length-1]?"Page "+p[0]:"Pages "+p[0]+"–"+p[p.length-1]):"Section";
+  const jobs=tableJobCount(sc.rep?.table);
+  return {name:sc.type==="cc"?"Completed contracts":"WIP schedule",
+    meta:pageText+(jobs?` · ${jobs} job${jobs===1?"":"s"}`:"")};
 }
 function renderSecnav(){
   const nav=$("#secnav");
-  if(SECTIONS.length<2){nav.classList.add("hidden");return;}
-  nav.classList.remove("hidden");
-  nav.innerHTML=SECTIONS.map((sc,i)=>{const l=secLabel(sc);
-    return '<button class="'+(i===ACTIVE?"on":"")+'" data-sec="'+i+'">'+l.name+(l.pg?'<span class="pg">'+l.pg+'</span>':"")+'</button>'}).join("");
+  if(VIEW!=="certificate"||SECTIONS.length<2){nav.classList.add("hidden");return;}
+  nav.classList.add("secnav");nav.classList.remove("hidden");
+  nav.innerHTML='<span class="secnav-title">Validation pages</span>'+SECTIONS.map((sc,i)=>{
+    const l=secLabel(sc),n=(sc.rep?.findings||[]).length,review=n>0;
+    return `<button class="${i===ACTIVE?"on ":""}${review?"review":"clean"}" data-sec="${i}">
+      <span class="sec-dot">${review?"!":"✓"}</span><span class="sec-copy">
+      <span class="sec-name">${l.name}</span><span class="sec-meta">${l.meta}</span></span></button>`;
+  }).join("");
   nav.querySelectorAll("button").forEach(b=>b.onclick=()=>selectSection(+b.dataset.sec));
 }
 function selectSection(i){
-  SECSTATE[ACTIVE]=ACCEPTED;
-  ACTIVE=i;REPORT=SECTIONS[i].rep;ACCEPTED=SECSTATE[i];
-  renderSecnav();
-  if(VIEW==="dash"){renderDash(REPORT);show("dash");}
-  else{renderCertificate(REPORT);show("certificate");}
+  SECSTATE[ACTIVE]=new Set(ACCEPTED);
+  ACTIVE=i;REPORT=SECTIONS[i].rep;ACCEPTED=SECSTATE[i];VIEW="certificate";
+  renderSecnav();renderCertificate(REPORT);show("certificate");
+  if(!BATCH_MODE)setSingleNav("validation");
+  window.scrollTo(0,0);
+}
+function syncActiveSectionReview(){
+  if(ACTIVE>=0&&SECSTATE[ACTIVE])SECSTATE[ACTIVE]=new Set(ACCEPTED);
+}
+function sectionVariableSignature(sc){
+  return [...new Set((sc?.rep?.table?.columns||[]).map(c=>c.variable).filter(Boolean))]
+    .sort().join("|");
+}
+function sectionPageRange(sc){
+  const p=(sc?.pages||[]).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+  return p.length?[p[0],p[p.length-1]]:null;
+}
+function currentScheduleSectionIndexes(){
+  const active=SECTIONS[ACTIVE];
+  if(!active||active.type!=="wip")return ACTIVE>=0?[ACTIVE]:[];
+  const sameTable=SECTIONS.map((sc,i)=>({sc,i})).filter(x=>
+    x.sc.type==="wip"&&active.tableIndex!=null&&x.sc.tableIndex===active.tableIndex).map(x=>x.i);
+  if(sameTable.length>1)return sameTable;
+
+  /* Conservative fallback for reports where each continuation page was emitted
+     as its own logical table: combine only adjacent WIP pages with the same
+     validated variable signature. Separate schedules remain separate. */
+  const sig=sectionVariableSignature(active),candidates=SECTIONS.map((sc,i)=>({sc,i,range:sectionPageRange(sc)}))
+    .filter(x=>x.sc.type==="wip"&&x.range&&sectionVariableSignature(x.sc)===sig)
+    .sort((a,b)=>a.range[0]-b.range[0]);
+  const pos=candidates.findIndex(x=>x.i===ACTIVE);
+  if(pos<0)return[ACTIVE];
+  let lo=pos,hi=pos;
+  while(lo>0&&candidates[lo].range[0]<=candidates[lo-1].range[1]+1)lo--;
+  while(hi<candidates.length-1&&candidates[hi+1].range[0]<=candidates[hi].range[1]+1)hi++;
+  return candidates.slice(lo,hi+1).map(x=>x.i);
+}
+function combinedWipReport(indexes){
+  syncActiveSectionReview();
+  const ordered=[...indexes].sort((a,b)=>a-b);
+  if(ordered.length<=1)return SECTIONS[ordered[0]]?.rep||REPORT;
+  const rows=[],ids=[],names=[],labels=[],pages=[];
+  const reps=ordered.map(i=>SECTIONS[i]?.rep||{});
+  ordered.forEach(i=>{
+    const sc=SECTIONS[i],rep=sc.rep||{},accepted=SECSTATE[i]||new Set();
+    pages.push(...(sc.pages||[]));
+    for(let row=0;row<tableJobCount(rep.table);row++){
+      const identity=tableIdentity(rep.table,row),vars=canonicalVars(rep,row,accepted);
+      rows.push(vars);ids.push(identity.jobId||"");names.push(identity.jobName||"");
+      labels.push(identity.jobName||identity.jobId||identity.label||`Row ${rows.length}`);
+    }
+  });
+  const columns=PRINT_COLUMN_ORDER.filter(variable=>rows.some(r=>Number.isFinite(+r[variable])))
+    .map(variable=>({variable,header:PRINT_COLUMN_NAMES[variable]||variableName(variable),
+      variable_name:PRINT_COLUMN_NAMES[variable]||variableName(variable)}));
+  const uniquePages=[...new Set(pages.map(Number).filter(Number.isFinite))].sort((a,b)=>a-b);
+  const pageLabel=uniquePages.length?(uniquePages[0]===uniquePages[uniquePages.length-1]
+    ?`page ${uniquePages[0]}`:`pages ${uniquePages[0]}–${uniquePages[uniquePages.length-1]}`):`${ordered.length} sections`;
+  const degraded=reps.some(r=>r.overall_status==="llm_mapped_unverified"||r.overall_status==="unmapped");
+  const tuning=reps.map(r=>r.analysis?.tuning).find(Boolean)||{};
+  const jobs=rows.map((vars,i)=>({label:labels[i],...vars}));
+  return{
+    source:(reps[0]?.source||"WIP schedule")+` · combined ${pageLabel}`,
+    overall_status:degraded?"llm_mapped_unverified":"verified",
+    validator_status:reps.some(r=>r.validator_status==="validation_failed")?"validation_failed":"success",
+    findings:[],witnesses:[],metrics:DOC?.metrics||reps[0]?.metrics||{},
+    _combinedSectionCount:ordered.length,_combinedPages:uniquePages,_combinedPageLabel:pageLabel,
+    table:{columns,values:rows.map(r=>columns.map(c=>r[c.variable]??null)),
+      job_ids:ids,job_names:names,job_labels:labels},
+    analysis:{schema:"wip",jobs,corrections:[],tuning,coverage:{
+      numeric_cols:columns.length,mapped_cols:columns.length}}
+  };
+}
+function documentAnalysisReport(){
+  return combinedWipReport(currentScheduleSectionIndexes());
+}
+function renderDocumentAnalysis(){
+  syncActiveSectionReview();VIEW="dash";renderSecnav();
+  renderDash(documentAnalysisReport());show("dash");
+  if(!BATCH_MODE)setSingleNav("analysis");
   window.scrollTo(0,0);
 }
 function render(doc,restore=null){
@@ -2051,7 +2145,7 @@ function render(doc,restore=null){
   REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];
   VIEW=restore?.view==="dash"?"dash":"certificate";
   renderSecnav();
-  if(VIEW==="dash"){renderDash(REPORT);show("dash");}
+  if(VIEW==="dash"){renderDash(documentAnalysisReport());show("dash");}
   else{renderCertificate(REPORT);show("certificate");}
   const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
   if(BATCH_MODE){
@@ -2064,8 +2158,8 @@ function render(doc,restore=null){
     setSingleNav(VIEW==="dash"?"analysis":"validation");
     $("#navConsolidated").onclick=renderSingleValidatedWip;
   }
-  $("#navCert").onclick=()=>{VIEW="certificate";renderCertificate(REPORT);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};
-  $("#navDash").onclick=()=>{VIEW="dash";renderDash(REPORT);show("dash");if(!BATCH_MODE)setSingleNav("analysis");window.scrollTo(0,0)};
+  $("#navCert").onclick=()=>{syncActiveSectionReview();VIEW="certificate";REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];renderSecnav();renderCertificate(REPORT);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};
+  $("#navDash").onclick=renderDocumentAnalysis;
 }
 
 function renderCertificate(rep){
@@ -2239,8 +2333,10 @@ function renderDash(rep){
   const signalBody=(sigs||timeSignals)
     ?sigs+timeSignals
     :`<p class="empty">Nothing above threshold in this book.</p>`;
+  const documentScope=rep._combinedSectionCount>1
+    ?`<span class="analysis-scope-label">Entire WIP · ${rep._combinedPageLabel} · ${tableJobCount(rep.table)} jobs</span>`:"<span></span>";
   $("#dash").innerHTML=`
-    <div class="analysis-topline">${BATCH_MODE?analysisSwitcherHTML():"<span></span>"}
+    <div class="analysis-topline">${BATCH_MODE&&BATCH_ACTIVE<0?analysisSwitcherHTML():documentScope}
       <button class="btn" id="printAnalysis">Print analysis</button></div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
