@@ -363,9 +363,14 @@ tr.selrow>td:first-child{background:#E4E9E1!important}
 .kpi.tint-amber .lab,.kpi.tint-amber .val{color:var(--amber)}
 .analysis-actions{display:flex;gap:10px;align-items:center;flex:none}
 .analysis-print-row{display:flex;justify-content:flex-end;margin-bottom:10px}
+.report-title{margin:6px 0 18px}
+.report-title h2{font:500 27px/1.2 Fraunces,serif}
+.report-title p{font-size:12.5px;color:var(--muted);margin-top:3px}
 .checks-fold summary::after{content:"\25BE";display:inline-block;margin-left:6px;transition:transform .15s}
 .checks-fold[open] summary::after{transform:rotate(180deg)}
-.ctab .cause-cell{text-align:left}
+.ctab .cause-cell{text-align:right}
+.eub-note{font-size:12.5px;background:#F6F4EE;border:1px solid var(--line-soft);border-radius:9px;padding:10px 14px;margin:0 0 12px;line-height:1.55}
+.eub-note .jm-link{font-size:12.5px}
 .ts-flag{display:inline-block;width:9px;height:9px;border-radius:999px;cursor:help}
 .ts-flag.brick{background:var(--brick)}
 .ts-flag.sage{background:var(--sage-deep)}
@@ -1068,19 +1073,27 @@ function totalsDetail(rep){
   const map=(rep.parse&&rep.parse.numeric_col_map)||[];
   const after=(rep.analysis&&rep.analysis.totals_after_corrections)||{};
   const out=[];
+  const nRows=tableJobCount(rep.table)||0;
   for(const[j,c]of Object.entries(tc.columns||{})){
     const resolved=after[j]||after[+j]||null;
     if(c.matches&&(!resolved||resolved.matches_after_corrections))continue;
+    /* Penny truncation and float error accumulate across rows; a stated total
+       within a few dollars of the column sum is agreement, not a finding. */
+    const liveDiff=resolved?resolved.difference_after_corrections:c.difference;
+    const negligible=Math.abs(liveDiff)<=Math.max(2,.02*nRows,1e-6*Math.abs(c.stated||0));
+    if(negligible)continue;
     const mcol=map.indexOf(+j);
     const header=(rep.table&&rep.table.columns[mcol]&&rep.table.columns[mcol].header)||("column "+j);
+    /* A column can carry several corrected cells; the stated total is explained
+       when the SUM of their correction deltas accounts for the difference. */
+    const colFinds=(rep.findings||[]).filter(f=>f.culprit_column===mcol&&f.proposed_correction!=null);
+    const deltaSum=colFinds.reduce((sum,f)=>sum+(f.observed-f.proposed_correction),0);
+    const tol=Math.max(2,.02*nRows,.005*Math.abs(c.difference));
     const explained=resolved?resolved.matches_after_corrections:
-      (rep.findings||[]).some(f=>f.culprit_column===mcol
-        &&f.proposed_correction!=null
-        &&Math.abs(Math.abs(f.observed-f.proposed_correction)-Math.abs(c.difference))
-          <=Math.max(2,.01*Math.abs(c.difference)));
+      colFinds.length>0&&Math.min(Math.abs(deltaSum-c.difference),Math.abs(deltaSum+c.difference))<=tol;
     out.push({header,stated:c.stated,
       computed:resolved?resolved.computed_after_corrections:c.computed,
-      diff:resolved?resolved.difference_after_corrections:c.difference,
+      diff:liveDiff,
       explained,colFindings:(rep.findings||[]).filter(f=>f.culprit_column===mcol).length});
   }
   return{present:true,allMatch:out.length===0,mismatches:out,
@@ -2014,6 +2027,41 @@ function timeSeriesData(){
     fade,fadeJobs:fading.length,stalls,anomalyJobs:anomalies.length,
     largestAnomaly:anomalies[0]||null};
 }
+function earlyUnderbillingFadeData(){
+  /* Conditional pattern from the contractor's own linked history: among jobs
+     observed materially underbilled (<= -2% of contract) before 60% complete,
+     how often did margin fade by the end? Evidence = jobs now past 85%
+     complete with a usable margin at both points. At-risk = open jobs whose
+     current or past observations match the early-underbilled profile. */
+  if(!MATCH_STATE)return null;
+  const EARLY_MIN=.15,EARLY_MAX=.60,UB=-.02,LATE=.85,FADE=-.01;
+  const evidence=[],atRisk=[];
+  for(const g of MATCH_STATE.groups){
+    const snaps=groupPeriodSnapshots(g).map(x=>jmSnapshotPoint(x.vars,x.period,x.type));
+    if(!snaps.length)continue;
+    const early=snaps.find(p=>Number.isFinite(p.P)&&Number.isFinite(p.position)
+      &&p.P>=EARLY_MIN&&p.P<=EARLY_MAX&&p.position<=UB);
+    if(!early)continue;
+    const last=snaps[snaps.length-1];
+    const authority=g.observations[g.observations.length-1]||{};
+    const label=authority.jobName||authority.name||authority.jobId||authority.id||"Job";
+    if(Number.isFinite(last.P)&&last.P>=LATE&&snaps.length>1){
+      if(Number.isFinite(early.margin)&&Number.isFinite(last.margin))
+        evidence.push({groupId:g.id,label,fadePts:last.margin-early.margin});
+    }else atRisk.push({groupId:g.id,label});
+  }
+  if(evidence.length<3)return null;
+  const faded=evidence.filter(e=>e.fadePts<=FADE);
+  const avgFadePts=faded.length?faded.reduce((sum,e)=>sum+e.fadePts,0)/faded.length:0;
+  return{evidence:evidence.length,faded:faded.length,avgFadePts,atRisk};
+}
+function eubSentenceHTML(eub,linkable){
+  if(!eub)return"";
+  const list=eub.atRisk.map(j=>linkable
+    ?`<button class="jm-link eub-job" data-group="${htmlEsc(j.groupId)}">${htmlEsc(j.label)}</button>`
+    :htmlEsc(j.label)).join(", ");
+  return`<p class="eub-note"><strong>Early underbillings and later fade:</strong> on this contractor's linked history, jobs underbilled more than 2% of contract before 60% complete went on to lose margin in ${eub.faded} of ${eub.evidence} cases${eub.faded?` (average ${(100*eub.avgFadePts).toFixed(1)} pts)`:""}. ${eub.atRisk.length?`${eub.atRisk.length} open job${eub.atRisk.length===1?"":"s"} currently match${eub.atRisk.length===1?"es":""} that profile: ${list}.`:"No open jobs currently match that profile."}</p>`;
+}
 function timeSeriesKpiStripHTML(rep){
   const data=timeSeriesData();
   const jobBorrow=computeSignals(rep).find(s=>s.id==="job_borrow")||null;
@@ -2031,12 +2079,14 @@ function timeSeriesKpiStripHTML(rep){
 }
 function timeSeriesSectionHTML(rep){
   const data=timeSeriesData();
-  if(!data)return"";
-  const{rows=[],stalls=0}=data;
-  if(!rows.length&&!stalls)return"";
+  const eub=earlyUnderbillingFadeData();
+  if(!data&&!eub)return"";
+  const{rows=[],stalls=0}=data||{};
+  if(!rows.length&&!stalls&&!eub)return"";
   const flagCell=(on,cls,label)=>`<td class="ts-flag-cell">${on?`<span class="ts-flag ${cls}" title="${htmlEsc(label)}"></span>`:""}</td>`;
   return`<div class="time-series-section"><h4>Jobs with changes between statements
       <small>Material changes, stalled jobs, and extreme estimate movements are shown; anomalies use both fixed materiality gates and the contractor’s own history</small></h4>
+    ${eubSentenceHTML(eub,true)}
     ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Job ID</th><th>Job name</th>
       <th class="ts-flag-col" title="Profit fade">Fade</th><th class="ts-flag-col" title="Cost estimate increase">Cost ↑</th>
       <th class="ts-flag-col" title="Estimate anomaly">Anom.</th><th class="ts-flag-col" title="No cost or billing movement">Stall</th>
@@ -2382,10 +2432,10 @@ function renderCertificate(rep){
       <td class="cause-cell">${causeText(f.classification,f.observed,f.proposed_correction,f.classification_label)}</td>
       <td style="text-align:right">${use}</td></tr>${ev}`;
   };
-  const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Suggested values are applied automatically. Check Revert to printed on any row to keep the document's value instead, then press Update figures.</p>
+  const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Corrections are applied automatically. Check Revert to printed on any row to keep the document's value instead, then press Update figures.</p>
   <div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
-      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th>
+      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Correction</th><th style="text-align:right">Cause</th>
       <th style="text-align:right"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">Revert to printed <input type="checkbox" id="useAll"></label></th>
     </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
   </div>
@@ -2439,7 +2489,7 @@ function renderCertificate(rep){
   const syncStatus=()=>{if(!st)return;
     const sel=selection();
     const same=sel.size===ACCEPTED.size&&[...sel].every(i=>ACCEPTED.has(i));
-    st.textContent=same?`${ACCEPTED.size} of ${corrsC.length} suggested correction${corrsC.length===1?"":"s"} applied`:"selection changed; update the figures when ready";
+    st.textContent=same?`${ACCEPTED.size} of ${corrsC.length} correction${corrsC.length===1?"":"s"} applied`:"selection changed; update the figures when ready";
     st.style.color=same?"var(--muted)":"var(--brick)";};
   document.querySelectorAll(".certbox").forEach(b=>b.onchange=()=>{syncUA();syncStatus();});
   if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox").forEach(b=>{b.checked=ua.checked;});syncStatus();};}
@@ -2495,6 +2545,7 @@ function renderDash(rep){
     <div class="analysis-print-row"><button class="btn" id="printAnalysis">Print analysis</button></div>
     <div class="analysis-topline">${BATCH_MODE&&BATCH_ACTIVE<0?analysisSwitcherHTML():documentScope}
       <div class="analysis-actions"><button class="btn primary" id="openJobAnalysis">Independent job analysis</button></div></div>
+    <div class="report-title"><h2>Underwriting report</h2>${rep.source?`<p>${htmlEsc(rep.source)}</p>`:""}</div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
@@ -2509,6 +2560,8 @@ function renderDash(rep){
     tr.onclick=()=>openWipModal(rep,+tr.dataset.row)});
   $("#dash").querySelectorAll(".time-series-section tbody tr[data-group]").forEach(tr=>{
     tr.onclick=()=>openGroupInValidatedWip(rep,tr.dataset.group)});
+  $("#dash").querySelectorAll(".eub-job[data-group]").forEach(b=>{
+    b.onclick=()=>openGroupInValidatedWip(rep,b.dataset.group)});
   $("#dash").querySelectorAll("#bookshape circle[data-row]").forEach(circle=>{
     const open=()=>openWipModal(rep,+circle.dataset.row);circle.onclick=open;
     circle.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}};
@@ -2580,11 +2633,15 @@ function computeSignals(rep){
   const U=hasEB?jobs.map((j,i)=>j.U!=null?j.U:Math.max(E[i]-B[i],0)):null;
   const O=hasEB?jobs.map((j,i)=>j.O!=null?j.O:Math.max(B[i]-E[i],0)):null;
   const lab=i=>jobs[i].label,out=[];
-  if(U&&E){const rows=[];for(let i=0;i<n;i++){if(U[i]<T.min_flag_dollars)continue;const remRev=V[i]-E[i];
-   if(P[i]>=.995||remRev<=Math.max(1,.005*Math.abs(V[i])))continue;
-   const ratio=U[i]/remRev;const sev=clamp01((ratio-T.ub_ratio_floor)/(T.ub_ratio_full-T.ub_ratio_floor));if(sev>T.min_signal_severity)rows.push([sev,i,ratio]);}
+  if(U&&E){const rows=[];for(let i=0;i<n;i++){if(U[i]<T.min_flag_dollars)continue;if(P[i]>1.02)continue;const remRev=V[i]-E[i];
+   /* A materially underbilled job with essentially no revenue left to earn has
+      no runway to recover through billings — that is the worst case of this
+      signal, not an exclusion. */
+   const noRunway=P[i]>=.995||remRev<=Math.max(1,.005*Math.abs(V[i]));
+   const ratio=noRunway?Infinity:U[i]/remRev;
+   const sev=noRunway?1:clamp01((ratio-T.ub_ratio_floor)/(T.ub_ratio_full-T.ub_ratio_floor));if(sev>T.min_signal_severity)rows.push([sev,i,ratio]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+U[r[1]],0),k=rows.length;
-    const allJobs=rows.map(r=>({label:lab(r[1]),row:r[1],severity:r[0],dollars:Math.round(U[r[1]]),cells:[pct0(P[r[1]]),sMoney(U[r[1]]),pct0(r[2])],detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`}));
+    const allJobs=rows.map(r=>({label:lab(r[1]),row:r[1],severity:r[0],dollars:Math.round(U[r[1]]),cells:[pct0(P[r[1]]),sMoney(U[r[1]]),Number.isFinite(r[2])&&r[2]<1?pct0(r[2]):"no runway"],detail:Number.isFinite(r[2])&&r[2]<1?`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled — more than all remaining revenue`}));
     out.push({id:"trapped_cash",count:k,severity:rows[0][0],dollars,
      headline:"Significant under billings with limited time to recover",
      cols:["Complete","Underbilled","Of remaining revenue"],allJobs,
@@ -2852,7 +2909,7 @@ function bookShape(rep){
     const U=Math.max(-(j.net),0),O=Math.max(j.net,0);
     if(U>=T.min_flag_dollars){
       const remRev=j.V-(j.E??j.V*j.P);
-      if(remRev<=Math.max(1,.005*Math.abs(j.V)))return null;
+      if(remRev<=Math.max(1,.005*Math.abs(j.V)))return{s:1,side:"under"};
       const r=U/remRev;
       const s=clamp01((r-T.ub_ratio_floor)/(T.ub_ratio_full-T.ub_ratio_floor));
       if(s>T.min_signal_severity)return{s,side:"under"};
@@ -3557,8 +3614,9 @@ function printSummary(rep){
     </section>`;
   }).join(""):'<p class="empty-print">No underwriting signals exceeded the reporting threshold.</p>';
   const trends=BATCH_ANALYSIS_MODE?timeSeriesData():null;
+  const printEub=BATCH_ANALYSIS_MODE?earlyUnderbillingFadeData():null;
   const printJobBorrow=signals.find(s=>s.id==="job_borrow")||null;
-  const trendHtml=(trends||printJobBorrow)?`<section class="print-trends">
+  const trendStrip=(trends||printJobBorrow)?`<section class="print-trends" style="margin-top:0">
     <h2 class="section-title">Across reporting periods</h2>
     <p class="section-sub">Cross-period flags include profit fade, cost changes, job borrow, and estimate anomalies. Anomalies combine fixed materiality thresholds with robust comparison to the contractor’s linked job history.</p>
     <div class="print-trend-kpis">
@@ -3575,7 +3633,11 @@ function printSummary(rep){
           ?`Largest GP swing ${htmlEsc(fmtM(Math.abs(trends.largestAnomaly.fade)))}`
           :"No extreme cross-period estimate changes"}</small></div>
     </div>
-    ${trends?.rows?.length?`<table><thead><tr><th>Job</th><th>Signal</th><th>Periods</th><th>Prior GP</th><th>Latest GP</th><th>GP change</th><th>Margin change</th></tr></thead>
+    ${eubSentenceHTML(printEub,false)}
+    </section>`:"";
+  const trendTable=trends?.rows?.length?`<section class="print-trends">
+    <h2 class="section-title">Jobs with changes between statements</h2>
+    ${`<table><thead><tr><th>Job</th><th>Signal</th><th>Periods</th><th>Prior GP</th><th>Latest GP</th><th>GP change</th><th>Margin change</th></tr></thead>
       <tbody>${trends.rows.map(row=>{const flags=[
         row.estimateAnomaly?`<span class="estimate-anomaly-badge">${row.fade>=0?"Profit gain anomaly":"Profit loss anomaly"}</span>`:"",
         row.materialFade?'<span class="profit-fade-badge">Profit fade</span>':"",
@@ -3587,7 +3649,7 @@ function printSummary(rep){
         <td>${htmlEsc(row.priorProfit==null?"—":fmtM(row.priorProfit))}</td>
         <td>${htmlEsc(row.currentProfit==null?"—":fmtM(row.currentProfit))}</td>
         <td class="${row.materialFade?"fade-value":""}">${htmlEsc(row.fade==null?"—":fmtM(row.fade))}</td>
-        <td>${htmlEsc(row.marginChange==null?"—":`${row.marginChange>=0?"+":""}${pct1(row.marginChange)}`)}</td></tr>`}).join("")}</tbody></table>`:""}
+        <td>${htmlEsc(row.marginChange==null?"—":`${row.marginChange>=0?"+":""}${pct1(row.marginChange)}`)}</td></tr>`}).join("")}</tbody></table>`}
     </section>`:"";
 
   const corrections=(a.corrections||[]).filter((_,i)=>ACCEPTED.has(i)).length;
@@ -3664,6 +3726,8 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 .chart-block svg{margin-top:10px!important;max-height:3.2in}
 .chart-block .card p{font-size:10px!important;line-height:1.45;margin-top:8px!important}
 .empty-print{font-size:10px;color:var(--muted)}
+.eub-note{font-size:9px;background:#F6F4EE;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:0 0 6px;line-height:1.5}
+.print-trends+.section-title,.print-trends~.section-title{margin-top:18px}
 .print-wip{border-collapse:collapse;width:100%;table-layout:auto;font-size:7px;font-variant-numeric:tabular-nums}
 .print-wip thead{display:table-header-group}
 .print-wip tfoot{display:table-footer-group}
@@ -3682,7 +3746,7 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 <section class="summary-page">
   <header class="report-head">
     <div>
-      <h1>Underwriting summary</h1>
+      <h1>Underwriting report</h1>
       <p>Validated WIP schedule</p>
     </div>
     <div class="report-meta">
@@ -3692,10 +3756,11 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
   <div class="print-kpis">${kpis.map(([label,value])=>
     `<div class="print-kpi"><div class="label">${htmlEsc(label)}</div><div class="value">${htmlEsc(value)}</div></div>`
   ).join("")}</div>
+  ${trendStrip}
   <h2 class="section-title">Underwriting signals</h2>
   <p class="section-sub">Jobs and values behind each underwriting flag.</p>
   ${signalHtml}
-  ${trendHtml}
+  ${trendTable}
 </section>
 
 <section class="chart-block">
