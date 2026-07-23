@@ -54,7 +54,7 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .batch-intro-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
 .batch-intro .next-arrow{font-size:18px;line-height:0;margin-left:6px}
 .batch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-.batch-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:17px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.batch-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:15px 18px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .batch-card.failed{border-color:#DFC3BA;background:#FAF3F0}
 .batch-card.needs-review{border-color:#D9C28F}
 .batch-top{display:flex;align-items:start;justify-content:space-between;gap:12px}
@@ -63,7 +63,9 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .batch-card.failed .batch-state{background:#F2DDD6;color:var(--brick)}
 .batch-meta{font-size:12.5px;color:var(--muted);min-height:40px}
 .batch-card .btn{align-self:flex-start}
-.batch-validation{display:flex;align-items:center;gap:9px;border-radius:9px;padding:10px 11px;font-size:13px;font-weight:600}
+.batch-validation{display:flex;align-items:center;gap:9px;border-radius:9px;padding:8px 11px;font-size:13px;font-weight:600}
+.batch-validation .btn{margin-left:auto;flex:none;font-size:12.5px;padding:5px 12px;white-space:nowrap}
+.batch-top .btn{flex:none;white-space:nowrap}
 .batch-validation .validation-icon{display:grid;place-items:center;width:23px;height:23px;border-radius:999px;flex:none;font-size:13px}
 .batch-validation-copy{display:flex;flex-direction:column;gap:2px;line-height:1.35}
 .batch-validation-note{font-size:11px;font-weight:500;color:var(--amber)}
@@ -360,6 +362,7 @@ tr.selrow>td:first-child{background:#E4E9E1!important}
 .kpi.tint-amber{background:#F6F0E2;border-color:#D9C28F}
 .kpi.tint-amber .lab,.kpi.tint-amber .val{color:var(--amber)}
 .analysis-actions{display:flex;gap:10px;align-items:center;flex:none}
+.analysis-print-row{display:flex;justify-content:flex-end;margin-bottom:10px}
 .checks-fold summary::after{content:"\25BE";display:inline-block;margin-left:6px;transition:transform .15s}
 .checks-fold[open] summary::after{transform:rotate(180deg)}
 .ctab .cause-cell{text-align:left}
@@ -421,20 +424,22 @@ tr.selrow>td:first-child{background:#E4E9E1!important}
 .jm-chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px;align-items:center}
 .jm-chips:empty{margin:6px 0 10px}
 .jm-chips .fade-badge,.jm-chips .cost-badge,.jm-chips .anomaly-badge,.jm-chips .jm-stalled-chip{margin:0;padding:3px 9px;font-size:10px;line-height:1.25;vertical-align:baseline}
-.jm-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}
-.jm-kpi{background:var(--paper);border:1px solid var(--line-soft);border-radius:9px;padding:7px 12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.jm-kpi .lab{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);flex:1 1 100%}
+.jm-kpis{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.jm-kpi{background:var(--paper);border:1px solid var(--line-soft);border-radius:9px;padding:7px 13px;display:inline-flex;align-items:baseline;gap:9px}
+.jm-kpi .lab{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);flex:none}
 .jm-kpi .val{font:500 16px/1.25 Inter}
 .jm-kpi .val.neg{color:var(--brick)}
 .jm-kpi .sub{font-size:10.5px;color:var(--muted)}
 .jm-kpi .sub.neg{color:var(--brick)}
-.jm-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
-.jm-chart-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:21px;margin-bottom:2px}
-.jm-chart-head p{font-size:11.5px;color:var(--muted)}
+.jm-charts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.jm-zone{background:var(--paper);border:1px solid var(--line-soft);border-radius:11px;padding:11px 14px 8px}
+.jm-chart-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:22px;margin-bottom:4px}
+.jm-chart-head p{font:500 13px Inter;color:var(--ink)}
 .jm-overlay-toggle{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .jm-chart-empty{display:grid;place-items:center;height:100%;min-height:150px;border:1px dashed var(--line);border-radius:9px;color:var(--muted);font-size:12px;text-align:center;padding:12px}
-.jm-table-head{display:flex;justify-content:space-between;align-items:baseline;margin:2px 0 0}
-.jm-table-head p{font-size:11.5px;color:var(--muted)}
+.jm-table-head{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 2px}
+.jm-table-head p{font:500 13px Inter;color:var(--ink)}
+.jm-table-head p small{font-weight:400;font-size:11px;color:var(--muted);margin-left:6px}
 .jm-link{background:none;border:0;padding:0;font:inherit;font-size:12px;color:var(--sage-deep);font-weight:600;cursor:pointer}
 .jm-link:hover{text-decoration:underline}
 .jm-hist{width:100%;border-collapse:collapse;font-size:12px;margin-top:5px}
@@ -1312,11 +1317,11 @@ function batchCardHTML(item,i){
   const validation=batchValidation(item);
   return`<article class="batch-card ${validation.kind==="review"?"needs-review":""}">
     <div class="batch-top"><span class="batch-name" title="${htmlEsc(item.name)}">${htmlEsc(item.name)}</span>
-      <span class="batch-state">ready</span></div>
+      <button class="btn primary batch-analysis" data-batch="${i}">View independent analysis</button></div>
     <div class="batch-validation ${validation.kind}"><span class="validation-icon">${validation.icon}</span>
       <span class="batch-validation-copy"><span>${validation.text}</span>
-        ${validation.note?`<span class="batch-validation-note">${validation.note}</span>`:""}</span></div>
-    <p class="batch-meta">${batchDocSummary(item.doc)}</p>
+        ${validation.note?`<span class="batch-validation-note">${validation.note}</span>`:""}</span>
+      <button class="btn batch-review" data-batch="${i}">Review validation</button></div>
     <div class="batch-fields">
       <div class="batch-field ${item.periodEnd?"":"missing"}"><label>Reporting date</label>
         <input class="batch-date" data-batch="${i}" type="date" value="${htmlEsc(item.periodEnd)}" aria-label="Reporting date for ${htmlEsc(item.name)}">
@@ -1328,10 +1333,6 @@ function batchCardHTML(item,i){
           <option value="cc" ${item.scheduleType==="cc"?"selected":""}>Completed contracts</option>
           <option value="mixed" ${item.scheduleType==="mixed"?"selected":""}>WIP + completed contracts</option>
         </select></div>
-    </div>
-    <div class="batch-actions">
-      <button class="btn primary batch-analysis" data-batch="${i}">View independent analysis</button>
-      <button class="btn batch-review" data-batch="${i}">Review validation</button>
     </div>
   </article>`;
 }
@@ -2484,9 +2485,9 @@ function renderDash(rep){
   const documentScope=rep._combinedSectionCount>1
     ?`<span class="analysis-scope-label">Entire WIP · ${rep._combinedPageLabel} · ${tableJobCount(rep.table)} jobs</span>`:"<span></span>";
   $("#dash").innerHTML=`
+    <div class="analysis-print-row"><button class="btn" id="printAnalysis">Print analysis</button></div>
     <div class="analysis-topline">${BATCH_MODE&&BATCH_ACTIVE<0?analysisSwitcherHTML():documentScope}
-      <div class="analysis-actions"><button class="btn" id="printAnalysis">Print analysis</button>
-        <button class="btn primary" id="openJobAnalysis">Job analysis</button></div></div>
+      <div class="analysis-actions"><button class="btn primary" id="openJobAnalysis">Job analysis</button></div></div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
@@ -3132,9 +3133,9 @@ function jmDetailHTML(rep,row,state){
   const overlays=state.overlaysByRow.get(row)||[];
   const overlayToggle=overlays.length?`<label class="jm-overlay-toggle"><input type="checkbox" id="jmOverlay"${state.overlay?" checked":""}> overlay similar jobs (${overlays.length})</label>`:"";
   const charts=`<div class="jm-charts">
-    <div><div class="jm-chart-head"><p>Billing position by % complete</p>${overlayToggle}</div>
+    <div class="jm-zone"><div class="jm-chart-head"><p>Billing position by % complete</p>${overlayToggle}</div>
       ${jmBillingChartSVG(points,overlays,state.overlay)}</div>
-    <div><div class="jm-chart-head"><p>Estimated margin by statement</p></div>
+    <div class="jm-zone"><div class="jm-chart-head"><p>Estimated margin by statement</p></div>
       ${jmMarginChartSVG(points,overlays,state.overlay)}</div>
   </div>`;
   const desc=[...points].sort((a,b)=>String(b.period).localeCompare(String(a.period)));
@@ -3153,9 +3154,9 @@ function jmDetailHTML(rep,row,state){
       <td class="num${p.position!=null&&p.position<0?" neg":""}">${p.position==null?"—":(p.position>0?"+":"")+pct1(p.position)}</td>
     </tr>`;}).join("");
   const fullLink=state.canFullSchedule?`<button class="jm-link" id="jmFullSchedule">Validated WIP \u2192</button>`:"";
-  const hist=`<div class="jm-table-head"><p>Statement history${desc.length===1?" · one statement on file":""}</p>${fullLink}</div>
+  const hist=`<div class="jm-zone" style="padding-bottom:11px"><div class="jm-table-head"><p>Statement history${desc.length===1?"<small>one statement on file</small>":""}</p>${fullLink}</div>
     <table class="jm-hist"><thead><tr><th>Statement</th><th>Complete</th><th>Contract</th><th>Est. cost</th><th>Est. GP%</th><th>Cost to date</th><th>Billed to date</th><th>Under/(over)</th><th>Position</th></tr></thead>
-    <tbody>${histRows}</tbody></table>`;
+    <tbody>${histRows}</tbody></table></div>`;
   return`<div class="jm-head"><div><div class="jm-title">${htmlEsc(title)}</div>${sub?`<div class="jm-sub">${htmlEsc(sub)}</div>`:""}</div>
       <button class="btn" id="jmClose">Close</button></div>
     <div class="jm-chips">${chips}</div>
