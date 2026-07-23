@@ -1080,7 +1080,7 @@ function totalsDetail(rep){
     out.push({header,stated:c.stated,
       computed:resolved?resolved.computed_after_corrections:c.computed,
       diff:resolved?resolved.difference_after_corrections:c.difference,
-      explained});
+      explained,colFindings:(rep.findings||[]).filter(f=>f.culprit_column===mcol).length});
   }
   return{present:true,allMatch:out.length===0,mismatches:out,
     allExplained:out.length>0&&out.every(m=>m.explained)};
@@ -1317,7 +1317,7 @@ function batchCardHTML(item,i){
   const validation=batchValidation(item);
   return`<article class="batch-card ${validation.kind==="review"?"needs-review":""}">
     <div class="batch-top"><span class="batch-name" title="${htmlEsc(item.name)}">${htmlEsc(item.name)}</span>
-      <button class="btn primary batch-analysis" data-batch="${i}">View independent analysis</button></div>
+      <button class="btn batch-analysis" data-batch="${i}">View independent analysis</button></div>
     <div class="batch-validation ${validation.kind}"><span class="validation-icon">${validation.icon}</span>
       <span class="batch-validation-copy"><span>${validation.text}</span>
         ${validation.note?`<span class="batch-validation-note">${validation.note}</span>`:""}</span>
@@ -2334,8 +2334,14 @@ function renderCertificate(rep){
     if(td.allMatch)C("ok","Stated totals match the column sums","");
     else if(td.allExplained)C("fixed","Stated totals match once the exception is corrected",
       "The document's own totals row agrees with the implied value, not the printed one.");
-    else C("bad","Stated totals disagree with the column sums"+(td.docLevel?" (document grand totals)":""),
-      findings.length?"Corrections automatically applied below.":"Review the stated totals against the extracted rows.");
+    else{
+      const unexplained=(td.mismatches||[]).filter(m=>!m.explained);
+      const totalsRowOnly=unexplained.length>0&&unexplained.every(m=>!m.colFindings);
+      C("bad","Stated totals disagree with the column sums"+(td.docLevel?" (document grand totals)":""),
+        totalsRowOnly
+          ?`The row values in ${unexplained.length===1?"the affected column":"the affected columns"} validate independently; the discrepancy sits in the document's stated totals row itself (${unexplained.map(m=>m.header).join(", ")}).`
+          :findings.length?"Corrections automatically applied below.":"Review the stated totals against the extracted rows.");
+    }
   }
 
   (rep._extra||[]).forEach(x=>C(x.st,x.label,x.note));
@@ -2487,7 +2493,7 @@ function renderDash(rep){
   $("#dash").innerHTML=`
     <div class="analysis-print-row"><button class="btn" id="printAnalysis">Print analysis</button></div>
     <div class="analysis-topline">${BATCH_MODE&&BATCH_ACTIVE<0?analysisSwitcherHTML():documentScope}
-      <div class="analysis-actions"><button class="btn primary" id="openJobAnalysis">Job analysis</button></div></div>
+      <div class="analysis-actions"><button class="btn primary" id="openJobAnalysis">Independent job analysis</button></div></div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
