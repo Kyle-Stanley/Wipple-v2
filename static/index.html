@@ -219,7 +219,7 @@ h1 em{font-style:normal;color:var(--sage-deep)}
   .match-row{grid-template-columns:1fr auto}.match-row .periods{grid-column:1/-1;grid-row:2}
   .linked-group>summary{grid-template-columns:1fr auto}.linked-group>summary .periods{grid-column:1/-1;grid-row:2}
   .analysis-topline{align-items:stretch;flex-direction:column}
-  .analysis-topline>#printAnalysis{align-self:flex-end}
+  .analysis-topline>.analysis-actions{align-self:flex-end}
 }
 
 /* processing */
@@ -355,7 +355,14 @@ tr.selrow>td:first-child{background:#E4E9E1!important}
 .trajectory-legend-item small{color:var(--muted);font-size:9.5px;white-space:nowrap}
 .ts-kpi-label{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:-12px 0 8px;display:flex;align-items:center;gap:10px}
 .ts-kpi-label::after{content:"";flex:1;height:1px;background:var(--line-soft)}
-.trend-cards.top{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:26px}
+.kpi.tint-brick{background:#F8ECE7;border-color:#E4B8A8}
+.kpi.tint-brick .lab,.kpi.tint-brick .val{color:var(--brick)}
+.kpi.tint-amber{background:#F6F0E2;border-color:#D9C28F}
+.kpi.tint-amber .lab,.kpi.tint-amber .val{color:var(--amber)}
+.analysis-actions{display:flex;gap:10px;align-items:center;flex:none}
+.checks-fold summary::after{content:"\25BE";display:inline-block;margin-left:6px;transition:transform .15s}
+.checks-fold[open] summary::after{transform:rotate(180deg)}
+.ctab .cause-cell{text-align:left}
 .ts-flag{display:inline-block;width:9px;height:9px;border-radius:999px;cursor:help}
 .ts-flag.brick{background:var(--brick)}
 .ts-flag.sage{background:var(--sage-deep)}
@@ -1351,7 +1358,6 @@ function analysisSwitcherHTML(){
   if(!periods.length)return"";
   return`<nav class="analysis-switcher" aria-label="Analysis views"><span>Analysis view</span>
     <button class="btn analysis-portfolio-switch ${ANALYSIS_SCOPE==="portfolio"?"on":""}">Full portfolio</button>
-    <button class="btn analysis-jobs-open">Job analysis</button>
     ${periods.map(period=>`<button class="btn analysis-period-switch ${ANALYSIS_SCOPE===period?"on":""}" data-period="${period}">
       ${new Date(period+"T00:00:00Z").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:"UTC"})}</button>`).join("")}</nav>`;
 }
@@ -2012,24 +2018,14 @@ function timeSeriesKpiStripHTML(rep){
   if(!data&&!jobBorrow)return"";
   const{totalCostIncrease=0,costIncreaseJobs=0,fade=0,fadeJobs=0,
     anomalyJobs=0,largestAnomaly=null}=data||{};
+  const js=n=>`${n} job${n===1?"":"s"}`;
   const cards=[
-    fadeJobs?`<div class="trend-card emphasis"><div class="lab">Profit fade</div><div class="val">${fmtM(fade)}</div>
-        <p class="match-source">${fadeJobs} job${fadeJobs===1?"":"s"} lost expected profit</p></div>
-      `:"",
-    costIncreaseJobs?`<div class="trend-card"><div class="lab">Cost estimate increases</div><div class="val">${fmtM(totalCostIncrease)}</div>
-        <p class="match-source">${costIncreaseJobs} job${costIncreaseJobs===1?"":"s"} revised upward</p></div>`:"",
-    `<div class="trend-card${jobBorrow?" borrow":""}"><div class="lab">Job borrow</div>
-        <div class="val">${fmtM(jobBorrow?.dollars||0)}</div>
-        <p class="match-source">${jobBorrow
-          ?`${jobBorrow.count} job${jobBorrow.count===1?" has":"s have"} billings pulled forward`
-          :"No billings pulled forward beyond cost and projected profit"}</p></div>`,
-    `<div class="trend-card${anomalyJobs?" anomaly":""}"><div class="lab">Estimate anomalies</div>
-        <div class="val">${anomalyJobs}</div>
-        <p class="match-source">${largestAnomaly
-          ?`Largest GP swing ${fmtM(Math.abs(largestAnomaly.fade))}`
-          :"No extreme cross-period estimate changes"}</p></div>`
+    fadeJobs?`<div class="kpi tint-brick" title="${js(fadeJobs)} lost expected profit between statements"><div class="lab">Profit fade · ${js(fadeJobs)}</div><div class="val num">${fmtM(fade)}</div></div>`:"",
+    costIncreaseJobs?`<div class="kpi" title="${js(costIncreaseJobs)} revised estimated cost upward"><div class="lab">Cost increases · ${js(costIncreaseJobs)}</div><div class="val num">${fmtM(totalCostIncrease)}</div></div>`:"",
+    `<div class="kpi${jobBorrow?" tint-amber":""}" title="${jobBorrow?`${js(jobBorrow.count)} with billings pulled forward beyond cost plus projected profit`:"No billings pulled forward beyond cost and projected profit"}"><div class="lab">Job borrow${jobBorrow?` · ${js(jobBorrow.count)}`:""}</div><div class="val num">${fmtM(jobBorrow?.dollars||0)}</div></div>`,
+    `<div class="kpi${anomalyJobs?" tint-amber":""}" title="${largestAnomaly?`Largest GP swing ${fmtM(Math.abs(largestAnomaly.fade))}`:"No extreme cross-period estimate changes"}"><div class="lab">Estimate anomalies</div><div class="val num">${anomalyJobs}</div></div>`
   ].filter(Boolean).join("");
-  return cards?`<div class="ts-kpi-label">Time series</div><div class="trend-cards top">${cards}</div>`:"";
+  return cards?`<div class="ts-kpi-label">Across reporting periods</div><div class="kpis trend-kpis">${cards}</div>`:"";
 }
 function timeSeriesSectionHTML(rep){
   const data=timeSeriesData();
@@ -2037,7 +2033,7 @@ function timeSeriesSectionHTML(rep){
   const{rows=[],stalls=0}=data;
   if(!rows.length&&!stalls)return"";
   const flagCell=(on,cls,label)=>`<td class="ts-flag-cell">${on?`<span class="ts-flag ${cls}" title="${htmlEsc(label)}"></span>`:""}</td>`;
-  return`<div class="time-series-section"><h4>Across reporting periods
+  return`<div class="time-series-section"><h4>Jobs with changes between statements
       <small>Material changes, stalled jobs, and extreme estimate movements are shown; anomalies use both fixed materiality gates and the contractor’s own history</small></h4>
     ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Job ID</th><th>Job name</th>
       <th class="ts-flag-col" title="Profit fade">Fade</th><th class="ts-flag-col" title="Cost estimate increase">Cost ↑</th>
@@ -2317,27 +2313,38 @@ function renderCertificate(rep){
     C("warn","Column identification not certifiable",
       "Too little numeric structure to verify. Columns were mapped from header text and are marked unverified.");
   }
+  const corrsC=(rep.analysis||{}).corrections||[];
+  const corrIndexFor=f=>corrsC.findIndex(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
+  const findingsFixed=findings.length>0&&findings.every(f=>{const ci=corrIndexFor(f);return ci>=0&&ACCEPTED.has(ci);});
   if(v==="success"||v==="validation_failed"){
-    C(findings.length?"bad":"ok",
-      findings.length?`${findings.length} cell${findings.length>1?"s fail":" fails"} the row identities`
+    C(findings.length?(findingsFixed?"fixed":"bad"):"ok",
+      findings.length
+        ?findingsFixed
+          ?`${findings.length} cell${findings.length>1?"s":""} failed the row identities as printed — corrected`
+          :`${findings.length} cell${findings.length>1?"s fail":" fails"} the row identities`
         :"Every job satisfies the row identities",
-      findings.length?"Detailed below.":"");
+      findings.length
+        ?findingsFixed
+          ?"Every failing cell has an applied correction below; revert any row to keep the printed value."
+          :"Detailed below."
+        :"");
   }
   if(td&&td.present){
     if(td.allMatch)C("ok","Stated totals match the column sums","");
-    else if(td.allExplained)C("ok","Stated totals match once the exception is corrected",
+    else if(td.allExplained)C("fixed","Stated totals match once the exception is corrected",
       "The document's own totals row agrees with the implied value, not the printed one.");
     else C("bad","Stated totals disagree with the column sums"+(td.docLevel?" (document grand totals)":""),
       findings.length?"Corrections automatically applied below.":"Review the stated totals against the extracted rows.");
   }
 
   (rep._extra||[]).forEach(x=>C(x.st,x.label,x.note));
-  const nExc=findings.length+((td&&!td.allMatch&&!td.allExplained)?1:0)
-    +(rep._extra||[]).filter(x=>x.st==="bad").length;
-  const passed=checks.filter(c=>c.st==="ok").length;
-  const head=nExc?`${passed} of ${checks.length} checks passed`:"All checks passed";
+  const nBad=checks.filter(c=>c.st==="bad").length;
+  const nFixed=checks.filter(c=>c.st==="fixed").length;
+  const passed=checks.filter(c=>c.st==="ok"||c.st==="fixed").length;
+  const head=nBad?`${passed} of ${checks.length} checks passed`
+    :nFixed?`${checks.length} of ${checks.length} checks pass after corrections`
+    :"All checks passed";
   const SHOWN=6;
-  const corrsC=(rep.analysis||{}).corrections||[];
   const excRow=f=>{
     const col=(rep.table&&rep.table.columns[f.culprit_column]&&rep.table.columns[f.culprit_column].header)||"";
     const ci=corrsC.findIndex(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
@@ -2346,7 +2353,7 @@ function renderCertificate(rep){
     const jobCell=c
       ?`<td class="corr-job-cell has-toggle"><div class="corr-job-line"><button class="evtoggle" data-ev="${ci}" aria-label="show the math">\u25B8</button><span class="corr-job-name" title="${label}">${label}</span></div><small>${htmlEsc(col)}</small></td>`
       :`<td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name" title="${label}">${label}</span></div><small>${htmlEsc(col)}</small></td>`;
-    const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""} aria-label="include suggested value for ${f.row_label}">`
+    const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"":"checked"} aria-label="revert to the printed value for ${f.row_label}">`
                :`<span style="color:var(--muted);font-size:12px">review</span>`;
     const confirmation=!c?"":c.proof_kind==="joint"?"joint proof":
       c.proof_kind==="inherited"?"validated inputs":
@@ -2363,15 +2370,15 @@ function renderCertificate(rep){
       </td></tr>`:"";
     return `<tr>${jobCell}
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
-      <td>${causeText(f.classification,f.observed,f.proposed_correction,f.classification_label)}</td>
       <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
+      <td class="cause-cell">${causeText(f.classification,f.observed,f.proposed_correction,f.classification_label)}</td>
       <td style="text-align:right">${use}</td></tr>${ev}`;
   };
-  const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Suggested values are applied by default. Uncheck a row to keep the document's printed value, then press Update figures.</p>
+  const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Suggested values are applied automatically. Check Revert to printed on any row to keep the document's value instead, then press Update figures.</p>
   <div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
-      <th>Job</th><th style="text-align:right">Flagged</th><th>Cause</th><th style="text-align:right">Suggested</th>
-      <th style="text-align:right"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">Apply suggested value <input type="checkbox" id="useAll"></label></th>
+      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th>
+      <th style="text-align:right"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">Revert to printed <input type="checkbox" id="useAll"></label></th>
     </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
   </div>
   ${corrsC.length?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0">
@@ -2396,10 +2403,10 @@ function renderCertificate(rep){
   $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
     <div class="kicker">validation results${SECTIONS.length>1?" \u00b7 "+secLabel(SECTIONS[ACTIVE]).name.toLowerCase()+" \u00b7 "+secLabel(SECTIONS[ACTIVE]).pg:""}</div>
     <h2 style="font-size:22px">${head}</h2>
-    <details class="more checks-fold"><summary>${nExc?"Review":"Show"} the ${checks.length} checks</summary>
+    <details class="more checks-fold"><summary>${nBad?"Review":"Show"} the ${checks.length} checks</summary>
     <div style="margin-top:12px">${checks.map(c=>{
-      const ic=c.st==="ok"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
-      const col=c.st==="ok"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
+      const ic=c.st==="ok"||c.st==="fixed"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
+      const col=c.st==="ok"||c.st==="fixed"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
       return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
     }).join("")}</div></details>
     <div class="go" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px">
@@ -2413,8 +2420,14 @@ function renderCertificate(rep){
     ${detail}
   </div></div>`;
   const ua=$("#useAll"),st=$("#applyStatus"),ap=$("#applySel"),src=$("#reviewSource");
-  const selection=()=>new Set([...document.querySelectorAll(".certbox:checked")].map(b=>+b.dataset.ci));
-  const syncUA=()=>{if(ua)ua.checked=!document.querySelector(".certbox:not(:checked)")};
+  /* Boxes now mean "revert to printed": checked = keep the document's value.
+     ACCEPTED remains the set of applied corrections, so it is the complement
+     of the checked boxes. */
+  const selection=()=>{
+    const reverted=new Set([...document.querySelectorAll(".certbox:checked")].map(b=>+b.dataset.ci));
+    return new Set(corrsC.map((_,i)=>i).filter(i=>!reverted.has(i)));
+  };
+  const syncUA=()=>{if(ua)ua.checked=corrsC.length>0&&!document.querySelector(".certbox:not(:checked)")};
   const syncStatus=()=>{if(!st)return;
     const sel=selection();
     const same=sel.size===ACCEPTED.size&&[...sel].every(i=>ACCEPTED.has(i));
@@ -2422,10 +2435,14 @@ function renderCertificate(rep){
     st.style.color=same?"var(--muted)":"var(--brick)";};
   document.querySelectorAll(".certbox").forEach(b=>b.onchange=()=>{syncUA();syncStatus();});
   if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox").forEach(b=>{b.checked=ua.checked;});syncStatus();};}
-  if(ap)ap.onclick=()=>{ACCEPTED=selection();syncStatus();
-    const restored=corrsC.length-ACCEPTED.size;
-    st.textContent=`\u2713 ${ACCEPTED.size} applied${restored?`; ${restored} restored to the printed value`:""}`;
-    st.style.color="var(--sage-deep)";};
+  if(ap)ap.onclick=()=>{
+    const applied=selection();const restored=corrsC.length-applied.size;
+    ACCEPTED=applied;
+    renderCertificate(rep);
+    const st2=$("#applyStatus");
+    if(st2){st2.textContent=`\u2713 ${applied.size} applied${restored?`; ${restored} kept as printed`:""}`;
+      st2.style.color="var(--sage-deep)";}
+  };
   if(src)src.onclick=()=>openSourceReview(rep);
   syncStatus();
   document.querySelectorAll(".evtoggle").forEach(t=>t.onclick=()=>{
@@ -2468,7 +2485,8 @@ function renderDash(rep){
     ?`<span class="analysis-scope-label">Entire WIP · ${rep._combinedPageLabel} · ${tableJobCount(rep.table)} jobs</span>`:"<span></span>";
   $("#dash").innerHTML=`
     <div class="analysis-topline">${BATCH_MODE&&BATCH_ACTIVE<0?analysisSwitcherHTML():documentScope}
-      <button class="btn" id="printAnalysis">Print analysis</button></div>
+      <div class="analysis-actions"><button class="btn" id="printAnalysis">Print analysis</button>
+        <button class="btn primary" id="openJobAnalysis">Job analysis</button></div></div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
@@ -2490,7 +2508,7 @@ function renderDash(rep){
   wireBillingTrajectory(rep);
   const portfolioSwitch=$("#dash .analysis-portfolio-switch");
   if(portfolioSwitch)portfolioSwitch.onclick=renderPortfolioAnalysis;
-  const jobsOpen=$("#dash .analysis-jobs-open");
+  const jobsOpen=$("#openJobAnalysis");
   if(jobsOpen)jobsOpen.onclick=()=>openWipModal(rep);
   $("#dash").querySelectorAll(".analysis-period-switch").forEach(button=>
     button.onclick=()=>renderPeriodAnalysis(button.dataset.period));
