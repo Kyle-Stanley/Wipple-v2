@@ -362,10 +362,10 @@ tr.selrow>td:first-child{background:#E4E9E1!important}
 .kpi.tint-amber{background:#F6F0E2;border-color:#D9C28F}
 .kpi.tint-amber .lab,.kpi.tint-amber .val{color:var(--amber)}
 .analysis-actions{display:flex;gap:10px;align-items:center;flex:none}
-.analysis-print-row{display:flex;justify-content:flex-end;margin-bottom:10px}
-.report-title{margin:6px 0 18px}
+.report-title{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;margin:26px 0 18px}
 .report-title h2{font:500 27px/1.2 Fraunces,serif}
 .report-title p{font-size:12.5px;color:var(--muted);margin-top:3px}
+.report-title .btn{flex:none}
 .checks-fold summary::after{content:"\25BE";display:inline-block;margin-left:6px;transition:transform .15s}
 .checks-fold[open] summary::after{transform:rotate(180deg)}
 .ctab .cause-cell{text-align:right}
@@ -1079,18 +1079,24 @@ function totalsDetail(rep){
     if(c.matches&&(!resolved||resolved.matches_after_corrections))continue;
     /* Penny truncation and float error accumulate across rows; a stated total
        within a few dollars of the column sum is agreement, not a finding. */
-    const liveDiff=resolved?resolved.difference_after_corrections:c.difference;
-    const negligible=Math.abs(liveDiff)<=Math.max(2,.02*nRows,1e-6*Math.abs(c.stated||0));
+    const residual=resolved&&Number.isFinite(+resolved.difference_after_corrections)
+      ?Math.abs(+resolved.difference_after_corrections):null;
+    const liveDiff=residual!=null?+resolved.difference_after_corrections:c.difference;
+    const negligible=Number.isFinite(liveDiff)&&Math.abs(liveDiff)<=Math.max(2,.02*nRows,1e-6*Math.abs(c.stated||0));
     if(negligible)continue;
     const mcol=map.indexOf(+j);
     const header=(rep.table&&rep.table.columns[mcol]&&rep.table.columns[mcol].header)||("column "+j);
     /* A column can carry several corrected cells; the stated total is explained
-       when the SUM of their correction deltas accounts for the difference. */
+       when the SUM of their correction deltas accounts for the difference.
+       The backend's after-corrections verdict is honored when positive, but a
+       false verdict from exact comparison is re-tested here with tolerance so
+       float strictness upstream cannot fail an explained column. */
     const colFinds=(rep.findings||[]).filter(f=>f.culprit_column===mcol&&f.proposed_correction!=null);
     const deltaSum=colFinds.reduce((sum,f)=>sum+(f.observed-f.proposed_correction),0);
     const tol=Math.max(2,.02*nRows,.005*Math.abs(c.difference));
-    const explained=resolved?resolved.matches_after_corrections:
-      colFinds.length>0&&Math.min(Math.abs(deltaSum-c.difference),Math.abs(deltaSum+c.difference))<=tol;
+    const explained=(resolved&&resolved.matches_after_corrections===true)
+      ||(residual!=null&&residual<=tol)
+      ||(colFinds.length>0&&Math.min(Math.abs(deltaSum-c.difference),Math.abs(deltaSum+c.difference))<=tol);
     out.push({header,stated:c.stated,
       computed:resolved?resolved.computed_after_corrections:c.computed,
       diff:liveDiff,
@@ -1223,14 +1229,22 @@ function batchValidation(item){
   const errors=findings+totalsProblems+structuralErrors;
   const incomplete=reps.some(r=>["unmapped","llm_mapped_unverified"].includes(r.overall_status));
   if(incomplete)return{kind:"review",icon:"!",text:"Validation needs review"};
-  if(!errors)return{kind:"ok",icon:"✓",text:"All checks passed"};
+  let checksPassed=0,checksTotal=0;
+  sections.forEach((section,si)=>{
+    const corrs=section.rep.analysis?.corrections||[];
+    const selected=item.reviewState?.states?.[si]||new Set(corrs.map((_,ci)=>ci));
+    const counts=computeValidationChecks(section.rep,selected);
+    checksPassed+=counts.passed;checksTotal+=counts.checks.length;
+  });
+  const tally=checksTotal?` · ${checksPassed}/${checksTotal} checks passed`:"";
+  if(!errors)return{kind:"ok",icon:"✓",text:"All checks passed"+(checksTotal&&checksPassed<checksTotal?tally:"")};
   const fullyCorrected=!structuralErrors&&findings>0&&corrections===findings
     &&applied===corrections&&supported===corrections;
   if(fullyCorrected)return{kind:"corrected",icon:"✓",
-    text:"Validated after corrections",
+    text:"Validated after corrections"+tally,
     note:`${findings} transcription error${findings===1?"":"s"} caught and corrected`
       +(totalsProblems?" · printed total discrepancy isolated":"")};
-  return{kind:"review",icon:"!",text:`${errors} error${errors===1?"":"s"} need review`};
+  return{kind:"review",icon:"!",text:`${errors} error${errors===1?"":"s"} need review`+tally};
 }
 async function scanBatch(files){
   resetBatch();clearSourceFile();BATCH_MODE=true;
@@ -2340,7 +2354,7 @@ function render(doc,restore=null){
   $("#navDash").onclick=renderDocumentAnalysis;
 }
 
-function renderCertificate(rep){
+function computeValidationChecks(rep,accepted){
   const v=rep.validator_status,o=rep.overall_status;
   const findings=rep.findings||[];
   const witnesses=rep.witnesses||[];
@@ -2367,7 +2381,7 @@ function renderCertificate(rep){
   }
   const corrsC=(rep.analysis||{}).corrections||[];
   const corrIndexFor=f=>corrsC.findIndex(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
-  const findingsFixed=findings.length>0&&findings.every(f=>{const ci=corrIndexFor(f);return ci>=0&&ACCEPTED.has(ci);});
+  const findingsFixed=findings.length>0&&findings.every(f=>{const ci=corrIndexFor(f);return ci>=0&&accepted.has(ci);});
   if(v==="success"||v==="validation_failed"){
     C(findings.length?(findingsFixed?"fixed":"bad"):"ok",
       findings.length
@@ -2388,10 +2402,11 @@ function renderCertificate(rep){
     else{
       const unexplained=(td.mismatches||[]).filter(m=>!m.explained);
       const totalsRowOnly=unexplained.length>0&&unexplained.every(m=>!m.colFindings);
+      const colDetail=unexplained.map(m=>`${m.header}: stated ${fmtM(m.stated)} vs ${fmtM(m.computed)} (\u0394 ${fmtM(m.diff)})`).join("; ");
       C("bad","Stated totals disagree with the column sums"+(td.docLevel?" (document grand totals)":""),
-        totalsRowOnly
-          ?`The row values in ${unexplained.length===1?"the affected column":"the affected columns"} validate independently; the discrepancy sits in the document's stated totals row itself (${unexplained.map(m=>m.header).join(", ")}).`
-          :findings.length?"Corrections automatically applied below.":"Review the stated totals against the extracted rows.");
+        (totalsRowOnly
+          ?`The row values in ${unexplained.length===1?"the affected column":"the affected columns"} validate independently; the discrepancy sits in the document's stated totals row itself. `
+          :findings.length?"Corrections automatically applied below. ":"Review the stated totals against the extracted rows. ")+colDetail);
     }
   }
 
@@ -2402,6 +2417,10 @@ function renderCertificate(rep){
   const head=nBad?`${passed} of ${checks.length} checks passed`
     :nFixed?`${checks.length} of ${checks.length} checks pass after corrections`
     :"All checks passed";
+  return{checks,nBad,nFixed,passed,head,findings,witnesses,corrsC};
+}
+function renderCertificate(rep){
+  const{checks,nBad,head,findings,witnesses,corrsC}=computeValidationChecks(rep,ACCEPTED);
   const SHOWN=6;
   const excRow=f=>{
     const col=(rep.table&&rep.table.columns[f.culprit_column]&&rep.table.columns[f.culprit_column].header)||"";
@@ -2542,10 +2561,10 @@ function renderDash(rep){
   const documentScope=rep._combinedSectionCount>1
     ?`<span class="analysis-scope-label">Entire WIP · ${rep._combinedPageLabel} · ${tableJobCount(rep.table)} jobs</span>`:"<span></span>";
   $("#dash").innerHTML=`
-    <div class="analysis-print-row"><button class="btn" id="printAnalysis">Print analysis</button></div>
     <div class="analysis-topline">${BATCH_MODE&&BATCH_ACTIVE<0?analysisSwitcherHTML():documentScope}
       <div class="analysis-actions"><button class="btn primary" id="openJobAnalysis">Independent job analysis</button></div></div>
-    <div class="report-title"><h2>Underwriting report</h2>${rep.source?`<p>${htmlEsc(rep.source)}</p>`:""}</div>
+    <div class="report-title"><div><h2>Underwriting report</h2>${rep.source?`<p>${htmlEsc(rep.source)}</p>`:""}</div>
+      <button class="btn" id="printAnalysis">Print report</button></div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
