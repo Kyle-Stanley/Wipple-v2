@@ -318,10 +318,32 @@ td.sigcell-amber{color:var(--amber);font-weight:600}
 .sigicon{font-size:10px;line-height:1;padding:3px 4px;border-radius:5px;cursor:help}
 .sigicon.brick{color:var(--brick);background:#F2DDD6}
 .sigicon.amber{color:var(--amber);background:#F2E7CF}
-tr.selrow>td{box-shadow:inset 3px 0 0 var(--sage-deep)}
+tr.selrow>td{box-shadow:inset 3px 0 0 var(--sage-deep);background:#EEF1EA}
 tr.selrow>td:first-child{background:#E4E9E1!important}
-tr.pulse>td{animation:rowpulse 1.4s ease-out 2}
-@keyframes rowpulse{0%{background:rgba(92,113,96,.3)}100%{background:transparent}}
+.sigtab tbody tr[data-row],.time-series-section tbody tr[data-group],#bookshape circle[data-row]{cursor:pointer}
+.sigtab tbody tr[data-row]:hover td,.time-series-section tbody tr[data-group]:hover td{background:var(--paper)}
+.time-series-section .tablewrap{position:relative;border:1px solid var(--line-soft);border-radius:8px}
+.time-series-section .tablewrap table{margin-top:0}
+.time-series-section .tablewrap thead th{position:sticky;top:0;z-index:3;background:var(--surface);box-shadow:0 1px 0 var(--line)}
+.trajectory-card{margin-bottom:18px}
+.trajectory-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.trajectory-head h3{display:block}
+.trajectory-head h3 small{display:block;margin-top:3px}
+.trajectory-controls{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.trajectory-toggle{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:999px;padding:5px 10px;font:500 11.5px Inter;cursor:pointer}
+.trajectory-toggle:hover:not(:disabled){border-color:var(--sage)}
+.trajectory-toggle.on{color:var(--ink);border-color:var(--sage-deep);background:#EEF1EA}
+.trajectory-toggle[data-filter="trapped_cash"].on,.trajectory-toggle[data-filter="loss_jobs"].on,.trajectory-toggle[data-filter="profit_fade"].on{border-color:#C98274;background:#F8ECE7;color:var(--brick)}
+.trajectory-toggle[data-filter="job_borrow"].on{border-color:#D2B56E;background:#F6F0E2;color:var(--amber)}
+.trajectory-toggle:disabled{opacity:.38;cursor:not-allowed}
+.trajectory-toggle .count{display:inline-block;min-width:17px;margin-left:4px;padding:0 5px;border-radius:999px;background:rgba(32,37,31,.07);font-size:10px;text-align:center}
+.trajectory-note{font-size:11.5px;color:var(--muted);margin:7px 0 0}
+.trajectory-empty{display:grid;place-items:center;min-height:150px;color:var(--muted);font-size:13px;text-align:center;padding:20px}
+.trajectory-hit{stroke:transparent;stroke-width:14;fill:none;pointer-events:stroke;cursor:pointer}
+.trajectory-line{fill:none;stroke-width:2;stroke-dasharray:6 5;pointer-events:none}
+.trajectory-point{stroke:var(--surface);stroke-width:1.5;cursor:pointer}
+.trajectory-clip{font-size:10px;font-weight:600;pointer-events:none}
+.signal-more{font-size:11.5px;color:var(--muted);margin-top:7px}
 .receipt.wide{margin-left:calc(50% - min(50vw - 24px,720px));margin-right:calc(50% - min(50vw - 24px,720px));transition:margin .2s ease}
 .wipmodal{position:fixed;inset:0;background:rgba(32,37,31,.32);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);z-index:60;display:flex;padding:2vh 1.5vw}
 .wm-panel{background:var(--surface);border-radius:14px;flex:1;display:flex;flex-direction:column;min-height:0;box-shadow:0 24px 70px rgba(32,37,31,.35)}
@@ -972,6 +994,7 @@ let BATCH_ITEMS=[],BATCH_ACTIVE=-1,BATCH_MODE=false;
 let MATCH_STATE=null;
 let BATCH_ANALYSIS_MODE=false;
 let ANALYSIS_SCOPE="portfolio";
+let BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
 
 function tableValues(t){
   if(!t)return[];
@@ -1037,6 +1060,7 @@ function setSingleNav(active){
 function resetBatch(){
   BATCH_ITEMS=[];BATCH_ACTIVE=-1;BATCH_MODE=false;MATCH_STATE=null;
   BATCH_ANALYSIS_MODE=false;ANALYSIS_SCOPE="portfolio";
+  BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
 }
 function batchDocError(doc){
   if(!doc)return"Processing did not return a report.";
@@ -1648,6 +1672,7 @@ function periodAnalysisReport(period){
   return{
     source:`Validated portfolio · ${displayPeriod(period)}`,
     overall_status:"verified",validator_status:"success",findings:[],witnesses:[],
+    _period:period,_consolidatedRows:rows,
     table:{
       columns,values:rows.map(row=>columns.map(col=>row.vars[col.variable]??null)),
       job_ids:rows.map(row=>row.id||""),job_names:rows.map(row=>row.name||""),
@@ -1809,13 +1834,14 @@ function timeSeriesData(){
     if(!batchMetadataReady())return null;
     buildMatchState();
   }
-  const series=MATCH_STATE.groups.map(g=>groupPeriodSnapshots(g)).filter(x=>x.length>1);
+  const series=MATCH_STATE.groups.map(g=>({group:g,snapshots:groupPeriodSnapshots(g)}))
+    .filter(x=>x.snapshots.length>1);
   if(!series.length)return null;
 
   /* Build every linked job first. Anomaly detection is deliberately hybrid:
      a large absolute + margin swing always flags, while a robust median/MAD
      comparison catches contractor-specific outliers that miss the fixed gate. */
-  const allRows=series.map(s=>{
+  const allRows=series.map(({group,snapshots:s})=>{
     const first=s[0],last=s[s.length-1],profit=x=>
       x.vars.G??(x.vars.V!=null&&x.vars.C!=null?x.vars.V-x.vars.C:null);
     const p0=profit(first),p1=profit(last);
@@ -1830,7 +1856,7 @@ function timeSeriesData(){
       &&Math.abs(last.vars.D-first.vars.D)<=1&&Math.abs(last.vars.B-first.vars.B)<=1;
     const materialCost=cost!=null&&cost>Math.max(10000,.03*Math.abs(first.vars.C||0));
     const materialFade=fade!=null&&fade<-Math.max(10000,.03*Math.abs(p0||0));
-    return{name:last.name||first.name,id:last.id||first.id,from:first.period,to:last.period,
+    return{groupId:group.id,name:last.name||first.name,id:last.id||first.id,from:first.period,to:last.period,
       fromType:first.type,toType:last.type,contract:v0!=null&&v1!=null?v1-v0:null,
       scale,priorProfit:p0,currentProfit:p1,margin0,margin1,marginChange,
       cost,fade,stalled,materialCost,materialFade};
@@ -1898,7 +1924,7 @@ function timeSeriesSectionHTML(rep){
     `<div class="trend-card${jobBorrow?" borrow":""}"><div class="lab">Job borrow</div>
         <div class="val">${fmtM(jobBorrow?.dollars||0)}</div>
         <p class="match-source">${jobBorrow
-          ?`${jobBorrow.count} job${jobBorrow.count===1?"":"s"} have billings pulled forward`
+          ?`${jobBorrow.count} job${jobBorrow.count===1?" has":"s have"} billings pulled forward`
           :"No billings pulled forward beyond cost and projected profit"}</p></div>`,
     `<div class="trend-card${anomalyJobs?" anomaly":""}"><div class="lab">Estimate anomalies</div>
         <div class="val">${anomalyJobs}</div>
@@ -1916,7 +1942,7 @@ function timeSeriesSectionHTML(rep){
         r.estimateAnomaly?`<span class="anomaly-badge" title="${htmlEsc(r.anomalyReason)}">${r.fade>=0?"Profit gain anomaly":"Profit loss anomaly"}</span>`:"",
         r.materialFade?'<span class="fade-badge" style="margin-left:0">Profit fade</span>':"",
         r.materialCost?'<span class="cost-badge">Cost increase</span>':""
-      ].filter(Boolean).join(" ");return`<tr class="${r.estimateAnomaly?"anomaly-row":""}"><td>${htmlEsc(r.id||"—")}</td><td>${htmlEsc(r.name||"—")}</td>
+      ].filter(Boolean).join(" ");const focus=reportRowForGroup(rep,r.groupId);return`<tr class="${r.estimateAnomaly?"anomaly-row":""}" data-group="${htmlEsc(r.groupId||"")}"${focus>=0?` data-row="${focus}"`:""} title="View in validated WIP"><td>${htmlEsc(r.id||"—")}</td><td>${htmlEsc(r.name||"—")}</td>
         <td>${flags||"—"}</td>
         <td>${r.from.slice(0,4)} → ${r.to.slice(0,4)}</td>
         <td class="num">${r.contract==null?"—":fmtM(r.contract)}</td>
@@ -2321,9 +2347,10 @@ function renderDash(rep){
   ];
   const sigs=computeSignals(rep).map(s=>{
     const tier=s.severity>=.66?"high":s.severity>=.33?"med":"low";
+    const shown=(s.jobs||[]).length;
     const body=s.cols?`<table class="sigtab"><thead><tr><th>Job</th>${s.cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead><tbody>${
       (s.jobs||[]).map(j=>`<tr${j.row!=null?` data-row="${j.row}" title="View in schedule"`:""}><td>${j.label}</td>${(j.cells||[j.detail]).map(c=>`<td class="num">${c}</td>`).join("")}</tr>`).join("")
-    }</tbody></table>`:`<div class="jobs">${(s.jobs||[]).map(j=>`<span class="chip">${j.label} · ${j.detail}</span>`).join("")}</div>`;
+    }</tbody></table>${s.count>shown?`<p class="signal-more">Showing ${shown} of ${s.count}; every flagged job remains marked in the validated WIP and included in the trajectory filters.</p>`:""}`:`<div class="jobs">${(s.jobs||[]).map(j=>`<span class="chip">${j.label} · ${j.detail}</span>`).join("")}</div>`;
     return `<div class="item">
       <div class="head"><span class="sevr ${tier}">${tier}</span><p class="hl">${s.headline}</p></div>
       ${body}
@@ -2344,10 +2371,18 @@ function renderDash(rep){
       <div class="card"><h3>Underwriting signals <small>What stands out for underwriting?</small></h3>
         ${signalBody}</div>
     </div>
+    ${billingTrajectoryChart(rep)}
     ${bookShape(rep)}
     <p class="foot">${footMeta(rep)}wipple does not store documents</p>`;
   $("#dash").querySelectorAll(".sigtab tbody tr[data-row]").forEach(tr=>{
     tr.onclick=()=>openWipModal(rep,+tr.dataset.row)});
+  $("#dash").querySelectorAll(".time-series-section tbody tr[data-group]").forEach(tr=>{
+    tr.onclick=()=>openGroupInValidatedWip(rep,tr.dataset.group)});
+  $("#dash").querySelectorAll("#bookshape circle[data-row]").forEach(circle=>{
+    const open=()=>openWipModal(rep,+circle.dataset.row);circle.onclick=open;
+    circle.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}};
+  });
+  wireBillingTrajectory(rep);
   const portfolioSwitch=$("#dash .analysis-portfolio-switch");
   if(portfolioSwitch)portfolioSwitch.onclick=renderPortfolioAnalysis;
   $("#dash").querySelectorAll(".analysis-period-switch").forEach(button=>
@@ -2416,10 +2451,11 @@ function computeSignals(rep){
    if(P[i]>=.995||remRev<=Math.max(1,.005*Math.abs(V[i])))continue;
    const ratio=U[i]/remRev;const sev=clamp01((ratio-T.ub_ratio_floor)/(T.ub_ratio_full-T.ub_ratio_floor));if(sev>T.min_signal_severity)rows.push([sev,i,ratio]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+U[r[1]],0),k=rows.length;
+    const allJobs=rows.map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(U[r[1]]),cells:[pct0(P[r[1]]),sMoney(U[r[1]]),pct0(r[2])],detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`}));
     out.push({id:"trapped_cash",count:k,severity:rows[0][0],dollars,
      headline:"Significant under billings with limited time to recover",
-     cols:["Complete","Underbilled","Of remaining revenue"],
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(U[r[1]]),cells:[pct0(P[r[1]]),sMoney(U[r[1]]),pct0(r[2])],detail:`${pct0(P[r[1]])} complete, ${sMoney(U[r[1]])} underbilled = ${pct0(r[2])} of remaining revenue`})),
+     cols:["Complete","Underbilled","Of remaining revenue"],allJobs,
+     jobs:allJobs.slice(0,5),
      why:"Earned revenue the contractor has not billed. On nearly-finished work this usually means unapproved change orders or receivables that may not convert to cash."});}}
   if(hasEB){const rows=[];for(let i=0;i<n;i++){
     const ctc=Math.max(C[i]-D[i],0),remainingBillings=V[i]-B[i];
@@ -2430,19 +2466,21 @@ function computeSignals(rep){
     if(sev>T.min_signal_severity)rows.push([sev,i,borrow,ctc,remainingBillings,ratio]);
    }
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+r[2],0);
-    out.push({id:"job_borrow",count:rows.length,severity:rows[0][0],dollars,
-     headline:`${rows.length} job${rows.length>1?"s":""} show ${sMoney(dollars)} of job borrow`,
-     cols:["Complete","Cost to finish","Left to bill","Job borrow"],
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(r[2]),
+    const allJobs=rows.map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(r[2]),
        cells:[pct0(P[r[1]]),sMoney(r[3]),sMoney(r[4]),sMoney(r[2])],
-       detail:`${sMoney(r[3])} to finish, ${sMoney(r[4])} left to bill, ${sMoney(r[2])} pulled forward`})),
+       detail:`${sMoney(r[3])} to finish, ${sMoney(r[4])} left to bill, ${sMoney(r[2])} pulled forward`}));
+    out.push({id:"job_borrow",count:rows.length,severity:rows[0][0],dollars,
+     headline:`${rows.length} job${rows.length===1?" shows":"s show"} ${sMoney(dollars)} of possible job borrow`,
+     cols:["Complete","Cost to finish","Left to bill","Job borrow"],allJobs,
+     jobs:allJobs.slice(0,5),
      why:"Billings exceed cost incurred plus the job's total projected profit. The excess is not free cash reserve; it has been pulled forward from the remaining work."});}}
   {const rows=[];for(let i=0;i<n;i++)if(m[i]<0){const sev=clamp01(-m[i]/T.loss_margin_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(C[r[1]]-V[r[1]]),0);
+    const allJobs=rows.map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(C[r[1]]-V[r[1]]),cells:[pct1(m[r[1]]),sMoney(C[r[1]]-V[r[1]])],detail:`estimated margin ${pct1(m[r[1]])}`}));
     out.push({id:"loss_jobs",count:rows.length,severity:rows[0][0],dollars,
      headline:`${rows.length} job${rows.length>1?"s":""} estimated to lose ${sMoney(dollars)}`,
-     cols:["Est. margin","Expected loss"],
-     jobs:rows.slice(0,5).map(r=>({label:lab(r[1]),row:r[1],dollars:Math.round(C[r[1]]-V[r[1]]),cells:[pct1(m[r[1]]),sMoney(C[r[1]]-V[r[1]])],detail:`estimated margin ${pct1(m[r[1]])}`})),
+     cols:["Est. margin","Expected loss"],allJobs,
+     jobs:allJobs.slice(0,5),
      why:"GAAP requires the full expected loss to be recognized immediately, not as the work progresses. A loss job on the schedule is a direct hit to the indemnitor's net worth."});}}
   {const rows=[];for(let i=0;i<n;i++)if(D[i]>C[i]){const sev=clamp01(((D[i]-C[i])/Math.max(C[i],1))/T.overrun_full);if(sev>T.min_signal_severity)rows.push([sev,i]);}
    if(rows.length){rows.sort((a,b)=>b[0]-a[0]);const dollars=rows.reduce((s,r)=>s+(D[r[1]]-C[r[1]]),0);
@@ -2506,14 +2544,117 @@ function computeSignals(rep){
   return out;
 }
 /*SIGEND*/
+const TRAJECTORY_FLAGS=[
+  {id:"trapped_cash",label:"Late under billings",ink:"var(--brick)"},
+  {id:"job_borrow",label:"Job borrow",ink:"var(--amber)"},
+  {id:"loss_jobs",label:"Jobs losing money",ink:"#B95445"},
+  {id:"profit_fade",label:"Profit fade",ink:"#C96A54"}
+];
+function reportRowForGroup(rep,groupId){
+  return (rep?._consolidatedRows||[]).findIndex(r=>r.group?.id===groupId);
+}
+function openGroupInValidatedWip(rep,groupId){
+  let target=rep,row=reportRowForGroup(target,groupId);
+  if(row<0&&MATCH_STATE){
+    const group=MATCH_STATE.groups.find(g=>g.id===groupId);
+    const periods=[...new Set((group?.observations||[]).map(o=>o.period))].sort().reverse();
+    for(const period of periods){
+      const candidate=periodAnalysisReport(period),candidateRow=reportRowForGroup(candidate,groupId);
+      if(candidateRow>=0){target=candidate;row=candidateRow;break;}
+    }
+  }
+  if(row>=0)openWipModal(target,row);
+}
+function trajectoryMembership(rep){
+  const membership=new Map(TRAJECTORY_FLAGS.map(f=>[f.id,new Set()]));
+  for(const signal of computeSignals(rep)){
+    if(!membership.has(signal.id))continue;
+    for(const job of (signal.allJobs||signal.jobs||[])){
+      const group=rep?._consolidatedRows?.[job.row]?.group;
+      if(group)membership.get(signal.id).add(group.id);
+    }
+  }
+  const trend=timeSeriesData();
+  for(const row of (trend?.rows||[]))if(row.materialFade&&row.groupId)
+    membership.get("profit_fade").add(row.groupId);
+  return membership;
+}
+function billingTrajectoryChart(rep){
+  if(!BATCH_ANALYSIS_MODE||!MATCH_STATE)return"";
+  const membership=trajectoryMembership(rep);
+  const available=TRAJECTORY_FLAGS.filter(f=>membership.get(f.id).size);
+  if(!available.length)return"";
+  let active=new Set([...BILLING_TRAJECTORY_FILTERS].filter(id=>membership.get(id)?.size));
+  if(!active.size){active=new Set([available[0].id]);BILLING_TRAJECTORY_FILTERS=new Set(active);}
+  const selectedIds=new Set();
+  for(const id of active)for(const groupId of membership.get(id)||[])selectedIds.add(groupId);
+  const priority=["loss_jobs","trapped_cash","profit_fade","job_borrow"];
+  const primaryFlag=groupId=>priority.find(id=>active.has(id)&&membership.get(id)?.has(groupId))||"trapped_cash";
+  const flagDef=id=>TRAJECTORY_FLAGS.find(f=>f.id===id)||TRAJECTORY_FLAGS[0];
+  const XMIN=.15,YMAX=.06,W=960,H=300,L=55,R=18,T=24,B=40;
+  const x=p=>L+(W-L-R)*(Math.max(XMIN,Math.min(1,p))-XMIN)/(1-XMIN);
+  const y=v=>T+(H-T-B)*(1-(Math.max(-YMAX,Math.min(YMAX,v))+YMAX)/(2*YMAX));
+  const trajectories=[];
+  for(const groupId of selectedIds){
+    const group=MATCH_STATE.groups.find(g=>g.id===groupId);if(!group)continue;
+    const points=groupPeriodSnapshots(group).map(snapshot=>{
+      const v=snapshot.vars||{},p=v.P??(v.C? v.D/v.C:null),contract=v.V;
+      const net=v.N??(v.B!=null&&v.E!=null?v.B-v.E:null);
+      return{p,position:contract&&net!=null?net/contract:null,period:snapshot.period,
+        name:snapshot.name||snapshot.id||"Job",id:snapshot.id||""};
+    }).filter(point=>Number.isFinite(point.p)&&Number.isFinite(point.position)&&point.p>=XMIN&&point.p<=1.000001)
+      .sort((a,b)=>a.period.localeCompare(b.period));
+    if(points.length)trajectories.push({groupId,points,flag:primaryFlag(groupId)});
+  }
+  const corridor=[
+    [.15,.035,.002],[.25,.040,.004],[.40,.035,.001],[.60,.023,-.004],[.80,.012,-.004],[1,0,0]
+  ];
+  const corridorPath=[...corridor.map(d=>`${x(d[0]).toFixed(1)},${y(d[1]).toFixed(1)}`),
+    ...[...corridor].reverse().map(d=>`${x(d[0]).toFixed(1)},${y(d[2]).toFixed(1)}`)].join(" ");
+  const yTicks=[-.06,-.04,-.02,0,.02,.04,.06].map(v=>`<g><line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="var(--line-soft)"/><text x="${L-8}" y="${y(v)+3}" text-anchor="end" font-size="10" fill="var(--muted)">${v>0?"+":""}${Math.round(v*100)}%</text></g>`).join("");
+  const xTicks=[.15,.25,.50,.75,1].map(v=>`<g><line x1="${x(v)}" y1="${H-B}" x2="${x(v)}" y2="${H-B+4}" stroke="var(--line)"/><text x="${x(v)}" y="${H-15}" text-anchor="middle" font-size="10" fill="var(--muted)">${Math.round(v*100)}%</text></g>`).join("");
+  const lines=trajectories.map(({groupId,points,flag})=>{
+    const def=flagDef(flag),coords=points.map(p=>`${x(p.p).toFixed(1)},${y(p.position).toFixed(1)}`).join(" ");
+    const label=points[points.length-1]?.name||"Job";
+    const title=`${label}: ${points.length} statement${points.length===1?"":"s"}; latest ${Math.round(points.at(-1).p*100)}% complete, ${(points.at(-1).position*100).toFixed(1)}% billing position`;
+    const segment=points.length>1?`<polyline class="trajectory-hit" data-group="${htmlEsc(groupId)}" points="${coords}"><title>${htmlEsc(title)}</title></polyline><polyline class="trajectory-line" points="${coords}" stroke="${def.ink}"/>`:"";
+    const dots=points.map(point=>{
+      const clipped=Math.abs(point.position)>YMAX,cy=y(point.position),symbol=point.position>YMAX?"↑":point.position<-YMAX?"↓":"";
+      return`<g data-group="${htmlEsc(groupId)}" style="cursor:pointer"><circle class="trajectory-point" cx="${x(point.p).toFixed(1)}" cy="${cy.toFixed(1)}" r="4.6" fill="${def.ink}"><title>${htmlEsc(label)} · ${displayPeriod(point.period)} · ${(point.p*100).toFixed(0)}% complete · ${(point.position*100).toFixed(1)}% of contract${clipped?" (clipped to chart edge)":""}</title></circle>${clipped?`<text class="trajectory-clip" x="${x(point.p).toFixed(1)}" y="${(cy+(point.position>0?13:-8)).toFixed(1)}" text-anchor="middle" fill="${def.ink}">${symbol}</text>`:""}</g>`;
+    }).join("");
+    return segment+dots;
+  }).join("");
+  const controls=TRAJECTORY_FLAGS.map(f=>{
+    const count=membership.get(f.id).size,on=active.has(f.id);
+    return`<button class="trajectory-toggle${on?" on":""}" data-filter="${f.id}" ${count?"":"disabled"} aria-pressed="${on}">${f.label}<span class="count">${count}</span></button>`;
+  }).join("");
+  const density=trajectories.length>12?` Dense view — all ${trajectories.length} matching jobs are shown; turn off a signal to separate the lines.`:` All ${trajectories.length} matching job${trajectories.length===1?" is":"s are"} shown; there is no top-job cutoff.`;
+  return`<div class="card trajectory-card" id="billingTrajectory"><div class="trajectory-head"><h3>Flagged job billing trajectories
+      <small>Statement-to-statement billing position; click any line or dot to view the validated WIP row</small></h3><div class="trajectory-controls">${controls}</div></div>
+    ${trajectories.length?`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:10px" role="img" aria-label="Billing position trajectories for flagged jobs"><polygon points="${corridorPath}" fill="#43653A" opacity=".17"/><text x="${x(.17)}" y="${y(.033)-5}" font-size="10" fill="var(--sage-deep)">healthy job reference</text>${yTicks}<line x1="${L}" y1="${y(0)}" x2="${W-R}" y2="${y(0)}" stroke="var(--line)" stroke-width="1.2"/>${xTicks}${lines}<text x="${(L+W-R)/2}" y="${H-2}" text-anchor="middle" font-size="10" fill="var(--muted)">% complete (shown from 15% — early positions are unstable)</text><text transform="translate(13 ${(T+H-B)/2}) rotate(-90)" text-anchor="middle" font-size="10" fill="var(--muted)">billing position (% of contract)</text></svg>`:`<div class="trajectory-empty">No linked job histories match the selected signals.</div>`}
+    <p class="trajectory-note">The green band is a visual healthy-job reference, not a pass/fail boundary. Values outside ±6% are pinned to the chart edge.${density}</p></div>`;
+}
+function wireBillingTrajectory(rep){
+  const root=$("#billingTrajectory");if(!root)return;
+  root.querySelectorAll(".trajectory-toggle").forEach(button=>button.onclick=()=>{
+    const id=button.dataset.filter;
+    if(BILLING_TRAJECTORY_FILTERS.has(id))BILLING_TRAJECTORY_FILTERS.delete(id);
+    else BILLING_TRAJECTORY_FILTERS.add(id);
+    root.outerHTML=billingTrajectoryChart(rep);wireBillingTrajectory(rep);
+  });
+  root.querySelectorAll("[data-group]").forEach(node=>node.onclick=e=>{
+    e.stopPropagation();openGroupInValidatedWip(rep,node.dataset.group);
+  });
+}
 function bookShape(rep){
-  const jobs=currentJobs(rep).filter(j=>j.net!=null&&j.V>0)
-    .map(j=>j.P>=.995?{...j,net:0,U:0,O:0}:j);
+  const XMIN=.15,ymax=.08;
+  const jobs=currentJobs(rep).map((j,row)=>({...j,_row:row}))
+    .filter(j=>j.net!=null&&j.V>0&&j.P>=XMIN)
+    .map(j=>j.P>=1-1e-6?{...j,net:0,U:0,O:0}:j);
   if(jobs.length<4)return"";
   const T={...SIG_T,...((rep.analysis||{}).tuning||{})};
   const W=960,H=210,L=46,R=14,Tm=18,Bm=34;
-  const ymax=Math.min(.28,Math.max(.06,...jobs.map(j=>Math.abs(j.net/j.V))))*1.15;
-  const x=p=>L+(W-L-R)*Math.min(Math.max(p,0),1.02), y=v=>{v=Math.max(-ymax,Math.min(ymax,v));return Tm+(H-Tm-Bm)*(1-(v+ymax)/(2*ymax))};
+  const x=p=>L+(W-L-R)*(Math.min(Math.max(p,XMIN),1)-XMIN)/(1-XMIN), y=v=>{v=Math.max(-ymax,Math.min(ymax,v));return Tm+(H-Tm-Bm)*(1-(v+ymax)/(2*ymax))};
   /* dot color comes from the SAME severity math as the flag list, so the
      chart and the signals can never disagree about what is a problem */
   const sevOf=j=>{
@@ -2539,7 +2680,8 @@ function bookShape(rep){
     const col=sev?(sev.side==="under"?"var(--brick)":"var(--amber)"):"var(--sage)";
     const op=sev?(.45+.35*sev.s).toFixed(2):".45";
     const position=j.net===0?"balanced":`${j.net<0?"under":"over"}billed $${fmt$(Math.abs(j.net))} (${(100*f).toFixed(1)}% of contract)`;
-    return `<circle cx="${x(j.P).toFixed(1)}" cy="${y(f).toFixed(1)}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="${op}" stroke="${col}"><title>${j.label}: ${(100*j.P).toFixed(0)}% complete, ${position}${sev?` — flagged, severity ${(100*sev.s).toFixed(0)}%`:""}</title></circle>`;
+    const clipped=Math.abs(f)>ymax;
+    return `<circle data-row="${j._row}" tabindex="0" role="button" cx="${x(j.P).toFixed(1)}" cy="${y(f).toFixed(1)}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="${op}" stroke="${col}" stroke-width="${clipped?2:1}"><title>${j.label}: ${(100*j.P).toFixed(0)}% complete, ${position}${sev?` — flagged, severity ${(100*sev.s).toFixed(0)}%`:""}${clipped?" — pinned to chart edge":""}. Click to view in the validated WIP.</title></circle>`;
   }).join("");
   /* the underbilling flag boundary U/(V-E)=floor is the straight line
      net/V = -floor*(1-P) in these axes -- exact when E is cost-to-cost */
@@ -2551,7 +2693,7 @@ function bookShape(rep){
     guide=`<line x1="${x(pStart).toFixed(1)}" y1="${y(-r0*(1-pStart)).toFixed(1)}" x2="${x(1).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--brick)" stroke-width="1" stroke-dasharray="4 4" opacity=".5"/>
     <text x="${x(1)-4}" y="${y(-r0*(1-.97))+13}" text-anchor="end" font-size="9" fill="var(--brick)" opacity=".75">underbilling flag boundary</text>`;
   }
-  const ticks=[0,.25,.5,.75,1].map(p=>`<text x="${x(p)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--muted)">${100*p}%</text>`).join("");
+  const ticks=[.15,.25,.5,.75,1].map(p=>`<text x="${x(p)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--muted)">${100*p}%</text>`).join("");
   return `<div class="card" id="bookshape" style="margin-bottom:18px">
     <h3>Billing position by completion <small>Each dot is a job, sized by contract value</small></h3>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:8px" role="img" aria-label="Scatter of billing position against completion for each job">
@@ -2560,7 +2702,7 @@ function bookShape(rep){
       <text x="${L}" y="${H-Bm-4}" font-size="10" fill="var(--muted)">underbilled</text>
       ${guide}${ticks}${dots}
     </svg>
-    <p style="font-size:12px;color:var(--muted);margin:6px 0 0">A healthy book sits slightly above the line early and converges to it near completion. Colored dots are flagged by the same rules as the signals above: red when unbilled earned revenue is large against what's left to bill${cc?" (the dashed boundary)":""}, gold when overbilling is large against the cost left to finish.</p>
+    <p style="font-size:12px;color:var(--muted);margin:6px 0 0">Shown from 15% complete; earlier positions are omitted because small denominators make them unstable. Values outside ±8% are pinned to the chart edge. Click any bubble to view that job in the validated WIP. Colored dots use the same flag rules as the signals above: red for material late underbilling${cc?" (the dashed boundary)":""}, gold when overbilling is large against the cost left to finish.</p>
   </div>`;
 }
 
@@ -2619,7 +2761,7 @@ function signalRowFlags(rep){
   const map={};
   for(const s of computeSignals(rep)){
     const mk=SIG_MARK[s.id];if(!mk)continue;
-    for(const j of (s.jobs||[])){
+    for(const j of (s.allJobs||s.jobs||[])){
       if(j.row==null)continue;
       (map[j.row]=map[j.row]||[]).push({id:s.id,...mk});
     }
@@ -2641,7 +2783,7 @@ function openWipModal(rep,focusRow){
   m.onclick=e=>{if(e.target===m)close()};
   m.querySelector("#wmClose").onclick=close;
   if(focusRow!=null){const el=m.querySelector("#wmrow-"+focusRow);
-    if(el){el.scrollIntoView({block:"center"});el.classList.add("selrow","pulse");}}
+    if(el){el.scrollIntoView({block:"center"});el.classList.add("selrow");}}
 }
 
 function sourceFinding(rep,c){
@@ -2767,7 +2909,7 @@ function printSignalTitle(s){
   const jobs=`${n} job${n===1?"":"s"}`;
   const titles={
     trapped_cash:"Significant under billings with limited time to recover",
-    job_borrow:`${jobs} with job borrow`,
+    job_borrow:`${jobs} with possible job borrow`,
     loss_jobs:`${jobs} losing money`,
     cost_overrun:`${jobs} over estimated cost`,
     early_concentration:"Significant contract value remains in early-stage work",
