@@ -1069,58 +1069,164 @@ function addLine(m){
   LATEST_PROGRESS=txt;
 }
 
-function totalsDetail(rep){
-  const tc=rep.totals_check;
-  if(!tc)return rep._doc_totals_detail||null;
-  const map=(rep.parse&&rep.parse.numeric_col_map)||[];
-  const after=(rep.analysis&&rep.analysis.totals_after_corrections)||{};
-  const out=[];
-  const nRows=tableJobCount(rep.table)||0;
-  for(const[j,c]of Object.entries(tc.columns||{})){
-    const resolved=after[j]||after[+j]||null;
-    if(c.matches&&(!resolved||resolved.matches_after_corrections))continue;
-    /* Penny truncation and float error accumulate across rows; a stated total
-       within a few dollars of the column sum is agreement, not a finding. */
-    const residual=resolved&&Number.isFinite(+resolved.difference_after_corrections)
-      ?Math.abs(+resolved.difference_after_corrections):null;
-    const liveDiff=residual!=null?+resolved.difference_after_corrections:c.difference;
-    const negligible=Number.isFinite(liveDiff)&&Math.abs(liveDiff)<=Math.max(2,.02*nRows,1e-6*Math.abs(c.stated||0));
-    if(negligible)continue;
-    const mcol=map.indexOf(+j);
-    const header=(rep.table&&rep.table.columns[mcol]&&rep.table.columns[mcol].header)||("column "+j);
-    /* A column can carry several corrected cells; the stated total is explained
-       when the SUM of their correction deltas accounts for the difference.
-       The backend's after-corrections verdict is honored when positive, but a
-       false verdict from exact comparison is re-tested here with tolerance so
-       float strictness upstream cannot fail an explained column. */
-    const colFinds=(rep.findings||[]).filter(f=>f.culprit_column===mcol&&f.proposed_correction!=null);
-    const deltaSum=colFinds.reduce((sum,f)=>sum+(f.observed-f.proposed_correction),0);
-    const tol=Math.max(2,.02*nRows,.005*Math.abs(c.difference));
-    /* Decisive test, independent of where a repair was booked: does the stated
-       total agree with the validated schedule's column sum? Covers corrections
-       recovered through duplicate columns, cross-column identities, or OCR
-       repair, none of which leave a finding on this column. */
-    let agreesWithValidated=false;
-    const varCode=rep.table?.columns?.[mcol]?.variable;
-    if(varCode){
-      const vals=currentJobs(rep).map(job=>+job[varCode]).filter(Number.isFinite);
-      if(vals.length){
-        const validatedSum=vals.reduce((a,b)=>a+b,0);
-        const vTol=Math.max(2,.02*nRows,1e-6*Math.abs(c.stated||0));
-        agreesWithValidated=Math.min(Math.abs(validatedSum-c.stated),Math.abs(validatedSum+c.stated))<=vTol;
-      }
-    }
-    const explained=(resolved&&resolved.matches_after_corrections===true)
-      ||(residual!=null&&residual<=tol)
-      ||(colFinds.length>0&&Math.min(Math.abs(deltaSum-c.difference),Math.abs(deltaSum+c.difference))<=tol)
-      ||agreesWithValidated;
-    out.push({header,stated:c.stated,
-      computed:resolved?resolved.computed_after_corrections:c.computed,
-      diff:liveDiff,
-      explained,colFindings:(rep.findings||[]).filter(f=>f.culprit_column===mcol).length});
+const ADDITIVE_TOTAL_VARS=new Set(["V","C","G","D","Q","E","B","H","N","U","O","R","RB"]);
+const MAGNITUDE_TOTAL_VARS=new Set(["U","O"]);
+function backendTotals(rep){
+  const candidates=[rep?.totals,rep?.validation?.totals,rep?.validator?.totals,
+    rep?.analysis?.totals,rep?._validation?.totals];
+  return candidates.find(Array.isArray)||null;
+}
+function backendTotalsScope(rep){
+  return rep?.totals_scope||rep?.validation?.totals_scope||rep?.validator?.totals_scope
+    ||rep?.analysis?.totals_scope||rep?._validation?.totals_scope||null;
+}
+function totalCorrectionKey(item){return `total:${item.column}:${item.variable||""}`;}
+function totalDistance(a,b,variable){
+  if(!Number.isFinite(+a)||!Number.isFinite(+b))return Infinity;
+  return MAGNITUDE_TOTAL_VARS.has(variable)
+    ?Math.abs(Math.abs(+a)-Math.abs(+b)):Math.abs(+a-(+b));
+}
+function presentTotal(value,stated,variable){
+  if(!Number.isFinite(+value))return null;
+  const n=+value;
+  return MAGNITUDE_TOTAL_VARS.has(variable)&&+stated<0?-Math.abs(n):n;
+}
+function totalTolerance(stated,computed,nRows,provided=0){
+  return Math.max(Number.isFinite(+provided)?+provided:0,1,.01*Math.max(nRows||1,1),
+    1e-9*Math.max(Math.abs(+stated||0),Math.abs(+computed||0)));
+}
+function totalColumnMeta(rep,column,variable,legacyRawColumn=false){
+  const cols=rep?.table?.columns||[];
+  let displayIndex=-1;
+  if(variable)displayIndex=cols.findIndex(c=>c?.variable===variable);
+  if(displayIndex<0){
+    const map=rep?.parse?.numeric_col_map||rep?._table_numeric_col_map||[];
+    displayIndex=legacyRawColumn?map.indexOf(+column):+column;
   }
-  return{present:true,allMatch:out.length===0,mismatches:out,
-    allExplained:out.length>0&&out.every(m=>m.explained)};
+  const c=displayIndex>=0?cols[displayIndex]:null;
+  const sourceHeader=rep?._table_headers?.[+column];
+  return {displayIndex,column:c,variable:variable||c?.variable||null,
+    header:c?.header||c?.variable_name||sourceHeader||variableName(variable||c?.variable)||`column ${column}`};
+}
+function semanticJobTotal(rep,variable,accepted){
+  if(!variable)return null;
+  const jobs=currentJobs(rep,accepted);
+  if(!jobs.length)return null;
+  const vals=jobs.map(job=>+job[variable]);
+  if(vals.some(v=>!Number.isFinite(v)))return null;
+  return vals.reduce((sum,v)=>sum+(MAGNITUDE_TOTAL_VARS.has(variable)?Math.abs(v):v),0);
+}
+function acceptedJobCorrections(rep,variable,accepted){
+  return (rep?.analysis?.corrections||[]).map((c,i)=>({c,i}))
+    .filter(({c,i})=>c.variable===variable&&accepted?.has(i));
+}
+function totalsScopeNote(td){
+  if(!td)return"";
+  const assessed=td.assessedCount||0,ignored=td.ignoredCount||0;
+  if(!assessed&&!ignored)return"";
+  return `${assessed} mapped additive column${assessed===1?" was":"s were"} assessed${ignored?`; ${ignored} other numeric column${ignored===1?" was":"s were"} outside this totals check`:""}.`;
+}
+function totalsDetail(rep,accepted=ACCEPTED){
+  const nRows=tableJobCount(rep.table)||rep?.parse?.n_rows||0;
+  const payload=backendTotals(rep);
+  if(payload){
+    const rows=[];
+    for(const item of payload){
+      const variable=item.variable||null;
+      const meta=totalColumnMeta(rep,item.column,variable,false);
+      const stated=+item.stated_total;
+      const raw=+item.raw_row_sum;
+      const backendValidated=+item.validated_row_sum;
+      let computed=semanticJobTotal(rep,variable,accepted);
+      if(!Number.isFinite(computed))computed=backendValidated;
+      computed=presentTotal(computed,stated,variable);
+      const tol=totalTolerance(stated,computed,nRows,item.tolerance);
+      const rawAgrees=totalDistance(stated,raw,variable)<=tol;
+      const computedAgrees=totalDistance(stated,computed,variable)<=tol;
+      const appliedJobs=acceptedJobCorrections(rep,variable,accepted);
+      const key=totalCorrectionKey(item);
+      let status=item.status||"unassessed",explained=false,proposed=null;
+      if(status==="unassessed"||!Number.isFinite(stated)||!Number.isFinite(computed)){
+        status="unassessed";
+      }else if(computedAgrees){
+        status=appliedJobs.length||item.status==="pass_after_corrections"
+          ?"pass_after_corrections":"pass";
+        explained=true;
+      }else if(rawAgrees&&appliedJobs.length){
+        status="conflicts_with_job_corrections";
+      }else{
+        status="total_row_error";
+        proposed=presentTotal(computed,stated,variable);
+        if(accepted?.has(key)){status="total_row_corrected";explained=true;}
+      }
+      rows.push({header:meta.header,column:item.column,variable,stated,raw,
+        computed,diff:stated-computed,status,explained,proposedCorrection:proposed,
+        correctionKey:key,reason:item.reason||"",colFindings:(rep.findings||[])
+          .filter(f=>f.culprit_variable===variable||f.culprit_column===item.column).length});
+    }
+    const nonPass=rows.filter(r=>r.status!=="pass");
+    const totalCorrections=rows.filter(r=>r.proposedCorrection!=null)
+      .map(r=>({...r,accepted:accepted?.has(r.correctionKey)}));
+    const scope=backendTotalsScope(rep)||{};
+    const numeric=rep?.parse?.n_numeric_cols??rep?.analysis?.coverage?.numeric_cols;
+    const assessed=rows.length;
+    const ignored=Number.isFinite(+numeric)?Math.max(0,+numeric-assessed)
+      :Array.isArray(scope.unmapped_numeric_columns)?scope.unmapped_numeric_columns.length:0;
+    return {present:rows.length>0,allMatch:nonPass.length===0,mismatches:nonPass,
+      allExplained:nonPass.length>0&&nonPass.every(r=>r.explained),
+      totalCorrections,assessedCount:assessed,ignoredCount:ignored,scope};
+  }
+
+  /* Legacy report path. The table-level totals check may cover every extracted
+     numeric column, but only columns mapped to additive WIP variables belong in
+     this validation. Period/supplemental columns remain intentionally ignored. */
+  const tc=rep.totals_check||rep._table_totals_check;
+  if(!tc)return rep._doc_totals_detail||null;
+  const after=rep.analysis?.totals_after_corrections||{};
+  const rows=[];
+  for(const[j,c]of Object.entries(tc.columns||{})){
+    const meta=totalColumnMeta(rep,j,null,true);
+    const variable=meta.variable;
+    if(meta.displayIndex<0||!ADDITIVE_TOTAL_VARS.has(variable))continue;
+    const resolved=after[j]||after[+j]||null;
+    const stated=+c.stated,raw=+c.computed;
+    let computed=semanticJobTotal(rep,variable,accepted);
+    if(!Number.isFinite(computed)&&resolved&&Number.isFinite(+resolved.computed_after_corrections))
+      computed=+resolved.computed_after_corrections;
+    if(!Number.isFinite(computed))computed=raw;
+    computed=presentTotal(computed,stated,variable);
+    const tol=totalTolerance(stated,computed,nRows,
+      Math.max(2,.02*nRows,1e-6*Math.abs(stated||0)));
+    const rawAgrees=totalDistance(stated,raw,variable)<=tol;
+    const computedAgrees=totalDistance(stated,computed,variable)<=tol;
+    const appliedJobs=acceptedJobCorrections(rep,variable,accepted);
+    const base={column:meta.displayIndex,variable};
+    const key=totalCorrectionKey(base);
+    let status="pass",explained=true,proposed=null;
+    if(computedAgrees){status=appliedJobs.length&&!rawAgrees?"pass_after_corrections":"pass";}
+    else if(rawAgrees&&appliedJobs.length){status="conflicts_with_job_corrections";explained=false;}
+    else{
+      status="total_row_error";explained=false;proposed=presentTotal(computed,stated,variable);
+      if(accepted?.has(key)){status="total_row_corrected";explained=true;}
+    }
+    rows.push({header:meta.header,column:meta.displayIndex,variable,stated,raw,
+      computed,diff:stated-computed,status,explained,proposedCorrection:proposed,
+      correctionKey:key,colFindings:(rep.findings||[])
+        .filter(f=>f.culprit_column===meta.displayIndex).length});
+  }
+  const nonPass=rows.filter(r=>r.status!=="pass");
+  const totalCorrections=rows.filter(r=>r.proposedCorrection!=null)
+    .map(r=>({...r,accepted:accepted?.has(r.correctionKey)}));
+  const numeric=rep?.parse?.n_numeric_cols??rep?.analysis?.coverage?.numeric_cols;
+  return {present:rows.length>0,allMatch:nonPass.length===0,mismatches:nonPass,
+    allExplained:nonPass.length>0&&nonPass.every(r=>r.explained),totalCorrections,
+    assessedCount:rows.length,ignoredCount:Number.isFinite(+numeric)?Math.max(0,+numeric-rows.length):0};
+}
+function defaultAcceptedCorrections(rep){
+  const accepted=new Set((rep?.analysis?.corrections||[]).map((_,i)=>i));
+  const td=totalsDetail(rep,accepted);
+  (td?.totalCorrections||[]).forEach(t=>accepted.add(t.correctionKey));
+  return accepted;
 }
 let REPORT=null;          /* the ACTIVE section's v2-shaped report */
 let ACCEPTED=new Set();   /* suggested corrections currently included */
@@ -1225,43 +1331,33 @@ function batchDocSummary(doc){
   return `${jobs} job${jobs===1?"":"s"} across ${schedules} table${schedules===1?"":"s"}`;
 }
 function batchValidation(item){
-  const sections=documentSections(item.doc),reps=sections.map(s=>s.rep);
-  const findings=reps.reduce((n,r)=>n+(r.findings||[]).length,0);
-  const corrections=reps.reduce((n,r)=>n+(r.analysis?.corrections||[]).length,0);
-  let applied=0,supported=0;
-  sections.forEach((section,si)=>{
-    const corrs=section.rep.analysis?.corrections||[];
-    const selected=item.reviewState?.states?.[si]||new Set(corrs.map((_,ci)=>ci));
-    corrs.forEach((correction,ci)=>{
-      if(selected.has(ci))applied++;
-      if(correction.confidence==="high"&&(correction.checks||0)>=1)supported++;
-    });
-  });
-  const totalsProblems=reps.reduce((n,r)=>{
-    const td=totalsDetail(r);
-    return n+(td&&td.present&&!td.allMatch&&!td.allExplained?1:0);
-  },0);
-  const structuralErrors=reps.reduce((n,r)=>
-    n+(r._extra||[]).filter(x=>x.st==="bad").length,0);
-  const errors=findings+totalsProblems+structuralErrors;
-  const incomplete=reps.some(r=>["unmapped","llm_mapped_unverified"].includes(r.overall_status));
+  const sections=documentSections(item.doc);
+  const incomplete=sections.some(section=>["unmapped","llm_mapped_unverified"].includes(section.rep.overall_status));
   if(incomplete)return{kind:"review",icon:"!",text:"Validation needs review"};
-  let checksPassed=0,checksTotal=0;
+  let checksPassed=0,checksTotal=0,nBad=0,nFixed=0,jobFixes=0,totalFixes=0;
   sections.forEach((section,si)=>{
-    const corrs=section.rep.analysis?.corrections||[];
-    const selected=item.reviewState?.states?.[si]||new Set(corrs.map((_,ci)=>ci));
-    const counts=computeValidationChecks(section.rep,selected);
+    const rep=section.rep||{};
+    const corrs=rep.analysis?.corrections||[];
+    const selected=item.reviewState?.states?.[si]||defaultAcceptedCorrections(rep);
+    const counts=computeValidationChecks(rep,selected);
     checksPassed+=counts.passed;checksTotal+=counts.checks.length;
+    nBad+=counts.nBad;nFixed+=counts.nFixed;
+    jobFixes+=(rep.findings||[]).filter(f=>{
+      const ci=corrs.findIndex(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
+      return ci>=0&&selected.has(ci);
+    }).length;
+    totalFixes+=(counts.td?.totalCorrections||[]).filter(t=>selected.has(t.correctionKey)).length;
   });
   const tally=checksTotal?` · ${checksPassed}/${checksTotal} checks passed`:"";
-  if(!errors)return{kind:"ok",icon:"✓",text:"All checks passed"+(checksTotal&&checksPassed<checksTotal?tally:"")};
-  const fullyCorrected=!structuralErrors&&findings>0&&corrections===findings
-    &&applied===corrections&&supported===corrections;
-  if(fullyCorrected)return{kind:"corrected",icon:"✓",
-    text:"Validated after corrections"+tally,
-    note:`${findings} transcription error${findings===1?"":"s"} caught and corrected`
-      +(totalsProblems?" · printed total discrepancy isolated":"")};
-  return{kind:"review",icon:"!",text:`${errors} error${errors===1?"":"s"} need review`+tally};
+  if(nBad)return{kind:"review",icon:"!",text:`${nBad} check${nBad===1?"":"s"} need review`+tally};
+  if(nFixed){
+    const parts=[];
+    if(jobFixes)parts.push(`${jobFixes} cell correction${jobFixes===1?"":"s"}`);
+    if(totalFixes)parts.push(`${totalFixes} stated-total correction${totalFixes===1?"":"s"}`);
+    return{kind:"corrected",icon:"✓",text:"Validated after corrections"+tally,
+      note:parts.length?parts.join(" · "):"Corrections applied"};
+  }
+  return{kind:"ok",icon:"✓",text:"All checks passed"+tally};
 }
 async function scanBatch(files){
   resetBatch();clearSourceFile();BATCH_MODE=true;
@@ -2173,7 +2269,13 @@ function adaptV3(doc){
     }
     for(const [sectionIndex,sec] of (t.sections||[]).entries()){
       const rep=sec.report||{};
+      const rawValidation=sec.validation||sec.validator||rep.validation||null;
+      if(!rep.totals&&Array.isArray(rawValidation?.totals))rep.totals=rawValidation.totals;
+      if(!rep.totals_scope&&rawValidation?.totals_scope)rep.totals_scope=rawValidation.totals_scope;
       rep.metrics=doc.metrics||rep.metrics;
+      rep._table_totals_check=tc||null;
+      rep._table_numeric_col_map=t.numeric_col_map||[];
+      rep._table_headers=t.headers||[];
       rep._doc_totals_detail=dtd;
       rep._extra=[];
       for(const mf of (t.misalignment_findings||[])){
@@ -2237,9 +2339,10 @@ function renderSecnav(){
   if(VIEW!=="certificate"||SECTIONS.length<2){nav.classList.add("hidden");return;}
   nav.classList.add("secnav");nav.classList.remove("hidden");
   nav.innerHTML='<span class="secnav-title">Validation pages</span>'+SECTIONS.map((sc,i)=>{
-    const l=secLabel(sc),n=(sc.rep?.findings||[]).length,review=n>0;
+    const l=secLabel(sc),state=SECSTATE[i]||defaultAcceptedCorrections(sc.rep||{});
+    const counts=computeValidationChecks(sc.rep||{},state),review=counts.nBad>0||counts.nFixed>0;
     return `<button class="${i===ACTIVE?"on ":""}${review?"review":"clean"}" data-sec="${i}">
-      <span class="sec-dot">${review?"!":"✓"}</span><span class="sec-copy">
+      <span class="sec-dot">${counts.nBad?"!":"✓"}</span><span class="sec-copy">
       <span class="sec-name">${l.name}</span><span class="sec-meta">${l.meta}</span></span></button>`;
   }).join("");
   nav.querySelectorAll("button").forEach(b=>b.onclick=()=>selectSection(+b.dataset.sec));
@@ -2346,7 +2449,7 @@ function render(doc,restore=null){
     $("#errmsg").textContent="No tables were found in that document.";
     show("err");return;
   }
-  const defaults=SECTIONS.map(sc=>new Set((((sc.rep||{}).analysis||{}).corrections||[]).map((_,i)=>i)));
+  const defaults=SECTIONS.map(sc=>defaultAcceptedCorrections(sc.rep||{}));
   SECSTATE=restore?.states?.length===SECTIONS.length
     ?restore.states.map(s=>new Set(s)):defaults;
   ACTIVE=Math.max(0,Math.min(restore?.active||0,SECTIONS.length-1));
@@ -2375,7 +2478,7 @@ function computeValidationChecks(rep,accepted){
   const findings=rep.findings||[];
   const witnesses=rep.witnesses||[];
   const pr=rep.parse||{};
-  const td=totalsDetail(rep);
+  const td=totalsDetail(rep,accepted);
   const repairs=(pr.cell_flags||[]).filter(f=>f.flag==="confusable_repair").length;
   const nrows=tableJobCount(rep.table)||pr.n_rows||0;
   const checks=[];
@@ -2412,17 +2515,24 @@ function computeValidationChecks(rep,accepted){
         :"");
   }
   if(td&&td.present){
-    if(td.allMatch)C("ok","Stated totals match the column sums","");
-    else if(td.allExplained)C("fixed","Stated totals match once the exception is corrected",
-      "The document's own totals row agrees with the implied value, not the printed one.");
-    else{
+    const scopeNote=totalsScopeNote(td);
+    const totalFixed=(td.totalCorrections||[]).filter(t=>t.accepted);
+    if(td.allMatch)C("ok","Stated totals match the validated column sums",scopeNote);
+    else if(td.allExplained){
+      const detail=totalFixed.map(t=>`${t.header}: ${fmtM(t.stated)} → ${fmtM(t.proposedCorrection)}`).join("; ");
+      C("fixed",totalFixed.length
+          ?`${totalFixed.length} stated total${totalFixed.length===1?" was":"s were"} incorrect — corrected`
+          :"Stated totals match after the job corrections",
+        `${scopeNote}${scopeNote&&detail?" ":""}${detail||"The stated totals agree with the independently validated job values."}`);
+    }else{
       const unexplained=(td.mismatches||[]).filter(m=>!m.explained);
-      const totalsRowOnly=unexplained.length>0&&unexplained.every(m=>!m.colFindings);
-      const colDetail=unexplained.map(m=>`${m.header}: stated ${fmtM(m.stated)} vs ${fmtM(m.computed)} (\u0394 ${fmtM(m.diff)})`).join("; ");
-      C("bad","Stated totals disagree with the column sums"+(td.docLevel?" (document grand totals)":""),
-        (totalsRowOnly
-          ?`The row values in ${unexplained.length===1?"the affected column":"the affected columns"} validate independently; the discrepancy sits in the document's stated totals row itself. `
-          :findings.length?"Corrections automatically applied below. ":"Review the stated totals against the extracted rows. ")+colDetail);
+      const colDetail=unexplained.map(m=>`${m.header}: stated ${fmtM(m.stated)} vs validated rows ${fmtM(m.computed)} (Δ ${fmtM(m.diff)})`).join("; ");
+      const conflicts=unexplained.some(m=>m.status==="conflicts_with_job_corrections");
+      const unresolved=unexplained.some(m=>m.status==="unassessed");
+      C("bad",unresolved?"One or more validated totals could not be assessed":
+          conflicts?"A stated total conflicts with the independently proven job corrections":
+          "Stated totals disagree with the validated column sums",
+        `${scopeNote}${scopeNote&&colDetail?" ":""}${colDetail}`);
     }
   }
 
@@ -2433,10 +2543,11 @@ function computeValidationChecks(rep,accepted){
   const head=nBad?`${passed} of ${checks.length} checks passed`
     :nFixed?`${checks.length} of ${checks.length} checks pass after corrections`
     :"All checks passed";
-  return{checks,nBad,nFixed,passed,head,findings,witnesses,corrsC};
+  return{checks,nBad,nFixed,passed,head,findings,witnesses,corrsC,td};
 }
 function renderCertificate(rep){
-  const{checks,nBad,head,findings,witnesses,corrsC}=computeValidationChecks(rep,ACCEPTED);
+  const{checks,nBad,head,findings,witnesses,corrsC,td}=computeValidationChecks(rep,ACCEPTED);
+  const totalCorrs=td?.totalCorrections||[];
   const SHOWN=6;
   const excRow=f=>{
     const col=(rep.table&&rep.table.columns[f.culprit_column]&&rep.table.columns[f.culprit_column].header)||"";
@@ -2467,15 +2578,25 @@ function renderCertificate(rep){
       <td class="cause-cell">${causeText(f.classification,f.observed,f.proposed_correction,f.classification_label)}</td>
       <td style="text-align:right">${use}</td></tr>${ev}`;
   };
-  const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Corrections are applied automatically. Check Revert to printed on any row to keep the document's value instead, then press Update figures.</p>
+  const totalExcRow=t=>{
+    const label=htmlEsc(t.header||variableName(t.variable)||"Stated total");
+    const use=`<input type="checkbox" class="totalbox" data-total-key="${htmlEsc(t.correctionKey)}" ${ACCEPTED.has(t.correctionKey)?"":"checked"} aria-label="revert to the printed total for ${label}">`;
+    return `<tr><td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name">TOTAL</span></div><small>${label}</small></td>
+      <td class="mny"><span class="bad">$${fmt$(t.stated)}</span></td>
+      <td class="mny">$${fmt$(t.proposedCorrection)}</td>
+      <td class="cause-cell">does not equal the sum of the independently validated jobs</td>
+      <td style="text-align:right">${use}</td></tr>`;
+  };
+  const hasCorrections=findings.length||totalCorrs.length;
+  const excHTML=hasCorrections?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Corrections are applied automatically. Check Revert to printed on any row to keep the document's value instead, then press Update figures.</p>
   <div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
       <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Correction</th><th style="text-align:right">Cause</th>
       <th style="text-align:right"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">Revert to printed <input type="checkbox" id="useAll"></label></th>
-    </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
+    </tr></thead><tbody>${findings.map(excRow).join("")}${totalCorrs.length&&findings.length?`<tr><td colspan="5" style="padding:12px 0 4px;color:var(--muted);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;border-bottom:0">Stated totals</td></tr>`:""}${totalCorrs.map(totalExcRow).join("")}</tbody></table>
   </div>
-  ${corrsC.length?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0">
-    <button class="btn" id="reviewSource">Review source</button>
+  ${(corrsC.length||totalCorrs.length)?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0">
+    ${corrsC.length?'<button class="btn" id="reviewSource">Review source</button>':""}
     <button class="btn" id="applySel">Update figures</button>
     <span id="applyStatus" style="font-size:12.5px;color:var(--muted)"></span>
   </div>`:""}`:"";
@@ -2516,24 +2637,30 @@ function renderCertificate(rep){
   /* Boxes now mean "revert to printed": checked = keep the document's value.
      ACCEPTED remains the set of applied corrections, so it is the complement
      of the checked boxes. */
+  const correctionKeys=()=>[...corrsC.map((_,i)=>i),...totalCorrs.map(t=>t.correctionKey)];
   const selection=()=>{
-    const reverted=new Set([...document.querySelectorAll(".certbox:checked")].map(b=>+b.dataset.ci));
-    return new Set(corrsC.map((_,i)=>i).filter(i=>!reverted.has(i)));
+    const revertedRows=new Set([...document.querySelectorAll(".certbox:checked")].map(b=>+b.dataset.ci));
+    const revertedTotals=new Set([...document.querySelectorAll(".totalbox:checked")].map(b=>b.dataset.totalKey));
+    const selected=new Set(corrsC.map((_,i)=>i).filter(i=>!revertedRows.has(i)));
+    totalCorrs.forEach(t=>{if(!revertedTotals.has(t.correctionKey))selected.add(t.correctionKey);});
+    return selected;
   };
-  const syncUA=()=>{if(ua)ua.checked=corrsC.length>0&&!document.querySelector(".certbox:not(:checked)")};
+  const syncUA=()=>{if(ua){const boxes=[...document.querySelectorAll(".certbox,.totalbox")];
+    ua.checked=boxes.length>0&&boxes.every(b=>b.checked);}};
   const syncStatus=()=>{if(!st)return;
-    const sel=selection();
-    const same=sel.size===ACCEPTED.size&&[...sel].every(i=>ACCEPTED.has(i));
-    st.textContent=same?`${ACCEPTED.size} of ${corrsC.length} correction${corrsC.length===1?"":"s"} applied`:"selection changed; update the figures when ready";
+    const sel=selection(),keys=correctionKeys();
+    const active=keys.filter(k=>sel.has(k)).length;
+    const same=keys.every(k=>sel.has(k)===ACCEPTED.has(k));
+    st.textContent=same?`${active} of ${keys.length} correction${keys.length===1?"":"s"} applied`:"selection changed; update the figures when ready";
     st.style.color=same?"var(--muted)":"var(--brick)";};
-  document.querySelectorAll(".certbox").forEach(b=>b.onchange=()=>{syncUA();syncStatus();});
-  if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox").forEach(b=>{b.checked=ua.checked;});syncStatus();};}
+  document.querySelectorAll(".certbox,.totalbox").forEach(b=>b.onchange=()=>{syncUA();syncStatus();});
+  if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox,.totalbox").forEach(b=>{b.checked=ua.checked;});syncStatus();};}
   if(ap)ap.onclick=()=>{
-    const applied=selection();const restored=corrsC.length-applied.size;
+    const applied=selection(),keys=correctionKeys();const restored=keys.filter(k=>!applied.has(k)).length;
     ACCEPTED=applied;
     renderCertificate(rep);
     const st2=$("#applyStatus");
-    if(st2){st2.textContent=`\u2713 ${applied.size} applied${restored?`; ${restored} kept as printed`:""}`;
+    if(st2){st2.textContent=`✓ ${keys.length-restored} applied${restored?`; ${restored} kept as printed`:""}`;
       st2.style.color="var(--sage-deep)";}
   };
   if(src)src.onclick=()=>openSourceReview(rep);
@@ -2611,7 +2738,7 @@ function renderDash(rep){
   $("#printAnalysis").onclick=()=>printSummary(rep);
 }
 
-function currentJobs(rep){
+function currentJobs(rep,accepted=ACCEPTED){
   const a=rep.analysis||{};
   const jobs=(a.jobs||[]).map(j=>({...j}));
   const corrs=a.corrections||[];
@@ -2619,8 +2746,8 @@ function currentJobs(rep){
   corrs.forEach((c,ci)=>{
     if(!c.variable)return;
     const j=jobs[c.row];if(!j)return;
-    j[c.variable]=ACCEPTED.has(ci)?c.implied:c.printed;
-    if(ACCEPTED.has(ci)&&(c.variable==="E"||c.variable==="B"))touched.add(c.row);
+    j[c.variable]=accepted.has(ci)?c.implied:c.printed;
+    if(accepted.has(ci)&&(c.variable==="E"||c.variable==="B"))touched.add(c.row);
   });
   jobs.forEach((j,r)=>{
     if(j.C>0)j.P=j.D/j.C;
