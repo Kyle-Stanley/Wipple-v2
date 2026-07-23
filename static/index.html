@@ -263,6 +263,8 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .cert .caught .num{color:var(--brick)}
 .cert .go{margin-top:30px}
 .chk{display:flex;gap:11px;text-align:left;padding:9px 0;border-top:1px solid var(--line-soft);font-size:13.5px}
+.checks-fold{margin-top:14px}
+.checks-fold>div{color:var(--ink)}
 .chk:first-of-type{border-top:none}
 .chk .ic{font-weight:600;flex:none;width:16px}
 .chk .cl{font-weight:500;margin:0}
@@ -344,9 +346,22 @@ tr.selrow>td:first-child{background:#E4E9E1!important}
 .trajectory-legend{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 0}
 .trajectory-legend-item{display:inline-flex;align-items:center;gap:6px;max-width:250px;border:1px solid var(--line-soft);border-radius:7px;background:var(--paper);color:var(--ink);padding:4px 8px;font:500 10.5px Inter;cursor:pointer}
 .trajectory-legend-item:hover,.trajectory-legend-item:focus-visible{border-color:var(--sage);background:#F5F3EC}
+.trajectory-legend-item.off{opacity:.45}
+.trajectory-legend-item.off .trajectory-legend-dot{background:transparent!important;box-shadow:inset 0 0 0 2px var(--muted)}
+.trajectory-legend-open{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:5px;font-size:11px;line-height:1;color:var(--sage-deep);flex:none}
+.trajectory-legend-open:hover{background:#E4E9E1}
 .trajectory-legend-dot{width:8px;height:8px;border-radius:999px;flex:none}
 .trajectory-legend-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trajectory-legend-item small{color:var(--muted);font-size:9.5px;white-space:nowrap}
+.ts-kpi-label{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:-12px 0 8px;display:flex;align-items:center;gap:10px}
+.ts-kpi-label::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+.trend-cards.top{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:26px}
+.ts-flag{display:inline-block;width:9px;height:9px;border-radius:999px;cursor:help}
+.ts-flag.brick{background:var(--brick)}
+.ts-flag.sage{background:var(--sage-deep)}
+.ts-flag.amber{background:var(--amber)}
+.ts-flag.mut{background:#B9B4A5}
+.time-series-section th.ts-flag-col,.time-series-section td.ts-flag-cell{text-align:center;padding-left:8px;padding-right:0}
 .trajectory-note{font-size:11.5px;color:var(--muted);margin:7px 0 0}
 .trajectory-empty{display:grid;place-items:center;min-height:170px;color:var(--muted);font-size:13px;text-align:center;padding:20px;border:1px dashed var(--line-soft);border-radius:9px;margin-top:12px}
 .trajectory-series{cursor:pointer;transition:opacity .12s ease}
@@ -396,14 +411,15 @@ tr.selrow>td:first-child{background:#E4E9E1!important}
 .jm-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
 .jm-title{font:500 21px/1.25 Fraunces,serif;letter-spacing:-.01em}
 .jm-sub{font-size:12px;color:var(--muted);margin-top:2px}
-.jm-chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px}
+.jm-chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 14px;align-items:center}
 .jm-chips:empty{margin:6px 0 10px}
-.jm-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px}
-.jm-kpi{background:var(--paper);border:1px solid var(--line-soft);border-radius:10px;padding:11px 14px}
-.jm-kpi .lab{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
-.jm-kpi .val{font:500 20px/1.25 Inter;margin-top:3px}
+.jm-chips .fade-badge,.jm-chips .cost-badge,.jm-chips .anomaly-badge,.jm-chips .jm-stalled-chip{margin:0;padding:3px 9px;font-size:10px;line-height:1.25;vertical-align:baseline}
+.jm-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.jm-kpi{background:var(--paper);border:1px solid var(--line-soft);border-radius:9px;padding:7px 12px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.jm-kpi .lab{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);flex:1 1 100%}
+.jm-kpi .val{font:500 16px/1.25 Inter}
 .jm-kpi .val.neg{color:var(--brick)}
-.jm-kpi .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.jm-kpi .sub{font-size:10.5px;color:var(--muted)}
 .jm-kpi .sub.neg{color:var(--brick)}
 .jm-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
 .jm-chart-head{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:21px;margin-bottom:2px}
@@ -1066,6 +1082,14 @@ let BATCH_ANALYSIS_MODE=false;
 let ANALYSIS_SCOPE="portfolio";
 let BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
 let BILLING_TRAJECTORY_SHOW_ALL=false;
+let BILLING_TRAJECTORY_HIDDEN=new Set();
+/* One healthy-billing band, shared by the portfolio trajectory chart and the
+   job analysis modal so the two can never disagree. Tune here only.
+   Each row: [% complete, top of band, bottom of band] as fraction of contract. */
+const HEALTHY_BILLING_CORRIDOR=[
+  [.15,.065,-.015],[.25,.07,-.012],[.40,.06,-.015],
+  [.60,.042,-.018],[.80,.024,-.012],[1,.004,-.003]
+];
 
 function tableValues(t){
   if(!t)return[];
@@ -1327,6 +1351,7 @@ function analysisSwitcherHTML(){
   if(!periods.length)return"";
   return`<nav class="analysis-switcher" aria-label="Analysis views"><span>Analysis view</span>
     <button class="btn analysis-portfolio-switch ${ANALYSIS_SCOPE==="portfolio"?"on":""}">Full portfolio</button>
+    <button class="btn analysis-jobs-open">Job analysis</button>
     ${periods.map(period=>`<button class="btn analysis-period-switch ${ANALYSIS_SCOPE===period?"on":""}" data-period="${period}">
       ${new Date(period+"T00:00:00Z").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:"UTC"})}</button>`).join("")}</nav>`;
 }
@@ -1981,12 +2006,12 @@ function timeSeriesData(){
     fade,fadeJobs:fading.length,stalls,anomalyJobs:anomalies.length,
     largestAnomaly:anomalies[0]||null};
 }
-function timeSeriesSectionHTML(rep){
+function timeSeriesKpiStripHTML(rep){
   const data=timeSeriesData();
   const jobBorrow=computeSignals(rep).find(s=>s.id==="job_borrow")||null;
   if(!data&&!jobBorrow)return"";
-  const{rows=[],totalCostIncrease=0,costIncreaseJobs=0,fade=0,fadeJobs=0,
-    stalls=0,anomalyJobs=0,largestAnomaly=null}=data||{};
+  const{totalCostIncrease=0,costIncreaseJobs=0,fade=0,fadeJobs=0,
+    anomalyJobs=0,largestAnomaly=null}=data||{};
   const cards=[
     fadeJobs?`<div class="trend-card emphasis"><div class="lab">Profit fade</div><div class="val">${fmtM(fade)}</div>
         <p class="match-source">${fadeJobs} job${fadeJobs===1?"":"s"} lost expected profit</p></div>
@@ -2003,27 +2028,34 @@ function timeSeriesSectionHTML(rep){
         <p class="match-source">${largestAnomaly
           ?`Largest GP swing ${fmtM(Math.abs(largestAnomaly.fade))}`
           :"No extreme cross-period estimate changes"}</p></div>`
-  ].join("");
+  ].filter(Boolean).join("");
+  return cards?`<div class="ts-kpi-label">Time series</div><div class="trend-cards top">${cards}</div>`:"";
+}
+function timeSeriesSectionHTML(rep){
+  const data=timeSeriesData();
+  if(!data)return"";
+  const{rows=[],stalls=0}=data;
+  if(!rows.length&&!stalls)return"";
+  const flagCell=(on,cls,label)=>`<td class="ts-flag-cell">${on?`<span class="ts-flag ${cls}" title="${htmlEsc(label)}"></span>`:""}</td>`;
   return`<div class="time-series-section"><h4>Across reporting periods
       <small>Material changes, stalled jobs, and extreme estimate movements are shown; anomalies use both fixed materiality gates and the contractor’s own history</small></h4>
-    ${cards?`<div class="trend-cards">${cards}</div>`:""}
-    ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Job ID</th><th>Job name</th><th>Signal</th><th>Periods</th>
-      <th>Contract change</th><th>Cost estimate change</th><th>Prior GP</th><th>Latest GP</th>
-      <th>GP change</th><th>Margin change</th><th>Stalled</th></tr></thead><tbody>
-      ${rows.map(r=>{const flags=[
-        r.estimateAnomaly?`<span class="anomaly-badge" title="${htmlEsc(r.anomalyReason)}">${r.fade>=0?"Profit gain anomaly":"Profit loss anomaly"}</span>`:"",
-        r.materialFade?'<span class="fade-badge" style="margin-left:0">Profit fade</span>':"",
-        r.materialCost?'<span class="cost-badge">Cost increase</span>':""
-      ].filter(Boolean).join(" ");const focus=reportRowForGroup(rep,r.groupId);return`<tr class="${r.estimateAnomaly?"anomaly-row":""}" data-group="${htmlEsc(r.groupId||"")}"${focus>=0?` data-row="${focus}"`:""} title="View in validated WIP"><td>${htmlEsc(r.id||"—")}</td><td>${htmlEsc(r.name||"—")}</td>
-        <td>${flags||"—"}</td>
+    ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Job ID</th><th>Job name</th>
+      <th class="ts-flag-col" title="Profit fade">Fade</th><th class="ts-flag-col" title="Cost estimate increase">Cost ↑</th>
+      <th class="ts-flag-col" title="Estimate anomaly">Anom.</th><th class="ts-flag-col" title="No cost or billing movement">Stall</th>
+      <th>Periods</th><th>Contract Δ</th><th>Cost est. Δ</th><th>Prior GP</th><th>Latest GP</th>
+      <th>GP Δ</th><th>Margin Δ</th></tr></thead><tbody>
+      ${rows.map(r=>{const focus=reportRowForGroup(rep,r.groupId);return`<tr class="${r.estimateAnomaly?"anomaly-row":""}" data-group="${htmlEsc(r.groupId||"")}"${focus>=0?` data-row="${focus}"`:""} title="View job analysis"><td>${htmlEsc(r.id||"—")}</td><td>${htmlEsc(r.name||"—")}</td>
+        ${flagCell(r.materialFade,"brick","Profit fade")}
+        ${flagCell(r.materialCost,"sage","Cost estimate increase")}
+        ${flagCell(r.estimateAnomaly,"amber",`${r.fade>=0?"Profit gain anomaly":"Profit loss anomaly"}${r.anomalyReason?": "+r.anomalyReason:""}`)}
+        ${flagCell(r.stalled,"mut","No cost or billing movement across periods")}
         <td>${r.from.slice(0,4)} → ${r.to.slice(0,4)}</td>
         <td class="num">${r.contract==null?"—":fmtM(r.contract)}</td>
         <td class="num">${r.cost==null?"—":fmtM(r.cost)}</td>
         <td class="num">${r.priorProfit==null?"—":fmtM(r.priorProfit)}</td>
         <td class="num">${r.currentProfit==null?"—":fmtM(r.currentProfit)}</td>
         <td class="num" style="${r.fade<0?"color:var(--brick)":""}">${r.fade==null?"—":fmtM(r.fade)}</td>
-        <td class="num">${r.marginChange==null?"—":`${r.marginChange>=0?"+":""}${pct1(r.marginChange)}`}</td>
-        <td>${r.stalled?'<span class="conflict-pill">yes</span>':"—"}</td></tr>`}).join("")}
+        <td class="num">${r.marginChange==null?"—":`${r.marginChange>=0?"+":""}${pct1(r.marginChange)}`}</td></tr>`}).join("")}
       </tbody></table></div>`:""}
       ${stalls?`<p class="batch-needed" style="margin-top:10px">${stalls} linked job${stalls===1?" has":"s have"} no cost or billing movement across the available periods.</p>`:""}
     </div>`;
@@ -2316,11 +2348,11 @@ function renderCertificate(rep){
       :`<td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name" title="${label}">${label}</span></div><small>${htmlEsc(col)}</small></td>`;
     const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""} aria-label="include suggested value for ${f.row_label}">`
                :`<span style="color:var(--muted);font-size:12px">review</span>`;
-    const confirmation=!c?"\u2014":c.proof_kind==="joint"?"joint proof":
+    const confirmation=!c?"":c.proof_kind==="joint"?"joint proof":
       c.proof_kind==="inherited"?"validated inputs":
       `${c.checks} way${c.checks===1?"":"s"}`;
-    const ev=c?`<tr class="evrow hidden" data-ev="${ci}"><td colspan="6">
-        <p class="evtitle">Formulas used</p>
+    const ev=c?`<tr class="evrow hidden" data-ev="${ci}"><td colspan="5">
+        <p class="evtitle">Formulas used · confirmed ${confirmation}${c.corroborated?" plus the totals row":""}</p>
         <div class="evgrid">
           ${(c.basis||[]).map(b=>`<div class="eq"><span class="eqname">${formulaHeading(b)}</span><div class="eqline"><span>${b}</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div></div>`).join("")}
           ${c.corroborated?`<div class="eq"><span class="eqname">Stated total</span><div class="eqline"><span>stated total \u2212 the other rows</span><span class="fr">\u2192 $${fmt$(c.implied)}</span></div></div>`:""}
@@ -2331,16 +2363,15 @@ function renderCertificate(rep){
       </td></tr>`:"";
     return `<tr>${jobCell}
       <td class="mny">${f.observed!=null?`<span class="bad">$${fmt$(f.observed)}</span>`:"\u2014"}</td>
-      <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
       <td>${causeText(f.classification,f.observed,f.proposed_correction,f.classification_label)}</td>
-      <td>${c?`${confirmation}${c.corroborated?"<small>plus the totals row</small>":""}`:"\u2014"}</td>
+      <td class="mny">${f.proposed_correction!=null?`$${fmt$(f.proposed_correction)}`:"\u2014"}</td>
       <td style="text-align:right">${use}</td></tr>${ev}`;
   };
-  const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Corrections automatically applied. Uncheck any correction to keep the document as printed.</p>
+  const excHTML=findings.length?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Suggested values are applied by default. Uncheck a row to keep the document's printed value, then press Update figures.</p>
   <div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
-      <th>Job</th><th style="text-align:right">Flagged</th><th style="text-align:right">Suggested</th><th>Cause</th><th>Confirmed</th>
-      <th style="text-align:right"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">Applied <input type="checkbox" id="useAll"></label></th>
+      <th>Job</th><th style="text-align:right">Flagged</th><th>Cause</th><th style="text-align:right">Suggested</th>
+      <th style="text-align:right"><label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">Apply suggested value <input type="checkbox" id="useAll"></label></th>
     </tr></thead><tbody>${findings.map(excRow).join("")}</tbody></table>
   </div>
   ${corrsC.length?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0">
@@ -2365,19 +2396,20 @@ function renderCertificate(rep){
   $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
     <div class="kicker">validation results${SECTIONS.length>1?" \u00b7 "+secLabel(SECTIONS[ACTIVE]).name.toLowerCase()+" \u00b7 "+secLabel(SECTIONS[ACTIVE]).pg:""}</div>
     <h2 style="font-size:22px">${head}</h2>
-    <div style="margin-top:16px">${checks.map(c=>{
+    <details class="more checks-fold"><summary>${nExc?"Review":"Show"} the ${checks.length} checks</summary>
+    <div style="margin-top:12px">${checks.map(c=>{
       const ic=c.st==="ok"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
       const col=c.st==="ok"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
       return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
-    }).join("")}</div>
-    ${headerComparisonHTML(rep)}
-    <section class="validation-corrections"><h3>Errors and corrections</h3>
-      ${excHTML||'<p class="empty" style="text-align:left">No errors or corrections for this schedule.</p>'}
-    </section>
-    <div class="go" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap">
+    }).join("")}</div></details>
+    <div class="go" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px">
       ${BATCH_MODE?'<button class="btn" onclick="renderBatch()">← All validations</button>':""}
       <button class="btn primary" onclick="${BATCH_MODE?`renderBatchItemAnalysis(${BATCH_ACTIVE})`:"VIEW='dash';renderDash(REPORT);show('dash');window.scrollTo(0,0)"}">View underwriting analysis</button>
     </div>
+    <section class="validation-corrections"><h3>Errors and corrections</h3>
+      ${excHTML||'<p class="empty" style="text-align:left">No errors or corrections for this schedule.</p>'}
+    </section>
+    ${headerComparisonHTML(rep)}
     ${detail}
   </div></div>`;
   const ua=$("#useAll"),st=$("#applyStatus"),ap=$("#applySel"),src=$("#reviewSource");
@@ -2425,8 +2457,8 @@ function renderDash(rep){
     }</tbody></table>${s.count>shown?`<p class="signal-more">Showing ${shown} of ${s.count}; every flagged job remains marked in the validated WIP and included in the trajectory filters.</p>`:""}`:`<div class="jobs">${(s.jobs||[]).map(j=>`<span class="chip">${j.label} · ${j.detail}</span>`).join("")}</div>`;
     return `<div class="item">
       <div class="head"><span class="sevr ${tier}">${tier}</span><p class="hl">${s.headline}</p></div>
+      <details class="why" open><summary>Why it matters</summary><p>${s.why}</p></details>
       ${body}
-      <details class="why"><summary>Why this matters</summary><p>${s.why}</p></details>
     </div>`}).join("");
   const timeSignals=BATCH_ANALYSIS_MODE?timeSeriesSectionHTML(rep):"";
   const signalBody=(sigs||timeSignals)
@@ -2439,8 +2471,9 @@ function renderDash(rep){
       <button class="btn" id="printAnalysis">Print analysis</button></div>
     ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
+    ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
     <div class="cols">
-      <div class="card"><h3>Underwriting signals <small>What stands out for underwriting?</small></h3>
+      <div class="card"><h3>Underwriting signals <small>What stands out for underwriting? Click any job to open its analysis</small></h3>
         ${signalBody}</div>
     </div>
     ${billingTrajectoryChart(rep)}
@@ -2457,6 +2490,8 @@ function renderDash(rep){
   wireBillingTrajectory(rep);
   const portfolioSwitch=$("#dash .analysis-portfolio-switch");
   if(portfolioSwitch)portfolioSwitch.onclick=renderPortfolioAnalysis;
+  const jobsOpen=$("#dash .analysis-jobs-open");
+  if(jobsOpen)jobsOpen.onclick=()=>openWipModal(rep);
   $("#dash").querySelectorAll(".analysis-period-switch").forEach(button=>
     button.onclick=()=>renderPeriodAnalysis(button.dataset.period));
   $("#printAnalysis").onclick=()=>printSummary(rep);
@@ -2697,14 +2732,13 @@ function billingTrajectoryChart(rep){
   const displayed=BILLING_TRAJECTORY_SHOW_ALL?trajectories:trajectories.slice(0,TOP_N);
   displayed.forEach((trajectory,index)=>trajectory.color=TRAJECTORY_COLORS[index%TRAJECTORY_COLORS.length]);
 
-  const corridor=[
-    [.15,.035,.002],[.25,.040,.004],[.40,.035,.001],[.60,.023,-.004],[.80,.012,-.004],[1,0,0]
-  ];
+  const corridor=HEALTHY_BILLING_CORRIDOR;
   const corridorPath=[...corridor.map(d=>`${x(d[0]).toFixed(1)},${y(d[1]).toFixed(1)}`),
     ...[...corridor].reverse().map(d=>`${x(d[0]).toFixed(1)},${y(d[2]).toFixed(1)}`)].join(" ");
   const yTicks=[-.20,-.10,0,.10,.20].map(v=>`<g>${v===0?"":`<line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="var(--line-soft)"/>`}<text x="${L-8}" y="${y(v)+3}" text-anchor="end" font-size="10" fill="var(--muted)">${v>0?"+":""}${Math.round(v*100)}%</text></g>`).join("");
   const xTicks=[.15,.25,.50,.75,1].map(v=>`<g><line x1="${x(v)}" y1="${H-B}" x2="${x(v)}" y2="${H-B+4}" stroke="var(--line)"/><text x="${x(v)}" y="${H-15}" text-anchor="middle" font-size="10" fill="var(--muted)">${Math.round(v*100)}%</text></g>`).join("");
-  const lines=displayed.map(({groupId,points,color,label})=>{
+  const drawn=displayed.filter(t=>!BILLING_TRAJECTORY_HIDDEN.has(t.groupId));
+  const lines=drawn.map(({groupId,points,color,label})=>{
     const coords=points.map(p=>`${x(p.p).toFixed(1)},${y(p.position).toFixed(1)}`).join(" ");
     const latest=points[points.length-1];
     const title=`${label}: ${points.length} statement${points.length===1?"":"s"}; latest ${Math.round(latest.p*100)}% complete, ${(latest.position*100).toFixed(1)}% billing position`;
@@ -2719,11 +2753,15 @@ function billingTrajectoryChart(rep){
     const count=membership.get(f.id).size,on=active.has(f.id);
     return`<button class="trajectory-toggle${on?" on":""}" data-filter="${f.id}" ${count?"":"disabled"} aria-pressed="${on}">${f.label}<span class="count">${count}</span></button>`;
   }).join("");
-  const legend=displayed.length?`<div class="trajectory-legend" aria-label="Displayed jobs">${displayed.map(t=>
-    `<button class="trajectory-legend-item" data-group="${htmlEsc(t.groupId)}" title="Open ${htmlEsc(t.label)}"><span class="trajectory-legend-dot" style="background:${t.color}"></span><span class="trajectory-legend-label">${htmlEsc(t.label)}</span><small>${t.points.length} stmt${t.points.length===1?"":"s"}</small></button>`).join("")}</div>`:"";
+  const legend=displayed.length?`<div class="trajectory-legend" aria-label="Displayed jobs — click to show or hide, arrow to open">${displayed.map(t=>{
+    const off=BILLING_TRAJECTORY_HIDDEN.has(t.groupId);
+    return`<button class="trajectory-legend-item${off?" off":""}" data-legend="${htmlEsc(t.groupId)}" aria-pressed="${!off}" title="${off?"Show":"Hide"} ${htmlEsc(t.label)} on the chart"><span class="trajectory-legend-dot" style="background:${t.color}"></span><span class="trajectory-legend-label">${htmlEsc(t.label)}</span><small>${t.points.length} stmt${t.points.length===1?"":"s"}</small><span class="trajectory-legend-open" role="button" tabindex="0" data-open="${htmlEsc(t.groupId)}" title="Open ${htmlEsc(t.label)}" aria-label="Open ${htmlEsc(t.label)}">\u2197</span></button>`;
+  }).join("")}</div>`:"";
+  const hiddenCount=displayed.filter(t=>BILLING_TRAJECTORY_HIDDEN.has(t.groupId)).length;
   const showToggle=total>TOP_N?`<button class="trajectory-show-toggle" id="trajectoryShowAll">${BILLING_TRAJECTORY_SHOW_ALL?`Show highest-priority ${TOP_N}`:`Show all ${total}`}</button>`:"";
-  const summary=active.size===0?"No signals selected":total===0?"No linked histories match the selected signals":BILLING_TRAJECTORY_SHOW_ALL
-    ?`Showing all ${total} matching jobs`:`Showing ${displayed.length} of ${total} matching jobs, prioritized by signal severity`;
+  const summary=(active.size===0?"No signals selected":total===0?"No linked histories match the selected signals":BILLING_TRAJECTORY_SHOW_ALL
+    ?`Showing all ${total} matching jobs`:`Showing ${displayed.length} of ${total} matching jobs, prioritized by signal severity`)
+    +(hiddenCount?` · ${hiddenCount} hidden from the key`:"");
   const empty=active.size===0?"Select one or more signals to display job trajectories.":"No linked job histories match the selected signals.";
   return`<div class="card trajectory-card" id="billingTrajectory"><div class="trajectory-head"><h3>Flagged job billing trajectories
       <small>Statement-to-statement billing position; click a line, dot, or job label to open the validated WIP row</small></h3><div class="trajectory-controls">${controls}</div></div>
@@ -2751,7 +2789,23 @@ function wireBillingTrajectory(rep){
       series.classList.toggle("is-dimmed",Boolean(groupId)&&series.dataset.group!==groupId);
     });
   };
-  root.querySelectorAll("[data-group]").forEach(node=>{
+  root.querySelectorAll(".trajectory-legend-item").forEach(item=>{
+    item.onclick=e=>{
+      if(e.target.closest("[data-open]"))return;
+      const id=item.dataset.legend;
+      if(BILLING_TRAJECTORY_HIDDEN.has(id))BILLING_TRAJECTORY_HIDDEN.delete(id);
+      else BILLING_TRAJECTORY_HIDDEN.add(id);
+      root.outerHTML=billingTrajectoryChart(rep);wireBillingTrajectory(rep);
+    };
+    item.onmouseenter=()=>focus(item.dataset.legend);item.onmouseleave=()=>focus(null);
+    item.onfocus=()=>focus(item.dataset.legend);item.onblur=()=>focus(null);
+  });
+  root.querySelectorAll("[data-open]").forEach(node=>{
+    const open=e=>{e.stopPropagation();openGroupInValidatedWip(rep,node.dataset.open);};
+    node.onclick=open;
+    node.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open(e);}};
+  });
+  root.querySelectorAll(".trajectory-series[data-group]").forEach(node=>{
     node.onclick=e=>{e.stopPropagation();openGroupInValidatedWip(rep,node.dataset.group);};
     node.onmouseenter=()=>focus(node.dataset.group);node.onmouseleave=()=>focus(null);
     node.onfocus=()=>focus(node.dataset.group);node.onblur=()=>focus(null);
@@ -2946,7 +3000,7 @@ function jmBillingChartSVG(points,overlays,showOverlay){
   const W=460,H=210,L=46,R=12,T=14,B=32;
   const x=p=>L+(W-L-R)*(Math.min(Math.max(p,XMIN),1)-XMIN)/(1-XMIN);
   const y=v=>T+(H-T-B)*(1-(Math.max(-ymax,Math.min(ymax,v))+ymax)/(2*ymax));
-  const corridor=[[.15,.035,.002],[.25,.040,.004],[.40,.035,.001],[.60,.023,-.004],[.80,.012,-.004],[1,0,0]];
+  const corridor=HEALTHY_BILLING_CORRIDOR;
   const corridorPath=[...corridor.map(d=>`${x(d[0]).toFixed(1)},${y(d[1]).toFixed(1)}`),
     ...[...corridor].reverse().map(d=>`${x(d[0]).toFixed(1)},${y(d[2]).toFixed(1)}`)].join(" ");
   const yVals=ymax===.08?[-.08,-.04,0,.04,.08]:[-.20,-.10,0,.10,.20];
@@ -2969,23 +3023,36 @@ function jmBillingChartSVG(points,overlays,showOverlay){
 function jmMarginChartSVG(points,overlays,showOverlay){
   const usable=points.filter(p=>Number.isFinite(p.margin));
   if(!usable.length)return`<div class="jm-chart-empty">No margin estimate available for this job.</div>`;
-  const finals=showOverlay?overlays.map(o=>o.finalMargin).filter(Number.isFinite):[];
-  const values=usable.map(p=>p.margin).concat(finals,[0]);
+  /* Margins beyond ±100% are data artifacts, not information; they must not
+     own the axis. Clamp the domain and pin outliers to the chart edge. */
+  const CLAMP=1;
+  const clamp=v=>Math.max(-CLAMP,Math.min(CLAMP,v));
+  const finals=showOverlay?overlays.map(o=>o.finalMargin).filter(Number.isFinite).map(clamp):[];
+  const values=usable.map(p=>clamp(p.margin)).concat(finals,[0]);
   let lo=Math.min(...values),hi=Math.max(...values);
-  const pad=Math.max(.015,(hi-lo)*.18);lo-=pad;hi+=pad;
+  const pad=Math.max(.015,(hi-lo)*.18);
+  lo=Math.max(-CLAMP,lo-pad);hi=Math.min(CLAMP,hi+pad);
+  if(hi-lo<.02){hi+=.01;lo-=.01;}
   const W=460,H=210,L=46,R=12,T=14,B=32;
   const n=usable.length;
   const x=i=>n===1?(L+W-R)/2:L+(W-L-R)*(i/(n-1));
-  const y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
-  const step=(hi-lo)>.16?.05:(hi-lo)>.08?.02:.01;
-  const ticks=[];for(let v=Math.ceil(lo/step)*step;v<=hi+1e-9;v+=step)ticks.push(Math.round(v*1000)/1000);
+  const y=v=>T+(H-T-B)*(1-(clamp(v)-lo)/(hi-lo));
+  const NICE=[.005,.01,.02,.025,.05,.1,.2,.25,.5];
+  const step=NICE.find(s=>(hi-lo)/s<=6.5)||1;
+  const ticks=[];for(let v=Math.ceil(lo/step-1e-9)*step;v<=hi+1e-9;v+=step)ticks.push(Math.round(v*10000)/10000);
   const yTicks=ticks.map(v=>`<g>${Math.abs(v)<1e-9?"":`<line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="var(--line-soft)"/>`}<text x="${L-7}" y="${y(v)+3}" text-anchor="end" font-size="9.5" fill="var(--muted)">${Math.round(v*100)}%</text></g>`).join("");
   const zero=lo<0&&hi>0?`<line x1="${L}" y1="${y(0)}" x2="${W-R}" y2="${y(0)}" stroke="var(--ink)" stroke-opacity=".5" stroke-width="1.8"/>`:"";
-  const xTicks=usable.map((p,i)=>`<text x="${x(i).toFixed(1)}" y="${H-16}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${jmShortPeriod(p.period)}</text>`).join("");
+  const xTicks=usable.map((p,i)=>{
+    const anchor=n===1?"middle":i===0?"start":i===n-1?"end":"middle";
+    return`<text x="${x(i).toFixed(1)}" y="${H-16}" text-anchor="${anchor}" font-size="9.5" fill="var(--muted)">${jmShortPeriod(p.period)}</text>`;
+  }).join("");
   const overlayLines=showOverlay?overlays.filter(o=>Number.isFinite(o.finalMargin)).map(o=>`<line x1="${L}" y1="${y(o.finalMargin).toFixed(1)}" x2="${W-R}" y2="${y(o.finalMargin).toFixed(1)}" stroke="#B4B2A9" stroke-width="1.1" stroke-dasharray="3 3"><title>${htmlEsc(o.label)} finished at ${pct1(o.finalMargin)}</title></line>`).join(""):"";
   const coords=usable.map((p,i)=>`${x(i).toFixed(1)},${y(p.margin).toFixed(1)}`).join(" ");
   const line=n>1?`<polyline points="${coords}" fill="none" stroke="#3F6FB6" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`:"";
-  const dots=usable.map((p,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(p.margin).toFixed(1)}" r="4.2" fill="#3F6FB6" stroke="var(--surface)" stroke-width="1.5"><title>${jmShortPeriod(p.period)} · estimated margin ${pct1(p.margin)}</title></circle>`).join("");
+  const dots=usable.map((p,i)=>{
+    const clipped=Math.abs(p.margin)>CLAMP;
+    return`<circle cx="${x(i).toFixed(1)}" cy="${y(p.margin).toFixed(1)}" r="4.2" fill="#3F6FB6" stroke="var(--surface)" stroke-width="1.5"><title>${jmShortPeriod(p.period)} · estimated margin ${pct1(p.margin)}${clipped?" (beyond ±100% — likely a data issue; shown at chart edge)":""}</title></circle>`;
+  }).join("");
   return`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Estimated gross margin at each statement">
     ${yTicks}${zero}${overlayLines}${line}${dots}${xTicks}
     <text x="${(L+W-R)/2}" y="${H-3}" text-anchor="middle" font-size="9.5" fill="var(--muted)">statement date</text>
