@@ -1,9 +1,8 @@
 """Cheap accounting evidence for choosing among plausible table layouts.
 
-Reconstruction has already used grid shape to eliminate impossible joins before
-this module runs. These functions do not emit user findings, apply corrections,
-run analysis, or permanently classify a table. They ask the existing WIP and
-CC validators how coherently each candidate grid behaves.
+Shape eliminates impossible joins first. The existing WIP and CC validators then
+measure each viable layout. This module does not emit user findings, apply
+corrections, run analysis, or permanently classify a table.
 """
 
 from __future__ import annotations
@@ -35,7 +34,6 @@ class SchemaEvidence:
 
     @property
     def key(self) -> tuple:
-        """Table-local evidence only; no continuation heuristics."""
         return (
             self.rank,
             round(self.coverage, 9),
@@ -61,13 +59,7 @@ class LayoutEvidence:
 
     @property
     def key(self) -> tuple:
-        """Whole-layout coherence without rewarding arbitrary partitioning.
-
-        A schedule split into two page tables should not receive twice the rank
-        or twice the formula-family credit of the same rows assembled vertically.
-        Coverage is weighted by table cells; witness row-weight is additive, so
-        equivalent partitions naturally tie. Exact ties remain ambiguous.
-        """
+        """Accounting coherence, neutral to arbitrary page partitioning."""
         fits = [table.best for table in self.tables if table.best is not None]
         if not fits:
             return (0, 0.0, 0, 0.0, 0.0, 0.0,
@@ -158,7 +150,13 @@ def rank_layouts(layouts: list[list[dict]]) -> list[tuple[list[dict], LayoutEvid
 
 
 def select_layout(layouts: list[list[dict]]) -> dict:
-    """Select only when validator evidence has one unique best layout."""
+    """Choose by validator evidence; on an exact tie, prefer viable joins.
+
+    Shape has already proven every join mechanically possible. Therefore an exact
+    accounting tie means stitching loses no mathematical coherence, and the
+    simpler logical-table partition wins. This is the only non-mathematical
+    tiebreaker: no labels, numeric-density rules, or pixel geometry participate.
+    """
     ranked = rank_layouts(layouts)
     if not ranked:
         return {"status": "no_tables", "layout": None, "candidates": []}
@@ -168,14 +166,20 @@ def select_layout(layouts: list[list[dict]]) -> dict:
     summary = [
         {
             "key": list(evidence.key),
+            "table_count": len(layout),
             "shapes": [list(table.shape) for table in evidence.tables],
             "schemas": [table.best.schema if table.best else None
                         for table in evidence.tables],
         }
-        for _, evidence in ranked
+        for layout, evidence in ranked
     ]
-    if len(tied) != 1:
+
+    fewest = min(len(layout) for layout, _ in tied)
+    finalists = [item for item in tied if len(item[0]) == fewest]
+    if len(finalists) != 1:
         return {"status": "ambiguous", "layout": None,
                 "candidates": summary}
-    return {"status": "selected", "layout": ranked[0][0],
-            "evidence": ranked[0][1], "candidates": summary}
+
+    layout, evidence = finalists[0]
+    return {"status": "selected", "layout": layout,
+            "evidence": evidence, "candidates": summary}
