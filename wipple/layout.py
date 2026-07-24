@@ -1,15 +1,24 @@
 """Page-level table fragments -> reconstructed logical tables.
 
 The vision model supplies grids only. Array shape determines which adjacent-page
-joins are mechanically possible. Existing WIP/CC validators compare the viable
-layouts. No label-overlap, numeric-density, header-semantic, or pixel-geometry
-heuristics decide continuation.
+joins are mechanically possible. For each neighboring pair, existing WIP/CC math
+compares at most three layouts: keep separate, join vertically, join horizontally.
+A successful join collapses on a stack and may then join the preceding block.
+
+No document-wide layout search, label-overlap continuation thresholds, numeric-
+density rules, header semantics, or pixel geometry decide assembly.
 """
 
 from __future__ import annotations
 
 from .layout_validation import select_layout
-from .reconstruction import enumerate_layouts, normalize_fragment
+from .reconstruction import (
+    can_join_horizontally,
+    can_join_vertically,
+    join_horizontal,
+    join_vertical,
+    normalize_fragment,
+)
 
 
 def _public_table(table: dict) -> dict:
@@ -25,35 +34,54 @@ def _public_table(table: dict) -> dict:
     }
 
 
+def _pair_candidates(left: dict, right: dict) -> list[list[dict]]:
+    """Return only mechanically viable interpretations of one boundary."""
+    candidates = [[left, right]]
+    if can_join_vertically(left, right):
+        candidates.append([join_vertical(left, right)])
+    if can_join_horizontally(left, right):
+        candidates.append([join_horizontal(left, right)])
+    return candidates
+
+
+def _reduce_tail(stack: list[dict]) -> None:
+    """Collapse the newest pair while validator evidence supports a join."""
+    while len(stack) >= 2:
+        left, right = stack[-2], stack[-1]
+        candidates = _pair_candidates(left, right)
+        if len(candidates) == 1:
+            return
+
+        decision = select_layout(candidates)
+        selected = decision.get("layout")
+        if decision.get("status") == "selected" and selected:
+            if len(selected) == 1:
+                stack[-2:] = selected
+                continue
+            return
+
+        # Two joins can occasionally remain mathematically indistinguishable.
+        # Preserve the boundary rather than inventing a direction.
+        right.setdefault("issues", []).append({
+            "kind": "layout_ambiguous",
+            "note": "vertical and horizontal page joins remained tied; "
+                    "the page boundary was preserved",
+        })
+        return
+
+
 def assemble(fragments: list[dict]) -> list[dict]:
-    """Reconstruct logical tables from page-reader grids.
+    """Reconstruct logical tables with local shape + validator decisions."""
+    normalized = [normalize_fragment(fragment, ordinal)
+                  for ordinal, fragment in enumerate(fragments)]
+    normalized.sort(key=lambda table: (
+        min(table.get("pages") or [1]),
+        (table.get("source_fragments") or [(1, 0)])[0][1],
+    ))
 
-    Shape first eliminates impossible joins. Validator math chooses among the
-    surviving page-order layouts. If accounting evidence ties exactly, the
-    layout with fewer logical tables wins because each join was already proven
-    mechanically viable. If ambiguity remains even after that narrow rule, the
-    safe output preserves page fragments separately rather than inventing a
-    continuation.
-    """
-    if not fragments:
-        return []
+    stack: list[dict] = []
+    for fragment in normalized:
+        stack.append(fragment)
+        _reduce_tail(stack)
 
-    layouts = enumerate_layouts(fragments)
-    decision = select_layout(layouts)
-    if decision.get("status") == "selected" and decision.get("layout"):
-        selected = decision["layout"]
-    else:
-        selected = [normalize_fragment(fragment, ordinal)
-                    for ordinal, fragment in enumerate(fragments)]
-        selected.sort(key=lambda table: (
-            min(table.get("pages") or [1]),
-            (table.get("source_fragments") or [(1, 0)])[0][1],
-        ))
-        for table in selected:
-            table.setdefault("issues", []).append({
-                "kind": "layout_ambiguous",
-                "note": "multiple mechanically viable layouts remained tied; "
-                        "page fragments were preserved separately",
-            })
-
-    return [_public_table(table) for table in selected]
+    return [_public_table(table) for table in stack]
