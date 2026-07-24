@@ -19,4 +19,22 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.txt pytest scipy
-      - run: python -m pytest tests/ -q
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        run: |
+          python -m pytest tests/ -q > pytest.log 2>&1
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+      - name: Record stitching references
+        if: always()
+        run: grep -R "stitching" -n --exclude-dir=.git . > stitching-references.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-diagnostics
+          path: |
+            pytest.log
+            stitching-references.log
+      - name: Fail when pytest failed
+        if: steps.tests.outputs.status != '0'
+        run: exit 1
