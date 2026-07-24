@@ -100,11 +100,10 @@ def g3_assembly():
          w["joined_columns"] and len(w["headers"]) == 11)
 
     frags = layout_fragments(book, vsplit=(6, True), drop_row=(1, 4))[0]
-    raw_cells = sum(len(row) for frag in frags for row in frag["rows"])
     t = assemble(frags)
-    assembled_cells = sum(len(row) for table in t for row in table["rows"])
-    gate("G3e incompatible horizontal join preserves every source cell",
-         assembled_cells == raw_cells)
+    gate("G3e incompatible horizontal join preserves both source grids",
+         t[0]["rows"] == frags[0]["rows"]
+         and t[1]["rows"] == frags[1]["rows"])
 
     frags = layout_fragments(book)[0][:2]
     frags[1] = {**frags[1], "rows": [list(r) for r in frags[0]["rows"][-3:]]

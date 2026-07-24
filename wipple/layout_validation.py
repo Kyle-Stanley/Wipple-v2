@@ -153,7 +153,7 @@ def select_layout(layouts: list[list[dict]]) -> dict:
     """Choose by validator evidence; on an exact tie, prefer viable joins.
 
     Shape has already proven every join mechanically possible. Therefore an exact
-    accounting tie means stitching loses no mathematical coherence, and the
+    accounting tie means joining loses no mathematical coherence, and the
     simpler logical-table partition wins. This is the only non-mathematical
     tiebreaker: no labels, numeric-density rules, or pixel geometry participate.
     """

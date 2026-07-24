@@ -27,7 +27,7 @@ class RawTable(TypedDict):
     headers: list[str]          # quarantined -- see module docstring
     rows: list[list[str]]       # cell strings exactly as printed on the page
     page_count: int
-    notes: list[str]            # extractor's own remarks (multi-page stitch etc.)
+    notes: list[str]            # extractor's own remarks (legacy section path)
 
 
 class WippleState(TypedDict, total=False):

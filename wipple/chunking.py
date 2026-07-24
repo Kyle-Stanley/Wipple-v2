@@ -9,7 +9,7 @@ trivial rather than meaningless.
 
 Images: overlapping horizontal strips -- pixel boundaries are arbitrary (a
 row can be sliced mid-glyph), so consecutive strips share OVERLAP_PX and the
-stitcher dedupes on the shared rows. The overlap is also a free witness: the
+assembler dedupes on the shared rows. The overlap is also a free witness: the
 same physical rows extracted twice must match verbatim, and a disagreement
 is direct evidence about extraction quality, for zero extra model calls.
 """

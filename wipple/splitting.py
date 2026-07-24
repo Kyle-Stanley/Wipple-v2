@@ -1,5 +1,5 @@
 """
-Splitter: the inverse operator to the stitcher, and the stitcher's safety
+Splitter: the inverse operator to table assembly, and the assembler's safety
 net. An over-merged table (completed contracts appended to the WIP in the
 same columns -- the layout that caused real intermingling bugs) is detected
 by MATH, not labels: a completed contract in WIP columns is exactly

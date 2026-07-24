@@ -15,7 +15,7 @@ Adversarial knobs, each one conversation-derived:
   page_subtotals        blank-label subtotal row per page (parse must strip)
   cc_placement          'own_page' | 'same_page' | 'consolidated'
   vsplit                (m, names_repeated): columns split across facing
-                        pages -- the horizontal-stitch case
+                        pages -- the horizontal-assembly case
   shift_chunk           (chunk_id, col): that chunk's cells displaced left by
                         one column, width preserved -- the silent block-
                         misalignment case
