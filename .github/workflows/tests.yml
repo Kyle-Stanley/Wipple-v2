@@ -1,0 +1,47 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - rework/table-reconstruction
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt pytest scipy pillow reportlab
+      - name: Run tests and corpus gates
+        id: tests
+        continue-on-error: true
+        run: |
+          set +e
+          python -m pytest tests/ -q > pytest.log 2>&1
+          pytest_status=$?
+          python -m wipple.gates > gates.log 2>&1
+          gates_status=$?
+          set -e
+          echo "pytest_status=$pytest_status" >> "$GITHUB_OUTPUT"
+          echo "gates_status=$gates_status" >> "$GITHUB_OUTPUT"
+      - name: Record deprecated stitching references
+        if: always()
+        run: grep -R "stitching" -n --exclude-dir=.git . > stitching-references.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-diagnostics
+          path: |
+            pytest.log
+            gates.log
+            stitching-references.log
+      - name: Fail when validation failed
+        if: steps.tests.outputs.pytest_status != '0' || steps.tests.outputs.gates_status != '0'
+        run: exit 1

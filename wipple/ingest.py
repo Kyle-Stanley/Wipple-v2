@@ -99,7 +99,7 @@ def csv_to_raw_table(data: bytes) -> dict:
         text = data.decode("latin-1")
     if text.strip():
         try:
-            dialect = csv.Sniffer().sniff(text[:4096])
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=",\t;|")
         except csv.Error:
             dialect = csv.excel
     else:

@@ -3,7 +3,7 @@
 Same architecture as v2 (thread runs the graph, queue feeds the SSE
 generator, heartbeats keep proxies alive); what changed is the graph and
 therefore the narration. Extraction is per-page with live progress lines,
-and the new stages -- stitching, the schema race, splitting, block
+and the new stages -- assembly, the schema race, splitting, block
 misalignment, concordance -- each narrate what they proved, not what they
 did. Everything the old endpoints accepted still works: spreadsheets and
 CSVs are sniffed inside the graph's own ingest node now, so /api/scan just
@@ -65,7 +65,7 @@ def _narrate(node: str, up: dict, state: dict) -> list[str]:
         if failed:
             msg += f" ({_plural(len(failed), 'page')} unreadable)"
         return [msg]
-    if node == "stitch":
+    if node == "assemble":
         lts = up.get("logical_tables") or []
         if not lts:
             return ["No tables found in the document"]
@@ -244,7 +244,7 @@ def how():
 @app.get("/api/sample")
 def sample():
     # Demo injects a pre-extracted fragment: perception is bypassed (no key
-    # needed); stitching, the schema race, validation, analysis -- the
+    # needed); assembly, the schema race, validation, analysis -- the
     # deterministic spine -- run for real. reextract budget pre-spent so
     # the planted decimal slip emits as a finding, not a model call.
     raw = demo_raw_table()

@@ -1,21 +1,18 @@
 """
-Document graph: the v3 assembly around the v2 engine.
+Document graph: page-table perception around the existing per-section engine.
 
-    ingest -> chunk -> extract_chunks -> stitch -> tables -+-> concordance -> emit
-                ^                                          |
-                +----------- re_extract_doc <--------------+   (bad chunks, x1)
+    ingest -> chunk -> extract_chunks -> assemble -> tables -+-> concordance -> emit
+                ^                                            |
+                +------------- re_extract <------------------+   (bad chunks, x1)
 
-The v2 graph survives INTACT as the per-section engine: after stitching,
-schema race, misalignment repair, and splitting, every final section is a
-clean single-table document -- exactly what v2 was built for -- so the
-tables node invokes the compiled v2 subgraph per section with an injected
-raw_table. That is the LangGraph maintainability argument made literal: the
-old pipeline drops in as one node of the new one.
+The page reader returns grids. ``layout.assemble`` reconstructs logical tables
+before schema selection, correction, and analysis. The existing v2 graph remains
+the per-section engine after assembly, misalignment repair, and any final WIP/CC
+section split.
 
 Page is provenance, not process: row_prov flows fragment -> logical table ->
-section, and every section finding gains a "page" field at assembly. The
-report shape is {source, document, tables: [...]}: WIP and CC never merge
-in data; a combined view is a presentation-layer join.
+section, and every section finding gains a page field. WIP and CC never merge in
+data; any combined view is a presentation-layer join.
 """
 
 from __future__ import annotations
@@ -30,10 +27,10 @@ from .chunking import chunk_document
 from .concordance import concordance_node
 from .extraction import extract_chunks_node
 from .graph import build_graph
+from .layout import assemble
 from .model_client import Metrics
 from .parsing import parse_table
 from .periods import extract_period_end
-from .stitching import stitch
 from .splitting import find_cc_block, split_sections
 from .validation import run_schema_race, serialize_validation
 
@@ -80,8 +77,9 @@ def ingest_doc_node(state: DocState) -> dict:
     return {"chunks": [], "fragments": [frag], "media_type": kind, **period}
 
 
-def stitch_node(state: DocState) -> dict:
-    return {"logical_tables": stitch(state.get("fragments") or [])}
+def assemble_node(state: DocState) -> dict:
+    """Reconstruct page grids into logical tables before schema processing."""
+    return {"logical_tables": assemble(state.get("fragments") or [])}
 
 
 def _page_of(row_prov, raw_row):
@@ -327,7 +325,7 @@ def build_doc_graph():
     g = StateGraph(DocState)
     g.add_node("ingest", ingest_doc_node)
     g.add_node("extract_chunks", extract_chunks_node)
-    g.add_node("stitch", stitch_node)
+    g.add_node("assemble", assemble_node)
     g.add_node("tables", tables_node)
     g.add_node("re_extract", re_extract_doc_node)
     g.add_node("concordance", concordance_node)
@@ -335,11 +333,11 @@ def build_doc_graph():
 
     g.set_entry_point("ingest")
     g.add_conditional_edges(
-        "ingest", lambda s: "stitch" if s.get("fragments") else
+        "ingest", lambda s: "assemble" if s.get("fragments") else
         "extract_chunks",
-        {"stitch": "stitch", "extract_chunks": "extract_chunks"})
-    g.add_edge("extract_chunks", "stitch")
-    g.add_edge("stitch", "tables")
+        {"assemble": "assemble", "extract_chunks": "extract_chunks"})
+    g.add_edge("extract_chunks", "assemble")
+    g.add_edge("assemble", "tables")
     g.add_conditional_edges("tables", route_after_tables,
                             {"re_extract": "re_extract",
                              "concordance": "concordance"})
