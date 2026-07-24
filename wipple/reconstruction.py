@@ -1,22 +1,22 @@
 """Reconstruct logical tables from page-level table fragments.
 
-This module is intentionally ignorant of accounting semantics.  The vision
-model returns grids; this layer derives their shape and enumerates only the
-page-order assemblies that are mechanically possible:
+The vision model returns grids. This module derives their array shape and
+constructs only page-order assemblies that are mechanically possible:
 
 * separate table
 * vertical continuation (same columns, more rows)
 * horizontal continuation (same rows, more columns)
 
-It does not classify WIP/CC, read headers semantically, inspect pixel geometry,
-or decide which plausible layout is correct.  A caller supplies the cheap
-validator-backed scoring function after candidates have been generated.
+It does not classify WIP/CC, interpret headers, inspect pixel coordinates, or use
+label-density/signature rules to decide continuation. Repeated-header cleanup and
+explicit image-strip overlap deduplication are deterministic normalization after
+a vertical candidate has already been constructed.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Callable, Iterable
+from typing import Iterable
 
 
 Table = dict
@@ -28,7 +28,7 @@ def _strings(values: Iterable) -> list[str]:
 
 
 def _shape(headers: list, rows: list[list]) -> tuple[int, int]:
-    """Return the deterministic grid shape; never ask the model to count."""
+    """Return grid shape in code; never ask the model to count."""
     n_rows = len(rows)
     n_cols = max([len(headers), *(len(row) for row in rows)], default=0)
     return n_rows, n_cols
@@ -39,7 +39,7 @@ def _pad(row: list[str], width: int) -> list[str]:
 
 
 def normalize_fragment(fragment: dict, ordinal: int = 0) -> Table:
-    """Normalize one extractor grid and attach derived, non-semantic metadata."""
+    """Normalize one extractor grid and attach derived provenance/shape."""
     headers = _strings(fragment.get("headers") or [])
     rows = [_strings(row) for row in (fragment.get("rows") or [])]
     n_rows, n_cols = _shape(headers, rows)
@@ -74,23 +74,19 @@ def normalize_fragment(fragment: dict, ordinal: int = 0) -> Table:
         "n_rows": n_rows,
         "n_cols": n_cols,
         "joined_columns": bool(fragment.get("joined_columns", False)),
+        "overlaps_prev": bool(fragment.get("overlaps_prev", False)),
     }
 
 
 def table_shape(table: Table) -> tuple[int, int]:
-    """Return shape from the grid itself, refreshing cached fields if needed."""
+    """Return shape from the grid itself, refreshing cached fields."""
     n_rows, n_cols = _shape(table.get("headers") or [], table.get("rows") or [])
     table["n_rows"], table["n_cols"] = n_rows, n_cols
     return n_rows, n_cols
 
 
 def _page_adjacent(left: Table, right: Table) -> bool:
-    """Only document-order neighbors may be continuations.
-
-    Distinct tables emitted from the same page stay distinct: the table reader
-    has already done the visual task of saying "there are two tables here".
-    Shuffled or distant pages are outside the reconstruction contract.
-    """
+    """Only document-order neighbors may be continuations."""
     return max(left["pages"]) + 1 == min(right["pages"])
 
 
@@ -115,19 +111,99 @@ def _header_is_blank(headers: list[str]) -> bool:
     return not any(str(value).strip() for value in headers)
 
 
+def _is_header_repeat(row: list[str], headers: list[str]) -> bool:
+    """Exact printed-header repetition cleanup, not semantic interpretation."""
+    nonblank = sum(1 for header in headers if str(header).strip())
+    if nonblank == 0:
+        return False
+    hits = sum(
+        1 for cell, header in zip(row, headers)
+        if str(cell).strip()
+        and str(cell).strip().casefold() == str(header).strip().casefold()
+    )
+    return hits >= max(3, 0.6 * nonblank)
+
+
+def _row_key(row: list[str]) -> str:
+    """First printed nonblank cell, used only inside declared strip overlap."""
+    return next((str(cell).strip() for cell in row if str(cell).strip()), "")
+
+
+def _dedup_declared_overlap(
+    left_rows: list[list[str]],
+    right_rows: list[list[str]],
+    right_prov: list[list[tuple]],
+    issues: list[dict],
+) -> tuple[list[list[str]], list[list[tuple]]]:
+    """Remove duplicated physical rows from explicitly overlapping image strips.
+
+    The chunker, not this function, declares that the strips overlap. We compare
+    only the longest suffix/prefix window. Exact duplicate rows are removed. If
+    row keys agree but cells differ, the duplicate is still removed and the
+    disagreement is retained as extraction-quality evidence.
+    """
+    max_k = min(len(left_rows), len(right_rows), 12)
+    for k in range(max_k, 0, -1):
+        tail = left_rows[-k:]
+        head = right_rows[:k]
+        if tail == head:
+            return right_rows[k:], right_prov[k:]
+
+        tail_keys = [_row_key(row) for row in tail]
+        head_keys = [_row_key(row) for row in head]
+        if not all(a and a == b for a, b in zip(tail_keys, head_keys)):
+            continue
+
+        for old, new, prov, key in zip(tail, head, right_prov[:k], tail_keys):
+            if old == new:
+                continue
+            width = max(len(old), len(new))
+            differing = [
+                index for index in range(width)
+                if (old[index] if index < len(old) else "")
+                != (new[index] if index < len(new) else "")
+            ]
+            first = prov[0] if prov else (None, None, None)
+            issues.append({
+                "kind": "overlap_mismatch",
+                "chunk_id": first[0],
+                "page": first[1],
+                "row_label": key,
+                "columns": differing,
+                "note": "same physical row was extracted twice with different "
+                        "values in overlapping image strips",
+            })
+        return right_rows[k:], right_prov[k:]
+
+    return right_rows, right_prov
+
+
 def join_vertical(left: Table, right: Table) -> Table:
     if not can_join_vertically(left, right):
         raise ValueError("tables are not mechanically compatible vertically")
 
     headers = (left["headers"] if not _header_is_blank(left["headers"])
                else right["headers"])
+    issues = deepcopy(left["issues"]) + deepcopy(right["issues"])
+    right_rows, right_prov = [], []
+    for row, prov in zip(deepcopy(right["rows"]),
+                         deepcopy(right["row_prov"])):
+        if _is_header_repeat(row, headers):
+            continue
+        right_rows.append(row)
+        right_prov.append(prov)
+
+    if right.get("overlaps_prev"):
+        right_rows, right_prov = _dedup_declared_overlap(
+            left["rows"], right_rows, right_prov, issues)
+
     result = {
         "headers": list(headers),
-        "rows": deepcopy(left["rows"]) + deepcopy(right["rows"]),
-        "row_prov": deepcopy(left["row_prov"]) + deepcopy(right["row_prov"]),
+        "rows": deepcopy(left["rows"]) + right_rows,
+        "row_prov": deepcopy(left["row_prov"]) + right_prov,
         "pages": sorted(set(left["pages"]) | set(right["pages"])),
         "chunks": sorted(set(left["chunks"]) | set(right["chunks"])),
-        "issues": deepcopy(left["issues"]) + deepcopy(right["issues"]),
+        "issues": issues,
         "source_fragments": (list(left["source_fragments"])
                              + list(right["source_fragments"])),
         "assembly": (list(left["assembly"]) + list(right["assembly"])
@@ -136,6 +212,7 @@ def join_vertical(left: Table, right: Table) -> Table:
                          "right_pages": list(right["pages"])}]),
         "joined_columns": bool(left.get("joined_columns")
                                or right.get("joined_columns")),
+        "overlaps_prev": False,
     }
     result["n_rows"], result["n_cols"] = _shape(result["headers"], result["rows"])
     return result
@@ -163,6 +240,7 @@ def join_horizontal(left: Table, right: Table) -> Table:
                          "left_pages": list(left["pages"]),
                          "right_pages": list(right["pages"])}]),
         "joined_columns": True,
+        "overlaps_prev": False,
     }
     result["n_rows"], result["n_cols"] = _shape(result["headers"], result["rows"])
     return result
@@ -190,12 +268,7 @@ def _dedupe(layouts: Iterable[Layout]) -> list[Layout]:
 
 
 def _closure_variants(layout: Layout) -> list[Layout]:
-    """After a local join, allow the two newest logical blocks to collapse.
-
-    This is what permits the ordinary four-page pattern:
-      horizontal(1,2), horizontal(3,4), then vertical(the two wide blocks).
-    Only the final adjacent blocks are considered; page order is never permuted.
-    """
+    """Allow the newest adjacent logical blocks to collapse repeatedly."""
     out, queue, seen = [], [layout], set()
     while queue:
         current = queue.pop()
@@ -216,12 +289,7 @@ def _closure_variants(layout: Layout) -> list[Layout]:
 
 
 def enumerate_layouts(fragments: list[dict], max_candidates: int = 256) -> list[Layout]:
-    """Enumerate mechanically plausible document-order table assemblies.
-
-    No candidate is called WIP or CC here.  No validator runs here.  When shape
-    leaves more than one real interpretation, the caller evaluates these layouts
-    with the cheap accounting math and chooses the coherent one.
-    """
+    """Enumerate mechanically plausible document-order table assemblies."""
     normalized = [normalize_fragment(fragment, ordinal)
                   for ordinal, fragment in enumerate(fragments)]
     normalized.sort(key=lambda table: (min(table["pages"]),
@@ -233,8 +301,8 @@ def enumerate_layouts(fragments: list[dict], max_candidates: int = 256) -> list[
     for fragment in normalized[1:]:
         next_layouts = []
         for layout in layouts:
-            # Separate is always legal.  It is essential for multiple tables on
-            # one page and for unsupported future financial-statement sections.
+            # Separate is always legal: multiple tables on one page and future
+            # unsupported statement types must remain representable.
             next_layouts.extend(_closure_variants(layout + [fragment]))
 
             last = layout[-1]
@@ -247,20 +315,7 @@ def enumerate_layouts(fragments: list[dict], max_candidates: int = 256) -> list[
 
         layouts = _dedupe(next_layouts)
         if len(layouts) > max_candidates:
-            # This is a hard safety bound, not a semantic ranking.  Normal
-            # financial documents generate only a handful of candidates because
-            # incompatible shapes eliminate almost every branch immediately.
+            # Safety bound only. Normal documents stay far below it because
+            # incompatible shapes eliminate almost every branch.
             layouts = layouts[:max_candidates]
     return layouts
-
-
-def choose_layout(layouts: list[Layout],
-                  evaluator: Callable[[Layout], float]) -> Layout | None:
-    """Choose using a caller-supplied validator-backed evaluator.
-
-    Keeping the evaluator outside this module prevents subjective continuation
-    heuristics or schema-specific policy from leaking into table reconstruction.
-    """
-    if not layouts:
-        return None
-    return max(layouts, key=evaluator)
