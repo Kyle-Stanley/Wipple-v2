@@ -8,9 +8,9 @@ constructs only page-order assemblies that are mechanically possible:
 * horizontal continuation (same rows, more columns)
 
 It does not classify WIP/CC, interpret headers, inspect pixel coordinates, or use
-label-density/signature rules to decide continuation. Repeated-header cleanup and
-explicit image-strip overlap deduplication are deterministic normalization after
-a vertical candidate has already been constructed.
+label-density/signature rules to decide continuation. Repeated-header cleanup,
+exact duplicate label-column cleanup, and explicit image-strip overlap dedup are
+deterministic normalization after a candidate join has already been constructed.
 """
 
 from __future__ import annotations
@@ -135,13 +135,7 @@ def _dedup_declared_overlap(
     right_prov: list[list[tuple]],
     issues: list[dict],
 ) -> tuple[list[list[str]], list[list[tuple]]]:
-    """Remove duplicated physical rows from explicitly overlapping image strips.
-
-    The chunker, not this function, declares that the strips overlap. We compare
-    only the longest suffix/prefix window. Exact duplicate rows are removed. If
-    row keys agree but cells differ, the duplicate is still removed and the
-    disagreement is retained as extraction-quality evidence.
-    """
+    """Remove duplicated physical rows from explicitly overlapping image strips."""
     max_k = min(len(left_rows), len(right_rows), 12)
     for k in range(max_k, 0, -1):
         tail = left_rows[-k:]
@@ -218,16 +212,44 @@ def join_vertical(left: Table, right: Table) -> Table:
     return result
 
 
+def _duplicate_right_columns(left: Table, right: Table) -> set[int]:
+    """Find exact repeated columns in a horizontal continuation.
+
+    A column is removed only when its printed header matches a left header and
+    every cell matches row-for-row. This safely removes a repeated job-name/ID
+    column without guessing from text density or accounting meaning.
+    """
+    drop: set[int] = set()
+    for rj, right_header in enumerate(right["headers"]):
+        rh = str(right_header).strip().casefold()
+        if not rh:
+            continue
+        for lj, left_header in enumerate(left["headers"]):
+            if rh != str(left_header).strip().casefold():
+                continue
+            if all(
+                str(left["rows"][i][lj]).strip()
+                == str(right["rows"][i][rj]).strip()
+                for i in range(len(left["rows"]))
+            ):
+                drop.add(rj)
+                break
+    return drop
+
+
 def join_horizontal(left: Table, right: Table) -> Table:
     if not can_join_horizontally(left, right):
         raise ValueError("tables are not mechanically compatible horizontally")
 
-    rows = [list(lrow) + list(rrow)
+    drop = _duplicate_right_columns(left, right)
+    right_columns = [j for j in range(len(right["headers"])) if j not in drop]
+    rows = [list(lrow) + [rrow[j] for j in right_columns]
             for lrow, rrow in zip(left["rows"], right["rows"])]
     provenance = [list(lp) + list(rp)
                   for lp, rp in zip(left["row_prov"], right["row_prov"])]
     result = {
-        "headers": list(left["headers"]) + list(right["headers"]),
+        "headers": (list(left["headers"])
+                    + [right["headers"][j] for j in right_columns]),
         "rows": rows,
         "row_prov": provenance,
         "pages": sorted(set(left["pages"]) | set(right["pages"])),
@@ -238,7 +260,8 @@ def join_horizontal(left: Table, right: Table) -> Table:
         "assembly": (list(left["assembly"]) + list(right["assembly"])
                      + [{"op": "horizontal",
                          "left_pages": list(left["pages"]),
-                         "right_pages": list(right["pages"])}]),
+                         "right_pages": list(right["pages"]),
+                         "duplicate_columns_removed": sorted(drop)}]),
         "joined_columns": True,
         "overlaps_prev": False,
     }
@@ -289,7 +312,7 @@ def _closure_variants(layout: Layout) -> list[Layout]:
 
 
 def enumerate_layouts(fragments: list[dict], max_candidates: int = 256) -> list[Layout]:
-    """Enumerate mechanically plausible document-order table assemblies."""
+    """Legacy test helper; the runtime uses local pairwise assembly."""
     normalized = [normalize_fragment(fragment, ordinal)
                   for ordinal, fragment in enumerate(fragments)]
     normalized.sort(key=lambda table: (min(table["pages"]),
@@ -301,8 +324,6 @@ def enumerate_layouts(fragments: list[dict], max_candidates: int = 256) -> list[
     for fragment in normalized[1:]:
         next_layouts = []
         for layout in layouts:
-            # Separate is always legal: multiple tables on one page and future
-            # unsupported statement types must remain representable.
             next_layouts.extend(_closure_variants(layout + [fragment]))
 
             last = layout[-1]
@@ -315,7 +336,5 @@ def enumerate_layouts(fragments: list[dict], max_candidates: int = 256) -> list[
 
         layouts = _dedupe(next_layouts)
         if len(layouts) > max_candidates:
-            # Safety bound only. Normal documents stay far below it because
-            # incompatible shapes eliminate almost every branch.
             layouts = layouts[:max_candidates]
     return layouts
