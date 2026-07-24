@@ -176,6 +176,7 @@ def test_repeated_constant_failures_collapse_to_one_structural_mapping_issue():
         "column": 8,
         "variable": "U",
         "affected_rows": 6,
+        "rows": [1, 5, 9, 13, 17, 21],
         "row_count": 24,
         "dominant_observed": 0.0,
         "note": (

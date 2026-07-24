@@ -108,6 +108,7 @@ def _concentrated_column_failures(findings: list[dict],
             "column": column,
             "variable": variable,
             "affected_rows": len(affected_rows),
+            "rows": sorted(affected_rows),
             "row_count": int(row_count),
             "dominant_observed": dominant_value,
             "note": (
