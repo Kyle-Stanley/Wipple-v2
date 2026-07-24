@@ -138,7 +138,7 @@ Rules -- these matter more than anything else:
    accounting meaning to anything.
 3. Preserve each table's printed top-to-bottom row order and left-to-right
    column order. Use "" for a blank cell so rows retain their column shape.
-4. Transcribe only what is visible in this input. Never infer, repeat, or carry over rows or columns from another page.
+4. Transcribe only what is visible in this input; never infer, repeat, or carry over rows or columns from another page.
 5. If a continued table prints no headers on this page, return an empty string
    for each visible column header.
 6. Do not include repeated header rows as data rows.
