@@ -1,7 +1,7 @@
 """Vision extraction: printed tables -> verbatim cell-string grids.
 
-The model's only job is perception.  It finds each table visible in the input,
-transcribes the printed cells, and preserves row/column order.  It does not
+The model's only job is perception. It finds each table visible in the input,
+transcribes the printed cells, and preserves row/column order. It does not
 classify schedules, infer continuations, count its output, assign accounting
 meaning, fix values, or summarize the page.
 """
@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Legacy v2 whole-document extraction.  Kept temporarily while the document
-# graph migration is under test; the live document path uses CHUNK_PROMPT.
+# Legacy v2 whole-document extraction. Kept while the standalone section graph
+# remains supported; the live document path uses CHUNK_PROMPT.
 # ---------------------------------------------------------------------------
 
 EXTRACTION_PROMPT = """You are transcribing a contractor Work-in-Progress (WIP) schedule.
@@ -108,9 +108,9 @@ def re_extract_node(state: WippleState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# v3 page reader.  The page is the perception unit and the response contains
-# only printed grids.  Page number and table order are known by the caller;
-# row/column counts are derived deterministically from the returned arrays.
+# Page reader. The page is the perception unit and the response contains only
+# printed grids. Page number and table order are known by the caller; row and
+# column counts are derived from the returned arrays.
 # ---------------------------------------------------------------------------
 
 CHUNK_PROMPT = """You are a table detector and table reader.
@@ -138,8 +138,7 @@ Rules -- these matter more than anything else:
    accounting meaning to anything.
 3. Preserve each table's printed top-to-bottom row order and left-to-right
    column order. Use "" for a blank cell so rows retain their column shape.
-4. Transcribe only what is visible in this input. Never infer, repeat, or carry
-   over rows or columns from another page.
+4. Transcribe only what is visible in this input. Never infer, repeat, or carry over rows or columns from another page.
 5. If a continued table prints no headers on this page, return an empty string
    for each visible column header.
 6. Do not include repeated header rows as data rows.
@@ -175,7 +174,7 @@ CHUNK_OUTPUT_SCHEMA = {
 def extract_chunks_node(state) -> dict:
     """Extract pending pages into schema-blind table fragments.
 
-    The caller supplies provenance.  Table order is simply the order of the
+    The caller supplies provenance. Table order is simply the order of the
     returned list; shape metadata is deliberately not requested from the model.
     """
     chunks = state.get("chunks") or []
@@ -205,8 +204,6 @@ def extract_chunks_node(state) -> dict:
                     "chunk_id": ch["chunk_id"],
                     "pages": ch["pages"],
                     "table_index": table_index,
-                    # Compatibility alias while old stitching remains available.
-                    "position": table_index,
                     "headers": [str(h) for h in table.get("headers", [])],
                     "rows": [[str(c) for c in row]
                              for row in table.get("rows", [])],
