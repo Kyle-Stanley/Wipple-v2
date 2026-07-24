@@ -212,6 +212,50 @@ def join_vertical(left: Table, right: Table) -> Table:
     return result
 
 
+def can_recover_headers_as_row(left: Table, right: Table) -> bool:
+    """Whether a vertical candidate can also test a promoted first data row.
+
+    Continuation pages sometimes print no header and the reader promotes their
+    first job into the header array. We do not guess whether that happened from
+    header wording or numeric-density thresholds. When the grids are otherwise
+    vertically compatible and the returned headers differ, layout validation
+    may compare both literal and recovered interpretations.
+    """
+    if not can_join_vertically(left, right):
+        return False
+    if _header_is_blank(right.get("headers") or []):
+        return False
+    return list(left.get("headers") or []) != list(right.get("headers") or [])
+
+
+def join_vertical_recovering_headers(left: Table, right: Table) -> Table:
+    """Treat the right fragment's header array as its first printed data row."""
+    if not can_recover_headers_as_row(left, right):
+        raise ValueError("header-row recovery is not mechanically available")
+
+    recovered = deepcopy(right)
+    chunk = (right.get("chunks") or [None])[0]
+    page = (right.get("pages") or [None])[0]
+    recovered["rows"] = [list(right["headers"])] + deepcopy(right["rows"])
+    recovered["row_prov"] = [[(chunk, page, -1)]] + deepcopy(
+        right["row_prov"])
+    recovered["headers"] = [""] * int(right["n_cols"])
+    recovered["n_rows"] = len(recovered["rows"])
+    recovered["issues"] = deepcopy(recovered["issues"]) + [{
+        "kind": "promoted_data_row_recovered",
+        "chunk_id": chunk,
+        "page": page,
+        "note": "the continuation page's returned header array validated as "
+                "its first data row and was restored",
+    }]
+    result = join_vertical(left, recovered)
+    result["assembly"].append({
+        "op": "recover_headers_as_row",
+        "right_pages": list(right["pages"]),
+    })
+    return result
+
+
 def _duplicate_right_columns(left: Table, right: Table) -> set[int]:
     """Find exact repeated columns in a horizontal continuation.
 

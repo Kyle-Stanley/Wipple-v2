@@ -36,11 +36,14 @@ def test_chunk_extraction_forwards_pinned_model_and_schema(monkeypatch):
 
         def generate(self, *_args, **kwargs):
             self.kwargs = kwargs
-            return json.dumps({"reporting_period_text": None, "tables": []})
+            return json.dumps({
+                "reporting_period_text": "Year ended December 31, 2025",
+                "tables": [],
+            })
 
     fake = FakeClient()
     monkeypatch.setattr(extraction, "get_client", lambda: fake)
-    extraction.extract_chunks_node({
+    result = extraction.extract_chunks_node({
         "chunks": [{"chunk_id": 0, "bytes": b"pdf", "pages": [1],
                     "media_type": "application/pdf"}],
         "fragments": [],
@@ -52,6 +55,11 @@ def test_chunk_extraction_forwards_pinned_model_and_schema(monkeypatch):
 
     assert fake.kwargs["model_override"] == "claude-sonnet-4-6"
     assert fake.kwargs["output_schema"] == extraction.CHUNK_OUTPUT_SCHEMA
+    assert result["reporting_period_texts"] == [{
+        "chunk_id": 0,
+        "pages": [1],
+        "text": "Year ended December 31, 2025",
+    }]
 
 
 def test_chunk_prompt_is_strictly_one_page():

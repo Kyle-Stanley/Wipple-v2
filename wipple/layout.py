@@ -17,10 +17,12 @@ from __future__ import annotations
 
 from .layout_validation import select_layout
 from .reconstruction import (
+    can_recover_headers_as_row,
     can_join_horizontally,
     can_join_vertically,
     join_horizontal,
     join_vertical,
+    join_vertical_recovering_headers,
     normalize_fragment,
 )
 
@@ -43,6 +45,8 @@ def _pair_candidates(left: dict, right: dict) -> list[list[dict]]:
     candidates = [[left, right]]
     if can_join_vertically(left, right):
         candidates.append([join_vertical(left, right)])
+    if can_recover_headers_as_row(left, right):
+        candidates.append([join_vertical_recovering_headers(left, right)])
     if can_join_horizontally(left, right):
         candidates.append([join_horizontal(left, right)])
     return candidates

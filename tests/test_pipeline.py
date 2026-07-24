@@ -142,6 +142,45 @@ def test_e2e_failed_emits_finding_when_not_ocr_shaped(patch_client):
     assert revenue_total["computed_after_corrections"] == 3860000.0
 
 
+def test_repeatedly_wrong_underbillings_column_is_never_admitted():
+    bad = raw_table(with_totals=False)
+    job_col = bad["headers"].index("Job #")
+    under_col = bad["headers"].index("Underbillings")
+    rows = []
+    for copy in range(3):
+        for row in bad["rows"]:
+            repeated = list(row)
+            repeated[job_col] = f"{row[job_col]}-{copy + 1}"
+            if repeated[under_col] != "-":
+                repeated[under_col] = str((copy + 1) * 1000 + len(rows))
+            rows.append(repeated)
+    bad["rows"] = rows
+
+    final = build_graph().invoke({
+        "raw_table": bad,
+        "pdf_bytes": b"",
+        "source_name": "structural-column-failure.pdf",
+        "extraction_tier": "primary",
+        "reextract_count": 1,
+        "extraction_attempts": [],
+        "_metrics": Metrics(),
+    })
+    rep = final["report"]
+
+    assert rep["validator_status"] == "success"
+    assert rep["overall_status"] == "verified"
+    assert rep["findings"] == []
+    assert rep["analysis"]["corrections"] == []
+    assert rep["analysis"]["kpis"] is not None
+    source_u = next(c for c in rep["columns"] if c["col"] == 8)
+    derived_u = next(
+        c for c in rep["columns"]
+        if c["col"] is None and c["variable"] == "U")
+    assert source_u["provenance"] == "unassigned"
+    assert source_u["variable"] is None
+    assert derived_u["provenance"] == "virtual"
+
+
 def test_bad_stated_total_does_not_block_a_proven_row_correction(patch_client):
     bad = raw_table(corrupt={(2, "Revenues Earned"): "287,451"})
     revenue_col = bad["headers"].index("Revenues Earned")
@@ -182,6 +221,74 @@ def test_single_formula_inherits_proof_from_the_rest_of_the_row():
     assert finding.proposed_correction == 360000.0
     assert finding.correction_basis == ["Q = C - D"]
     assert finding.proof_kind == "inherited"
+
+
+def test_zero_predictions_cannot_steal_a_percent_column():
+    rows, labels = [], []
+    for tup in rows_numeric():
+        name, V, C, G, D, Q, P, E, _B, _U, _O = tup
+        B = E + 10_000
+        labels.append(name)
+        rows.append([V, C, G, D, Q, P, E, B, B - E])
+
+    result = validate_wip(np.asarray(rows, dtype=float), labels)
+
+    assert result.status == "success"
+    assert result.mapping[5] == "P"
+    assert result.mapping[8] == "O"
+    assert "U" in result.virtuals
+
+
+def test_zero_heavy_unused_column_is_not_promoted_to_underbillings():
+    rows, labels = [], []
+    for tup in rows_numeric():
+        name, V, C, G, D, Q, P, E, B, _U, O = tup
+        labels.append(name)
+        rows.append([V, C, G, D, Q, P, E, B, O, 0])
+
+    result = validate_wip(np.asarray(rows, dtype=float), labels)
+
+    assert result.status == "success"
+    assert result.mapping[8] == "O"
+    assert 9 not in result.mapping
+    assert "U" in result.virtuals
+
+
+def test_contract_components_cannot_identify_billings_by_partition_alone():
+    rows, labels = [], []
+    for tup in rows_numeric():
+        name, V, C, G, D, Q, P, E, B, _U, _O = tup
+        changes = round(V * 0.05)
+        original = V - changes
+        labels.append(name)
+        rows.append([original, changes, V, C, G, D, Q, P, E, B])
+
+    result = validate_wip(np.asarray(rows, dtype=float), labels)
+
+    assert result.status == "insufficient_information_for_validation"
+    assert result.mapping == {}
+    assert "Billings to Date (B) would go unverified" in result.reason
+
+
+def test_independent_billing_cycles_defeat_contract_component_symmetry():
+    rows, labels = [], []
+    for tup in rows_numeric():
+        name, V, C, G, D, Q, P, E, B, U, O = tup
+        changes = round(V * 0.05)
+        original = V - changes
+        labels.append(name)
+        rows.append([
+            original, changes, V, C, G, D, Q, P, E, B,
+            B / V, O, U, G / V, V - B,
+        ])
+
+    result = validate_wip(np.asarray(rows, dtype=float), labels)
+
+    assert result.status == "success"
+    assert result.mapping[9] == "B"
+    assert result.mapping[14] == "RB"
+    assert result.mapping.get(0) != "B"
+    assert result.mapping.get(1) != "RB"
 
 
 def test_two_errors_in_one_job_are_repaired_together_when_uniquely_proven():

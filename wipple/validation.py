@@ -50,7 +50,6 @@ CLASSIFICATION_LABELS = {
     "unresolved": "unresolved",
 }
 
-
 def _trailing_total_evidence(matrix) -> dict | None:
     """Return evidence that the final parsed row is an aggregate total.
 
@@ -472,11 +471,14 @@ def validate_node(state: WippleState) -> dict:
     return {"validation": out}
 
 
-def _race_rank(r: ValidationResult) -> int:
+def _race_rank(r: ValidationResult, n_cols: int) -> int:
     """SUCCESS and FAILED both mean the mapping CERTIFIED (failed = certified
-    mapping, wrong values -- exactly the state that carries findings); a
-    mapping without witnesses ranks below both; nothing ranks last."""
-    if r.mapping and r.witnesses:
+    mapping, wrong values -- exactly the state that carries findings). A
+    witnessed sub-lattice explaining less than half the table remains partial
+    evidence rather than a schema verdict; a mapping without witnesses ranks
+    there too, and nothing ranks last."""
+    coverage = len(r.mapping) / max(n_cols, 1)
+    if r.mapping and r.witnesses and coverage >= 0.5:
         return 2
     if r.mapping:
         return 1
@@ -497,8 +499,8 @@ def run_schema_race(matrix, labels):
     wip = validate_wip(matrix, job_labels=labels)
     cc = validate_cc(matrix, job_labels=labels)
     m = matrix.shape[1]
-    kw = (_race_rank(wip), _race_score(wip, m))
-    kc = (_race_rank(cc), _race_score(cc, m))
+    kw = (_race_rank(wip, m), _race_score(wip, m))
+    kc = (_race_rank(cc, m), _race_score(cc, m))
     chosen, name = (wip, "wip") if kw >= kc else (cc, "cc")
     return chosen, {"chosen": name,
                     "wip": {"status": wip.status, "rank": kw[0],

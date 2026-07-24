@@ -136,14 +136,6 @@ class Config:
     ident_rel: float = 0.01      # loose money tolerance: 1% of predicted value
     ident_abs: float = 1.0       # ...but never tighter than $1
     pct_ident_slack: float = 0.02   # loose percent tolerance: +/- 2 points
-    # Shadow audit (money only): after a winner is selected, an unassigned
-    # physical column that STRICTLY matches one of the winner's virtual
-    # variables on >= shadow_audit_frac of rows proves the virtual stood in
-    # while a physical column was the better explanation (anti-bug 1, heavy
-    # corruption arm) -> validation_failed on the disagreeing rows, never a
-    # silent re-route. Money only: percent vectors are too collision-prone
-    # in low dimension for majority-claims to be safe.
-    shadow_audit_frac: float = 0.55
     min_rows: int = 3            # fewer usable rows than this => insufficient
     min_informative_rows: int = 2   # clipped witnesses (U, O) need this many
     # nonzero-expected rows to carry evidence: an all-zeros column must not
@@ -296,6 +288,20 @@ RULE_BY_NAME = {r.name: r for r in RULES}
 # Money rules first: dollar-precise matches must claim columns before percent
 # matches can steal one on a low-dimensional coincidence.
 RULES_ORDERED = sorted(RULES, key=lambda r: 0 if r.kind == "money" else 1)
+
+# These families can establish the semantic meaning of the two progress
+# anchors.  The omitted families are deliberately only corroborative:
+#
+#   Q + D = C   is indistinguishable from any other decomposition of C.
+#   RB + B = V  is indistinguishable from Original + Changes = V.
+#
+# Once D or B is independently anchored, those decompositions are valuable
+# checks and can identify Q/RB by inherited proof.  They cannot bootstrap the
+# anchor they depend on without circularly naming an arbitrary additive pair.
+D_IDENTIFYING_FAMILIES = frozenset({
+    "earned", "earned_profit", "pct_complete", "billing_pos",
+})
+B_IDENTIFYING_FAMILIES = frozenset({"billing_pos", "pct_billed"})
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +556,12 @@ def _match_candidates(pred, ptol, rule, unassigned, cols, cfg, ab,
         strict = _money_strict(pred, ptol, cfg)
         loose = strict + np.maximum(cfg.ident_abs, cfg.ident_rel * np.abs(pred))
         informative = int((np.abs(pred) > strict + 1e-9).sum())
+        # Agreement with a structurally zero prediction identifies nothing.
+        # In particular, a ratio column full of values below $1 must not be
+        # claimed as an all-zero U/O/N money column merely because it lies
+        # inside whole-dollar display tolerance.
+        if informative == 0:
+            return out
         for j in unassigned:
             x = cols[j]
             match_x = (np.abs(x)
@@ -565,9 +577,10 @@ def _match_candidates(pred, ptol, rule, unassigned, cols, cfg, ab,
                 # NB: no majority-fit "salvage" here. Loosening identification
                 # lets structurally-coincident predictions of WRONG hypotheses
                 # claim real columns (e.g. with B anchored on the U column,
-                # E - U literally equals B on every underbilled row). Heavier
-                # corruption than the robust allowance is instead caught by
-                # the post-selection shadow audit (_audit_shadowed_virtuals).
+                # E - U literally equals B on every underbilled row). A column
+                # outside the robust allowance remains unassigned; available
+                # canonical values stay virtual rather than being inferred
+                # from a merely majority-fitting physical vector.
                 continue
             vv = VarVal(var=rule.out, values=x.copy(),
                         tol=np.full(m, cfg.money_obs_tol),
@@ -1135,8 +1148,7 @@ def _rank_prepare_axes(cols_m, Vm, Cm, vcol, xcol, orient,
 
     d_rule_names = ("E = V x D / C", "Q = C - D", "H = E - D",
                     "P = D / C", "R = V - E")
-    d_touch = {"earned", "cost_complete", "earned_profit",
-               "pct_complete", "backlog"}
+    d_touch = D_IDENTIFYING_FAMILIES
     d_cache, d_scores = {}, []
     for dcol in d_candidates:
         known = dict(shared)
@@ -1154,7 +1166,7 @@ def _rank_prepare_axes(cols_m, Vm, Cm, vcol, xcol, orient,
         d_scores.append((_rank_axis_score(records, d_touch, m, cfg), dcol))
 
     b_rule_names = ("RB = V - B", "PB = B / V")
-    b_touch = {"rem_billing", "pct_billed"}
+    b_touch = B_IDENTIFYING_FAMILIES
     b_cache, b_scores = {}, []
     for bcol in b_candidates:
         known = dict(shared)
@@ -1194,9 +1206,8 @@ def _rank_pair_score(records, dcol, bcol, m, cfg):
     records = [r for r in records if r[2] not in {dcol, bcol}]
     chosen, families, strict_rows, robust_rows, residual = \
         _rank_select_records(records, m, cfg)
-    d_touch = {"earned", "cost_complete", "earned_profit",
-               "pct_complete", "backlog", "billing_pos"}
-    b_touch = {"rem_billing", "pct_billed", "billing_pos"}
+    d_touch = D_IDENTIFYING_FAMILIES
+    b_touch = B_IDENTIFYING_FAMILIES
     d_fams = families & d_touch
     b_fams = families & b_touch
     rank = (int(bool(d_fams) and bool(b_fams)),
@@ -1295,8 +1306,16 @@ def _build_hypothesis(cols_m, row_index, vcol, xcol, orient, dcol, bcol, cfg):
              "D": obs("D", dcol), "B": obs("B", bcol)}
     known, edges = _peel(cols_m, seeds, cfg)
     fams = _merge_families(edges, cfg)
-    corr_d = sum(1 for s, w in fams.values() if w > 0 and dcol in s)
-    corr_b = sum(1 for s, w in fams.values() if w > 0 and bcol in s)
+    corr_d = sum(
+        1 for family, (support, weight) in fams.items()
+        if family in D_IDENTIFYING_FAMILIES
+        and weight > 0 and dcol in support
+    )
+    corr_b = sum(
+        1 for family, (support, weight) in fams.items()
+        if family in B_IDENTIFYING_FAMILIES
+        and weight > 0 and bcol in support
+    )
     evidence = float(sum(w for _, w in fams.values()))
     n_assigned = sum(1 for vv in known.values() if vv.col is not None)
     hyp = Hypothesis(
@@ -2083,58 +2102,6 @@ def _minimal_row_repair(hyp, r, cfg):
     return "none", []
 
 
-def _shadow_column_mapping(failures):
-    """Return unambiguous physical-column recoveries from shadow audits."""
-    recovered, conflicts = {}, set()
-    for failure in failures:
-        if (not failure.relation.startswith("column ")
-                or failure.column is None):
-            continue
-        col = int(failure.column)
-        prior = recovered.get(col)
-        if prior is not None and prior != failure.variable:
-            conflicts.add(col)
-        else:
-            recovered[col] = failure.variable
-    for col in conflicts:
-        recovered.pop(col, None)
-    return recovered
-
-
-def _repair_hypothesis_with_shadow_columns(hyp, cols, failures, cfg):
-    """Expose consistently identified shadow columns to the repair solver.
-
-    Identification deliberately tolerates a badly corrupted physical column
-    by routing through a virtual value. Once the shadow audit identifies what
-    that physical column represents, however, every row identity should be
-    allowed to use it while solving a repair. This is particularly important
-    for penny-exact identities such as D = E - H and D = C - Q.
-    """
-    known = dict(hyp.known)
-    occupied = {
-        vv.col: var for var, vv in known.items() if vv.col is not None}
-    used_vars = set(occupied.values())
-    for col, var in sorted(_shadow_column_mapping(failures).items()):
-        if col in occupied or var in used_vars:
-            continue
-        known[var] = VarVal(
-            var=var,
-            values=np.asarray(cols[col][hyp.row_index], dtype=float),
-            tol=np.full(len(hyp.row_index), cfg.money_obs_tol, dtype=float),
-            support=frozenset({col}), col=col,
-            derivation="physical column recovered by shadow audit",
-            deps=frozenset({var}))
-        occupied[col] = var
-        used_vars.add(var)
-    return Hypothesis(
-        v_col=hyp.v_col, x_col=hyp.x_col,
-        orientation=hyp.orientation, d_col=hyp.d_col, b_col=hyp.b_col,
-        key=hyp.key, known=known, edges=hyp.edges, families=hyp.families,
-        corr_d=hyp.corr_d, corr_b=hyp.corr_b, evidence=hyp.evidence,
-        score=hyp.score, n_assigned=hyp.n_assigned,
-        row_index=hyp.row_index)
-
-
 def _diagnose(hyp, cols, labels, cfg, failures):
     """Distill relation-level failures into cell-level findings.
 
@@ -2148,8 +2115,7 @@ def _diagnose(hyp, cols, labels, cfg, failures):
     grid-coarse and serve only as corroboration) and classify the
     observed/implied pair; (5) scan for neighbor transplants."""
     findings = []
-    repair_hyp = _repair_hypothesis_with_shadow_columns(
-        hyp, cols, failures, cfg)
+    repair_hyp = hyp
     edge_data = []
     for e in hyp.edges:
         rule = e.rule
@@ -2170,11 +2136,8 @@ def _diagnose(hyp, cols, labels, cfg, failures):
         gset = out.deps | frozenset().union(*[iv.deps for iv in ins])
         edge_data.append((e, rule, ins, out, pred, strict, ok, gset))
 
-    fail_rows = sorted({f.row_index for f in failures
-                        if not f.relation.startswith("column ")})
-    audit = [f for f in failures if f.relation.startswith("column ")]
+    fail_rows = sorted({f.row_index for f in failures})
     orig_to_m = {int(orig): m for m, orig in enumerate(hyp.row_index)}
-    culprits_by_row = {}
 
     for orig_r in fail_rows:
         r = orig_to_m.get(orig_r)
@@ -2208,8 +2171,6 @@ def _diagnose(hyp, cols, labels, cfg, failures):
             proof_kind = "joint" if len(repair) > 1 else (
                 "direct" if len(repair[0]["families"]) >=
                 cfg.correction_min_families else "inherited")
-            if len(repair) == 1:
-                culprits_by_row[int(orig_r)] = repair[0]["variable"]
             for item in repair:
                 vv = repair_hyp.known[item["variable"]]
                 observed = item["observed"] * vv.interp_scale
@@ -2283,7 +2244,6 @@ def _diagnose(hyp, cols, labels, cfg, failures):
                 transplant_sources=[]))
             continue
         culprit = cands.pop()
-        culprits_by_row[int(orig_r)] = culprit
         cvv = hyp.known[culprit]
         scale = cvv.interp_scale
         implied = _implied_values(culprit, failing, r, cfg)
@@ -2341,145 +2301,12 @@ def _diagnose(hyp, cols, labels, cfg, failures):
             classification=cls, classification_detail=detail,
             transplant_sources=transplant))
 
-    for f in audit:
-        # If an edge finding at this row already attributed the failure to
-        # a base variable of the audited virtual, the audit mismatch is a
-        # downstream echo of that culprit -- skip the duplicate.
-        vdeps = hyp.known[f.variable].deps if f.variable in hyp.known \
-            else frozenset()
-        if culprits_by_row.get(f.row_index) in vdeps:
-            continue
-        expected = (round(f.expected, 2) if f.variable not in PCT_VARS
-                    else f.expected)
-        proposed = None
-        basis = [f.relation]
-        confidence = "low"
-        proof_kind = "direct"
-
-        # The shadow audit has already established that this unassigned
-        # physical column realizes the virtual variable on a majority of
-        # rows. Promote it in a temporary hypothesis and run the same unique
-        # minimal-repair search used for normally mapped columns. This is the
-        # inherited-proof path for sparse columns such as Cost to Complete:
-        # one direct equation is enough when every alternative repair breaks
-        # another independently observed identity.
-        orig_to_m = {int(orig): m
-                     for m, orig in enumerate(hyp.row_index)}
-        mr = orig_to_m.get(f.row_index)
-        if mr is not None and f.variable in repair_hyp.known:
-            repair_status, repair = _minimal_row_repair(
-                repair_hyp, mr, cfg)
-            if repair_status == "resolved":
-                item = next((x for x in repair
-                             if x["variable"] == f.variable), None)
-                if item is not None:
-                    proposed = item["proposed"]
-                    basis = item["basis"]
-                    confidence = "high"
-                    proof_kind = "joint" if len(repair) > 1 else (
-                        "direct" if len(item["families"]) >=
-                        cfg.correction_min_families else "inherited")
-
-        cls, detail = _classify_error(
-            f.observed, proposed if proposed is not None else expected)
-        if proposed is None:
-            detail += (
-                f"; the column is identified by its fit on the other rows, "
-                "but the replacement is not unique under the row's "
-                "available identities"
-            )
-        elif proof_kind == "inherited":
-            detail += (
-                "; replacement is uniquely determined after every "
-                "alternative repair is rejected by the row's other "
-                "validated identities"
-            )
-        elif proof_kind == "joint":
-            detail += (
-                "; this value is part of the unique smallest joint repair "
-                "that makes every applicable identity pass"
-            )
-
-        tr = _transplant_sources(cols, f.row_index, f.column, f.observed)
-        if tr and cls in ("unexplained_substitution", "digit_transposition"):
-            cls = "neighbor_transplant"
-            detail = ("observed value equals neighboring cell(s) "
-                      + ", ".join(f"(row {a}, col {b})" for a, b in tr)
-                      + " -- extractor likely grabbed the wrong cell"
-                      + ("; the unique minimal repair supplies the "
-                         "replacement" if proposed is not None else
-                         "; the replacement remains mathematically "
-                         "ambiguous"))
-        findings.append(Finding(
-            row_index=f.row_index, row_label=f.row_label,
-            culprit_column=f.column, culprit_variable=f.variable,
-            candidate_variables=[f.variable], exonerated_variables=[],
-            observed=f.observed, proposed_correction=proposed,
-            correction_basis=basis, confidence=confidence,
-            classification=cls, classification_detail=detail,
-            transplant_sources=tr,
-            failing_relations=[f.relation],
-            proof_kind=proof_kind))
     return findings
 
 
 # ---------------------------------------------------------------------------
 # Ambiguity helper
 # ---------------------------------------------------------------------------
-
-def _audit_shadowed_virtuals(hyp, cols, labels, cfg):
-    """Anti-bug 1, heavy-corruption arm. A virtual node may only stand in
-    for a variable when no physical column was a better explanation. If an
-    unassigned column strictly matches a virtual variable's implied values on
-    a majority of rows (i.e. the true column was too corrupted for robust
-    identification and got routed around), that is an inconsistency of the
-    table, reported row-by-row -- never silently accepted."""
-    failures = []
-    assigned = {vv.col for vv in hyp.known.values() if vv.col is not None}
-    cols_m = [c[hyp.row_index] for c in cols]
-    m = cols_m[0].size if cols_m else 0
-    unassigned = [j for j in range(len(cols_m)) if j not in assigned]
-    if not unassigned or m == 0:
-        return failures
-    need = int(np.ceil(cfg.shadow_audit_frac * m))
-    for j in unassigned:
-        x = cols_m[j]
-        best = None
-        for var, vv in hyp.known.items():
-            if vv.col is not None or var in PCT_VARS:
-                continue
-            strict = vv.tol + cfg.money_obs_tol + cfg.cert_slack \
-                + cfg.cert_money_rel * np.abs(vv.values)
-            match_x = (np.abs(x)
-                       if var in MAGNITUDE_PRESENTATION_VARS else x)
-            match_resid = np.abs(match_x - vv.values)
-            fit = int((match_resid <= strict).sum())
-            qualifies = need <= fit < m
-            if qualifies and (best is None or fit > best[0]):
-                best = (fit, var, vv, strict, match_resid, match_x)
-        if best is None:
-            continue
-        fit, var, vv, strict, match_resid, match_x = best
-        for r in np.nonzero(match_resid > strict)[0]:
-            orig = int(hyp.row_index[r])
-            failures.append(RowFailure(
-                relation=f"column {j} realizes {var} "
-                         f"({vv.derivation}) but disagrees",
-                business_form=(f"unmapped column {j} matches "
-                               f"{VAR_NAMES[var]} on {fit}/{m} rows"),
-                variable=var, column=j, row_index=orig,
-                row_label=labels[orig],
-                observed=float(x[r]), expected=float(vv.values[r]),
-                difference=float(match_x[r] - vv.values[r]),
-                tolerance=float(strict[r])))
-    return failures
-
-
-def _certify_full(hyp, cols, labels, cfg):
-    witnesses, failures = _certify(hyp, labels, cfg)
-    failures += _audit_shadowed_virtuals(hyp, cols, labels, cfg)
-    return witnesses, failures
-
 
 def _suggest_disambiguator(h1, h2):
     """If two semantic readings survive, name a single additional column that
@@ -2592,7 +2419,7 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
     best = validatable[0]
     # The best hypothesis is certified FIRST and is never abandoned for a
     # rival because of its failures (anti-bug 1: no silent re-routing).
-    witnesses, base_failures = _certify_full(best, cols, labels, cfg)
+    witnesses, base_failures = _certify(best, labels, cfg)
     excluded_failures, excluded_incomplete, excluded_checked = \
         _certify_excluded_rows(best, cols, labels, ~finite, cfg)
     failures = base_failures + excluded_failures
@@ -2625,7 +2452,7 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
                 # explanation with a hole. Genuine ambiguity requires
                 # incomparable explanations.
                 continue
-            _, rf = _certify_full(rival, cols, labels, cfg)
+            _, rf = _certify(rival, labels, cfg)
             rex, rinc, _ = _certify_excluded_rows(
                 rival, cols, labels, ~finite, cfg)
             if rf or rex or rinc:
@@ -2649,16 +2476,7 @@ def validate_wip(columns, job_labels=None, config=None) -> ValidationResult:
             diag["rivals_refuted_by_certification"] = refuted
 
     mapping = {int(c): v for c, v in sorted(_mapping_of(best).items())}
-    recovered_by_col = _shadow_column_mapping(failures)
     occupied_vars = set(mapping.values())
-    for col, var in sorted(recovered_by_col.items()):
-        if col not in mapping and var not in occupied_vars:
-            mapping[col] = var
-            occupied_vars.add(var)
-    if recovered_by_col:
-        diag["shadow_columns_promoted"] = {
-            int(col): var for col, var in recovered_by_col.items()
-            if mapping.get(int(col)) == var}
     other = "G" if best.orientation == "C" else "C"
     orientation = (
         f"estimate column (col {best.x_col}) read as "
