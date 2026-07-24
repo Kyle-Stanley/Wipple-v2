@@ -425,6 +425,17 @@ def analyze_node(state: WippleState) -> dict:
     if matrix is None or getattr(matrix, "size", 0) == 0:
         return {"analysis": {"kpis": None, "signals": [],
                              "basis": "none"}, "table": None}
+    if v.get("status") == "structural_mapping_failure":
+        return {
+            "analysis": {
+                "kpis": None,
+                "signals": [],
+                "basis": "structural-mapping-failure",
+                "structural_issues": list(v.get("structural_issues") or []),
+                "corrections": [],
+            },
+            "table": _table(state, {}),
+        }
 
     if (v.get("schema") == "cc"):
         return _analyze_cc(matrix, v, labels)

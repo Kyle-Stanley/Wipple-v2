@@ -8,6 +8,8 @@ from wipple.reconstruction import (
     join_vertical,
     normalize_fragment,
 )
+from wipple.layout import assemble
+from synth import raw_table
 
 
 def fragment(page, rows, cols, table_index=0, headers=True):
@@ -127,3 +129,24 @@ def test_nonadjacent_pages_never_secretly_reassemble():
     ])
     assert len(layouts) == 1
     assert shapes(layouts[0]) == [(12, 8), (12, 8)]
+
+
+def test_validator_recovers_first_continuation_job_promoted_to_headers():
+    source = raw_table(with_totals=False)
+    first = {
+        "chunk_id": 0, "pages": [1], "table_index": 0,
+        "headers": source["headers"], "rows": source["rows"][:4],
+    }
+    second_rows = source["rows"][4:]
+    second = {
+        "chunk_id": 1, "pages": [2], "table_index": 0,
+        "headers": second_rows[0], "rows": second_rows[1:],
+    }
+
+    tables = assemble([first, second])
+
+    assert len(tables) == 1
+    assert tables[0]["headers"] == source["headers"]
+    assert tables[0]["rows"] == source["rows"]
+    assert any(issue["kind"] == "promoted_data_row_recovered"
+               for issue in tables[0]["issues"])

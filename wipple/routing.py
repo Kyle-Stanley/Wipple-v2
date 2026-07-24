@@ -30,6 +30,7 @@ MAX_REEXTRACTS = 1
 SUCCESS = "success"
 INSUFFICIENT = "insufficient_information_for_validation"
 FAILED = "validation_failed"
+STRUCTURAL_MAPPING_FAILURE = "structural_mapping_failure"
 
 
 def route_after_extract(state: WippleState) -> str:
@@ -141,6 +142,12 @@ def emit_node(state: WippleState) -> dict:
                             "provenance": prov,
                             "llm_confidence": fb_conf.get(mcol)})
         overall = "llm_mapped_unverified" if fb else "unmapped"
+    elif status == STRUCTURAL_MAPPING_FAILURE:
+        for mcol in range(len(col_map)):
+            columns.append({"col": mcol, "header": doc_header(mcol),
+                            "variable": None, "variable_name": None,
+                            "provenance": "unassigned"})
+        overall = "mapping_unreliable"
     else:
         overall = "unmapped"
 
@@ -155,6 +162,7 @@ def emit_node(state: WippleState) -> dict:
         "estimate_orientation": v.get("estimate_orientation", ""),
         "findings": v.get("findings", []),
         "failures": v.get("failures", []),
+        "structural_issues": v.get("structural_issues", []),
         "witnesses": v.get("witnesses", []),
         "totals_check": (state.get("parse_report") or {}).get("totals_check"),
         "parse": state.get("parse_report", {}),

@@ -142,6 +142,50 @@ def test_e2e_failed_emits_finding_when_not_ocr_shaped(patch_client):
     assert revenue_total["computed_after_corrections"] == 3860000.0
 
 
+def test_repeated_constant_failures_collapse_to_one_structural_mapping_issue():
+    bad = raw_table(with_totals=False)
+    job_col = bad["headers"].index("Job #")
+    under_col = bad["headers"].index("Underbillings")
+    rows = []
+    for copy in range(3):
+        for row in bad["rows"]:
+            repeated = list(row)
+            repeated[job_col] = f"{row[job_col]}-{copy + 1}"
+            repeated[under_col] = "-"
+            rows.append(repeated)
+    bad["rows"] = rows
+
+    final = build_graph().invoke({
+        "raw_table": bad,
+        "pdf_bytes": b"",
+        "source_name": "structural-column-failure.pdf",
+        "extraction_tier": "primary",
+        "reextract_count": 1,
+        "extraction_attempts": [],
+        "_metrics": Metrics(),
+    })
+    rep = final["report"]
+
+    assert rep["validator_status"] == "structural_mapping_failure"
+    assert rep["overall_status"] == "mapping_unreliable"
+    assert rep["findings"] == []
+    assert rep["analysis"]["corrections"] == []
+    assert rep["analysis"]["kpis"] is None
+    assert rep["structural_issues"] == [{
+        "kind": "column_mapping_failure",
+        "column": 8,
+        "variable": "U",
+        "affected_rows": 6,
+        "row_count": 24,
+        "dominant_observed": 0.0,
+        "note": (
+            "6 rows in the same mapped column were read as 0 while the "
+            "identities imply different values; the column mapping or "
+            "extraction alignment must be reviewed as one structural issue"
+        ),
+    }]
+
+
 def test_bad_stated_total_does_not_block_a_proven_row_correction(patch_client):
     bad = raw_table(corrupt={(2, "Revenues Earned"): "287,451"})
     revenue_col = bad["headers"].index("Revenues Earned")

@@ -1332,7 +1332,7 @@ function batchDocSummary(doc){
 }
 function batchValidation(item){
   const sections=documentSections(item.doc);
-  const incomplete=sections.some(section=>["unmapped","llm_mapped_unverified"].includes(section.rep.overall_status));
+  const incomplete=sections.some(section=>["unmapped","llm_mapped_unverified","mapping_unreliable"].includes(section.rep.overall_status));
   if(incomplete)return{kind:"review",icon:"!",text:"Validation needs review"};
   let checksPassed=0,checksTotal=0,nBad=0,nFixed=0,jobFixes=0,totalFixes=0;
   sections.forEach((section,si)=>{
@@ -1455,9 +1455,11 @@ function batchCardHTML(item,i){
       <span class="batch-state">needs attention</span></div>
     <p class="batch-meta">${htmlEsc(item.error||"Could not process this schedule.")}</p></article>`;
   const validation=batchValidation(item);
+  const analysisBlocked=documentSections(item.doc)
+    .some(section=>section.rep?.overall_status==="mapping_unreliable");
   return`<article class="batch-card ${validation.kind==="review"?"needs-review":""}">
     <div class="batch-top"><span class="batch-name" title="${htmlEsc(item.name)}">${htmlEsc(item.name)}</span>
-      <button class="btn batch-analysis" data-batch="${i}">View independent analysis</button></div>
+      <button class="btn batch-analysis" data-batch="${i}" ${analysisBlocked?"disabled":""}>${analysisBlocked?"Resolve mapping first":"View independent analysis"}</button></div>
     <div class="batch-validation ${validation.kind}"><span class="validation-icon">${validation.icon}</span>
       <span class="batch-validation-copy"><span>${validation.text}</span>
         ${validation.note?`<span class="batch-validation-note">${validation.note}</span>`:""}</span>
@@ -2406,7 +2408,7 @@ function combinedWipReport(indexes){
   const uniquePages=[...new Set(pages.map(Number).filter(Number.isFinite))].sort((a,b)=>a-b);
   const pageLabel=uniquePages.length?(uniquePages[0]===uniquePages[uniquePages.length-1]
     ?`page ${uniquePages[0]}`:`pages ${uniquePages[0]}–${uniquePages[uniquePages.length-1]}`):`${ordered.length} sections`;
-  const degraded=reps.some(r=>r.overall_status==="llm_mapped_unverified"||r.overall_status==="unmapped");
+  const degraded=reps.some(r=>["llm_mapped_unverified","unmapped","mapping_unreliable"].includes(r.overall_status));
   const tuning=reps.map(r=>r.analysis?.tuning).find(Boolean)||{};
   const jobs=rows.map((vars,i)=>({label:labels[i],...vars}));
   return{
@@ -2482,11 +2484,17 @@ function computeValidationChecks(rep,accepted){
   const repairs=(pr.cell_flags||[]).filter(f=>f.flag==="confusable_repair").length;
   const nrows=tableJobCount(rep.table)||pr.n_rows||0;
   const checks=[];
+  const structural=rep.structural_issues||[];
   const C=(st,label,note)=>checks.push({st,label,note});
 
   C("ok",`Parsed ${nrows} jobs, ${pr.n_numeric_cols??"?"} numeric columns`,
     repairs?`${repairs} OCR-damaged cell${repairs>1?"s":""} repaired, originals kept`:"");
-  if(o==="verified"||o==="verified_mapping_with_findings"){
+  if(o==="mapping_unreliable"){
+    const affected=structural.reduce((n,issue)=>n+(+issue.affected_rows||0),0);
+    const variables=[...new Set(structural.map(issue=>issue.variable).filter(Boolean))];
+    C("bad","Column identification failed structurally",
+      `${affected} rows failed in the same mapped ${variables.length?variables.join("/")+" ":""}column. Wipple withheld those cell corrections and analysis until the extraction or column mapping is resolved.`);
+  }else if(o==="verified"||o==="verified_mapping_with_findings"){
     const cov=(rep.analysis||{}).coverage||{};
     const partial=cov.numeric_cols&&cov.mapped_cols<cov.numeric_cols;
     C("ok","Column identification certified",
@@ -2588,6 +2596,7 @@ function renderCertificate(rep){
       <td style="text-align:right">${use}</td></tr>`;
   };
   const hasCorrections=findings.length||totalCorrs.length;
+  const structuralBlocked=rep.overall_status==="mapping_unreliable";
   const excHTML=hasCorrections?`<p style="font-size:12.5px;color:var(--muted);margin:14px auto 8px;max-width:62ch">Corrections are applied automatically. Check Revert to printed on any row to keep the document's value instead, then press Update figures.</p>
   <div class="cgroup" style="text-align:left">
     <table class="ctab"><thead><tr>
@@ -2625,10 +2634,10 @@ function renderCertificate(rep){
     }).join("")}</div></details>
     <div class="go" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px">
       ${BATCH_MODE?'<button class="btn" onclick="renderBatch()">← All validations</button>':""}
-      <button class="btn primary" onclick="${BATCH_MODE?`renderBatchItemAnalysis(${BATCH_ACTIVE})`:"VIEW='dash';renderDash(REPORT);show('dash');window.scrollTo(0,0)"}">View underwriting analysis</button>
+      <button class="btn primary" ${structuralBlocked?"disabled":""} onclick="${BATCH_MODE?`renderBatchItemAnalysis(${BATCH_ACTIVE})`:"VIEW='dash';renderDash(REPORT);show('dash');window.scrollTo(0,0)"}">${structuralBlocked?"Resolve mapping before analysis":"View underwriting analysis"}</button>
     </div>
     <section class="validation-corrections"><h3>Errors and corrections</h3>
-      ${excHTML||'<p class="empty" style="text-align:left">No errors or corrections for this schedule.</p>'}
+      ${excHTML||(structuralBlocked?'<p class="empty" style="text-align:left">Individual corrections were withheld because this is a column-level identification failure.</p>':'<p class="empty" style="text-align:left">No errors or corrections for this schedule.</p>')}
     </section>
     ${headerComparisonHTML(rep)}
     ${detail}
@@ -2672,7 +2681,7 @@ function renderCertificate(rep){
 
 function renderDash(rep){
   const a=rep.analysis||{},k=computeKpis(rep);
-  const degraded=rep.overall_status==="llm_mapped_unverified"||rep.overall_status==="unmapped";
+  const degraded=["llm_mapped_unverified","unmapped","mapping_unreliable"].includes(rep.overall_status);
   const kpis=a.schema==="cc"?[
     ["Total revenue",fmtM(k.total_revenue)],
     ["Total cost",fmtM(k.total_cost)],
