@@ -1,11 +1,9 @@
-"""
-Extract node: PDF -> verbatim cell-string table via one vision call.
+"""Vision extraction: printed tables -> verbatim cell-string grids.
 
-The contract is deliberately minimal. The model's ONLY job is perception:
-transcribe what is printed, preserve column order, do not interpret. Every
-instruction that asks the model to "fix", "normalize", or "compute" anything
-moves work from the deterministic layer (auditable) to the stochastic layer
-(not) -- so there are none.
+The model's only job is perception.  It finds each table visible in the input,
+transcribes the printed cells, and preserves row/column order.  It does not
+classify schedules, infer continuations, count its output, assign accounting
+meaning, fix values, or summarize the page.
 """
 
 from __future__ import annotations
@@ -16,6 +14,12 @@ from .model_client import Metrics, extract_json, get_client
 from .state import WippleState
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Legacy v2 whole-document extraction.  Kept temporarily while the document
+# graph migration is under test; the live document path uses CHUNK_PROMPT.
+# ---------------------------------------------------------------------------
 
 EXTRACTION_PROMPT = """You are transcribing a contractor Work-in-Progress (WIP) schedule.
 
@@ -48,7 +52,6 @@ Rules -- these matter more than anything else:
 
 Return the JSON object and nothing else."""
 
-
 EXTRACTION_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -65,7 +68,7 @@ EXTRACTION_OUTPUT_SCHEMA = {
 
 def extract_node(state: WippleState) -> dict:
     tier = state.get("extraction_tier", "primary")
-    metrics: Metrics = state["_metrics"]  # injected by the runner
+    metrics: Metrics = state["_metrics"]
     attempts = list(state.get("extraction_attempts", []))
 
     try:
@@ -87,23 +90,17 @@ def extract_node(state: WippleState) -> dict:
             "page_count": int(obj.get("page_count", 1) or 1),
             "notes": [str(n) for n in obj.get("notes", [])],
         }
-        attempts.append({"tier": tier, "ok": True, "rows": len(raw_table["rows"])})
+        attempts.append({"tier": tier, "ok": True,
+                         "rows": len(raw_table["rows"])})
         return {"raw_table": raw_table, "extraction_attempts": attempts}
-    except Exception as e:  # noqa: BLE001 -- failure is a routed state, not a crash
+    except Exception as e:  # noqa: BLE001 -- routed state, not a crash
         logger.exception("extraction failed on tier=%s", tier)
         attempts.append({"tier": tier, "ok": False, "error": str(e)})
         return {"raw_table": None, "extraction_attempts": attempts}
 
 
 def re_extract_node(state: WippleState) -> dict:
-    """Escalate tier, bump the retry counter; the graph loops back to extract.
-
-    Carries the validator's cell-level findings nowhere on purpose: the
-    re-extraction is independent. If the strong model independently produces
-    the value the validator's identities implied, that is two independent
-    witnesses agreeing -- feeding the expected value into the prompt would
-    collapse them into one.
-    """
+    """Escalate tier; re-extraction remains independent of proposed repairs."""
     return {
         "extraction_tier": "escalated",
         "reextract_count": int(state.get("reextract_count", 0)) + 1,
@@ -111,79 +108,76 @@ def re_extract_node(state: WippleState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# v3: per-chunk extraction. The chunk is the perception unit; the page is
-# provenance. The prompt's only addition over v2 is the tables array (a page
-# can carry two distinct tables) -- every verbatim rule is unchanged.
+# v3 page reader.  The page is the perception unit and the response contains
+# only printed grids.  Page number and table order are known by the caller;
+# row/column counts are derived deterministically from the returned arrays.
 # ---------------------------------------------------------------------------
 
-_V2_SHAPE = (
-    '{\n'
-    '  "headers": ["<column header 1>", "..."],\n'
-    '  "rows": [["<cell>", "<cell>", "..."], ...],\n'
-    '  "page_count": <int>,\n'
-    '  "notes": ["<anything unusual about the document structure>"]\n'
-    '}')
-_V3_SHAPE = (
-    '{\n'
-    '  "reporting_period_text": "<exact printed reporting-period phrase or null>",\n'
-    '  "tables": [\n'
-    '    {"headers": ["<column header 1>", "..."],\n'
-    '     "rows": [["<cell>", "<cell>", "..."], ...],\n'
-    '     "position": <0-based order of this table on the page>,\n'
-    '     "notes": ["<anything unusual>"]}\n'
-    '  ]\n'
-    '}\n\n'
-    'If the page continues a table from a previous page and reprints no\n'
-    'headers, return "headers" as a list of empty strings matching the\n'
-    'column count. If the page holds TWO separate tables (e.g. contracts in\n'
-    'progress and completed contracts), return both, in reading order.')
+CHUNK_PROMPT = """You are a table detector and table reader.
 
-_MULTIPAGE_RULE = (
-    '4. If the table spans multiple pages, the columns are the same on every\n'
-    '   page: continue the same rows array across pages in reading order.\n'
-    '   Do not repeat header rows as data rows.')
-_ONE_PAGE_RULE = (
-    '4. This input contains only one page or image slice. Transcribe only the\n'
-    '   rows visible in this input; never infer, repeat, or carry over rows\n'
-    '   from pages you cannot see. Do not include a repeated header as data.')
+This input contains exactly one page or image slice from a possibly longer
+financial document. Find every distinct table visible in this input and
+transcribe each one.
 
-CHUNK_PROMPT = EXTRACTION_PROMPT.replace(
-    'Return ONLY a JSON object with this exact shape:',
-    'This is ONE PAGE (or one slice) of a possibly longer document. '
-    'Return ONLY a JSON object with this exact shape:').replace(
-    _V2_SHAPE, _V3_SHAPE).replace(
-    _MULTIPAGE_RULE, _ONE_PAGE_RULE) + """
+Return ONLY a JSON object with this exact shape:
 
-For reporting_period_text, copy the exact printed phrase that states the
-schedule's reporting or period-end date (for example, "Year ended December
-31, 2025"). If this page does not print one, return null. Do not guess a date
-from the table values or page number."""
+{
+  "tables": [
+    {
+      "headers": ["<column header 1>", "..."],
+      "rows": [["<cell>", "<cell>", "..."], ...]
+    }
+  ]
+}
+
+Rules -- these matter more than anything else:
+1. Transcribe every visible table cell VERBATIM as a string. Keep commas,
+   periods, parentheses, currency signs, percent signs, and dashes exactly as
+   printed. If a printed number looks wrong, transcribe it wrong.
+2. Do NOT compute, correct, round, normalize, classify, summarize, or assign
+   accounting meaning to anything.
+3. Preserve each table's printed top-to-bottom row order and left-to-right
+   column order. Use "" for a blank cell so rows retain their column shape.
+4. Transcribe only what is visible in this input. Never infer, repeat, or carry
+   over rows or columns from another page.
+5. If a continued table prints no headers on this page, return an empty string
+   for each visible column header.
+6. Do not include repeated header rows as data rows.
+7. Include printed total and subtotal rows as ordinary rows. Downstream code
+   determines how they are used.
+8. If the page visibly contains multiple separate tables, return each as its
+   own item in top-to-bottom reading order.
+9. Exclude narrative paragraphs, page numbers, signatures, letterhead, and
+   other non-tabular page content.
+10. If there is no table on the page, return {"tables": []}.
+
+Return the JSON object and nothing else."""
 
 CHUNK_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "reporting_period_text": {"type": ["string", "null"]},
         "tables": {"type": "array", "items": {
             "type": "object",
             "properties": {
                 "headers": {"type": "array", "items": {"type": "string"}},
                 "rows": {"type": "array", "items": {
                     "type": "array", "items": {"type": "string"}}},
-                "position": {"type": "integer"},
-                "notes": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["headers", "rows", "position", "notes"],
+            "required": ["headers", "rows"],
             "additionalProperties": False,
         }},
     },
-    "required": ["reporting_period_text", "tables"],
+    "required": ["tables"],
     "additionalProperties": False,
 }
 
 
 def extract_chunks_node(state) -> dict:
-    """Extract every pending chunk (all on the first pass; the re-queued
-    subset on the escalated retry). Fragments accumulate with provenance."""
+    """Extract pending pages into schema-blind table fragments.
+
+    The caller supplies provenance.  Table order is simply the order of the
+    returned list; shape metadata is deliberately not requested from the model.
+    """
     chunks = state.get("chunks") or []
     pending = state.get("bad_chunks")
     tier = state.get("extraction_tier", "primary")
@@ -192,6 +186,7 @@ def extract_chunks_node(state) -> dict:
     fragments = [f for f in (state.get("fragments") or [])
                  if pending is None or f["chunk_id"] not in set(pending)]
     failed = []
+
     for ch in chunks:
         if pending is not None and ch["chunk_id"] not in set(pending):
             continue
@@ -204,23 +199,26 @@ def extract_chunks_node(state) -> dict:
                 metrics=metrics,
                 purpose=f"extract[chunk={ch['chunk_id']},{tier}]")
             obj = extract_json(text)
-            period_text = obj.get("reporting_period_text")
-            for t in obj.get("tables", []):
+            tables = obj.get("tables", [])
+            for table_index, table in enumerate(tables):
                 fragments.append({
-                    "chunk_id": ch["chunk_id"], "pages": ch["pages"],
-                    "headers": [str(h) for h in t.get("headers", [])],
-                    "rows": [[str(c) for c in r] for r in t.get("rows", [])],
-                    "position": int(t.get("position", 0)),
-                    "notes": [str(n) for n in t.get("notes", [])],
-                    "reporting_period_text": (
-                        str(period_text) if period_text else None),
-                    "overlaps_prev": bool(ch.get("overlaps_prev"))})
+                    "chunk_id": ch["chunk_id"],
+                    "pages": ch["pages"],
+                    "table_index": table_index,
+                    # Compatibility alias while old stitching remains available.
+                    "position": table_index,
+                    "headers": [str(h) for h in table.get("headers", [])],
+                    "rows": [[str(c) for c in row]
+                             for row in table.get("rows", [])],
+                    "overlaps_prev": bool(ch.get("overlaps_prev")),
+                })
             attempts.append({"chunk": ch["chunk_id"], "tier": tier,
-                             "ok": True})
+                             "ok": True, "tables": len(tables)})
         except Exception as e:  # noqa: BLE001 -- routed state, not a crash
             logger.exception("chunk %s extraction failed", ch["chunk_id"])
             attempts.append({"chunk": ch["chunk_id"], "tier": tier,
                              "ok": False, "error": str(e)})
             failed.append(ch["chunk_id"])
+
     return {"fragments": fragments, "extraction_attempts": attempts,
             "failed_chunks": failed, "bad_chunks": None}
