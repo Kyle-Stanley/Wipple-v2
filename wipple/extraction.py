@@ -108,9 +108,9 @@ def re_extract_node(state: WippleState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Page reader. The page is the perception unit and the response contains only
-# printed grids. Page number and table order are known by the caller; row and
-# column counts are derived from the returned arrays.
+# Page reader. The page is the perception unit. The table contract contains
+# only printed grids; one separate page-level field preserves an exact printed
+# reporting-period phrase for deterministic date parsing downstream.
 # ---------------------------------------------------------------------------
 
 CHUNK_PROMPT = """You are a table detector and table reader.
@@ -122,6 +122,7 @@ transcribe each one.
 Return ONLY a JSON object with this exact shape:
 
 {
+  "reporting_period_text": "<exact printed reporting-period phrase or null>",
   "tables": [
     {
       "headers": ["<column header 1>", "..."],
@@ -148,13 +149,19 @@ Rules -- these matter more than anything else:
    own item in top-to-bottom reading order.
 9. Exclude narrative paragraphs, page numbers, signatures, letterhead, and
    other non-tabular page content.
-10. If there is no table on the page, return {"tables": []}.
+10. For reporting_period_text, copy only an exact phrase printed on this page
+    that states a reporting or period-end date, such as "Year ended December
+    31, 2025". Return null when no such phrase is printed. Do not infer a date,
+    classify the document, or use dates found only inside table rows.
+11. If there is no table on the page, return an empty tables array. Still
+    return reporting_period_text when a reporting-period phrase is visible.
 
 Return the JSON object and nothing else."""
 
 CHUNK_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "reporting_period_text": {"type": ["string", "null"]},
         "tables": {"type": "array", "items": {
             "type": "object",
             "properties": {
@@ -166,7 +173,7 @@ CHUNK_OUTPUT_SCHEMA = {
             "additionalProperties": False,
         }},
     },
-    "required": ["tables"],
+    "required": ["reporting_period_text", "tables"],
     "additionalProperties": False,
 }
 
@@ -184,6 +191,10 @@ def extract_chunks_node(state) -> dict:
     attempts = list(state.get("extraction_attempts", []))
     fragments = [f for f in (state.get("fragments") or [])
                  if pending is None or f["chunk_id"] not in set(pending)]
+    period_texts = [
+        item for item in (state.get("reporting_period_texts") or [])
+        if pending is None or item.get("chunk_id") not in set(pending)
+    ]
     failed = []
 
     for ch in chunks:
@@ -199,6 +210,13 @@ def extract_chunks_node(state) -> dict:
                 purpose=f"extract[chunk={ch['chunk_id']},{tier}]")
             obj = extract_json(text)
             tables = obj.get("tables", [])
+            period_text = obj.get("reporting_period_text")
+            if period_text:
+                period_texts.append({
+                    "chunk_id": ch["chunk_id"],
+                    "pages": list(ch["pages"]),
+                    "text": str(period_text),
+                })
             for table_index, table in enumerate(tables):
                 fragments.append({
                     "chunk_id": ch["chunk_id"],
@@ -217,5 +235,7 @@ def extract_chunks_node(state) -> dict:
                              "ok": False, "error": str(e)})
             failed.append(ch["chunk_id"])
 
-    return {"fragments": fragments, "extraction_attempts": attempts,
+    return {"fragments": fragments,
+            "reporting_period_texts": period_texts,
+            "extraction_attempts": attempts,
             "failed_chunks": failed, "bad_chunks": None}

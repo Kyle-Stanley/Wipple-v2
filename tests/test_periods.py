@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from wipple.docgraph import run_document
+from wipple.docgraph import emit_doc_node, run_document
 from wipple.periods import extract_period_end
 
 
@@ -14,6 +14,20 @@ def test_period_end_is_exact_or_missing():
         "reporting_date": None,
         "reporting_date_error": "reporting_date_not_found",
     }
+
+
+def test_document_uses_exact_page_reporting_period_phrase():
+    result = emit_doc_node({
+        "source_name": "contractor.pdf",
+        "tables": [],
+        "fragments": [],
+        "logical_tables": [],
+        "reporting_period_texts": [
+            {"chunk_id": 0, "pages": [1],
+             "text": "Year ended December 31, 2025"},
+        ],
+    })
+    assert result["report"]["document"]["reporting_date"] == "2025-12-31"
 
 
 def test_conflicting_periods_fail_instead_of_guessing():

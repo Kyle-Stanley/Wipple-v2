@@ -47,6 +47,7 @@ class DocState(TypedDict, total=False):
     extraction_tier: str
     reextract_count: int
     extraction_attempts: list
+    reporting_period_texts: list
     logical_tables: list
     tables: list
     concordance: dict
@@ -295,9 +296,17 @@ def emit_doc_node(state: DocState) -> dict:
         "reporting_date_error": state.get("reporting_date_error"),
     }
     if not period["reporting_date"] and not period["reporting_date_error"]:
-        texts = [f.get("reporting_period_text") for f in
-                 (state.get("fragments") or [])
-                 if f.get("reporting_period_text")]
+        texts = [
+            item.get("text") for item in
+            (state.get("reporting_period_texts") or [])
+            if item.get("text")
+        ]
+        # Backward compatibility for injected pre-extracted fixtures.
+        texts.extend(
+            f.get("reporting_period_text") for f in
+            (state.get("fragments") or [])
+            if f.get("reporting_period_text")
+        )
         period = extract_period_end(texts, state.get("source_name", ""))
     schedule_types = sorted({
         s.get("type") for t in tables for s in (t.get("sections") or [])
@@ -358,7 +367,8 @@ def run_document(doc_bytes: bytes = b"", source_name: str = "",
         "media_type": media_type, "fragments": fragments or [],
         "model_override": model_override,
         "extraction_tier": "primary", "reextract_count": 0,
-        "extraction_attempts": [], "_metrics": metrics,
+        "extraction_attempts": [], "reporting_period_texts": [],
+        "_metrics": metrics,
     }, {"recursion_limit": 50})
     report = final.get("report", {})
     report["metrics"] = metrics.summary()

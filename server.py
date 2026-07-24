@@ -228,7 +228,8 @@ def models():
 def _initial(**kw) -> dict:
     return {"doc_bytes": b"", "source_name": "", "media_type": None,
             "fragments": [], "chunks": [], "extraction_tier": "primary",
-            "reextract_count": 0, "extraction_attempts": [], **kw}
+            "reextract_count": 0, "extraction_attempts": [],
+            "reporting_period_texts": [], **kw}
 
 
 @app.get("/")

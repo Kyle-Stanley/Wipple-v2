@@ -11,9 +11,10 @@ ingest -> chunk -> extract page grids -> assemble logical tables -> validate/ana
                                              +-- validator math ------+
 ```
 
-The page vision call is deliberately schema-blind. It returns only visible table
-grids (`headers` and `rows`). It does not classify WIP/CC, count rows, infer page
-continuations, read reporting dates, or produce corrections.
+The page vision call is deliberately schema-blind. It returns visible table
+grids (`headers` and `rows`) plus one separate exact reporting-period phrase
+when printed on the page. It does not classify WIP/CC, count rows, infer page
+continuations, interpret the date, or produce corrections.
 
 `wipple/layout.py` owns reconstruction:
 
@@ -94,6 +95,6 @@ python -m pytest tests/ -q
 
 ## Future document metadata
 
-Reporting dates, statement titles, narrative text, and other non-tabular document
-features will be handled by a separate document-understanding pass. They are not
-part of the page table reader's contract.
+The exact reporting-period phrase is parsed deterministically into a date.
+Statement titles, narrative text, and other non-tabular document features remain
+outside the page table reader's contract.

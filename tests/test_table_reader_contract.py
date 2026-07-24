@@ -17,11 +17,12 @@ def test_chunk_prompt_does_not_request_derived_metadata():
     assert "column_count" not in lower
     assert "bounding box" not in lower
     assert "position" not in lower
-    assert "reporting_period_text" not in lower
+    assert "do not infer a date" in lower
 
 
-def test_chunk_schema_contains_only_grids():
-    assert set(CHUNK_OUTPUT_SCHEMA["properties"]) == {"tables"}
+def test_chunk_schema_keeps_page_date_separate_from_grids():
+    assert set(CHUNK_OUTPUT_SCHEMA["properties"]) == {
+        "reporting_period_text", "tables"}
     table = CHUNK_OUTPUT_SCHEMA["properties"]["tables"]["items"]
     assert set(table["properties"]) == {"headers", "rows"}
     assert set(table["required"]) == {"headers", "rows"}
