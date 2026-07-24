@@ -101,6 +101,25 @@ def test_four_page_wide_then_long_layout_is_generated():
     assert operations(matches[0])[0].count("vertical") == 1
 
 
+def test_consecutive_schedule_groups_can_reconstruct_as_two_tables():
+    """Pages 1-2 may be one WIP while pages 3-4 are one CC schedule.
+
+    Reconstruction does not need those labels. It must preserve the candidate
+    consisting of two independently continued logical tables so the validator
+    layer can later identify the first as WIP and the second as CC.
+    """
+    layouts = enumerate_layouts([
+        fragment(1, 18, 12),
+        fragment(2, 14, 12, headers=False),
+        fragment(3, 16, 9),
+        fragment(4, 11, 9, headers=False),
+    ])
+    matches = [layout for layout in layouts
+               if shapes(layout) == [(32, 12), (27, 9)]]
+    assert matches
+    assert operations(matches[0]) == [["vertical"], ["vertical"]]
+
+
 def test_nonadjacent_pages_never_secretly_reassemble():
     layouts = enumerate_layouts([
         fragment(1, 12, 8),
