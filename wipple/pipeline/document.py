@@ -55,6 +55,9 @@ class DocState(TypedDict, total=False):
     reporting_date: Optional[str]
     reporting_date_error: Optional[str]
     _metrics: Any
+    # Undeclared keys never reach the nodes, so the server's live progress
+    # callback has to be part of the schema to survive the graph.
+    _progress: Any
 
 
 def ingest_doc_node(state: DocState) -> dict:

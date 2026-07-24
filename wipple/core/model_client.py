@@ -176,21 +176,30 @@ class Metrics:
     pinned_model_id: Optional[str] = None
     originally_requested_model_id: Optional[str] = None
 
+    # Pages of one document are read concurrently, so several threads share this
+    # object: pinning and recording are serialized rather than merely atomic.
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, repr=False, compare=False)
+
     def pin(self, model_id: str) -> str:
         canonical = canonical_model_id(model_id)
-        if self.pinned_model_id and self.pinned_model_id != canonical:
-            raise RuntimeError(
-                "Conflicting explicit model selections in one Wipple run: "
-                f"{self.pinned_model_id!r} and {canonical!r}")
-        self.pinned_model_id = canonical
-        if self.originally_requested_model_id is None:
-            self.originally_requested_model_id = model_id
+        with self._lock:
+            if self.pinned_model_id and self.pinned_model_id != canonical:
+                raise RuntimeError(
+                    "Conflicting explicit model selections in one Wipple run: "
+                    f"{self.pinned_model_id!r} and {canonical!r}")
+            self.pinned_model_id = canonical
+            if self.originally_requested_model_id is None:
+                self.originally_requested_model_id = model_id
         return canonical
 
     def record(self, rec: CallRecord) -> None:
-        self.calls.append(rec)
+        with self._lock:
+            self.calls.append(rec)
 
     def summary(self) -> dict:
+        with self._lock:
+            calls = list(self.calls)
         by_call = [
             {
                 "purpose": c.purpose,
@@ -207,18 +216,18 @@ class Metrics:
                 "cost_usd": round(c.cost_usd, 6),
                 "seconds": round(c.seconds, 2),
             }
-            for c in self.calls
+            for c in calls
         ]
         return {
             "selection_mode": "pinned" if self.pinned_model_id else "auto",
             "requested_model": self.originally_requested_model_id,
             "pinned_model": self.pinned_model_id,
-            "api_calls": len(self.calls),
-            "input_tokens": sum(c.input_tokens for c in self.calls),
-            "output_tokens": sum(c.output_tokens for c in self.calls),
-            "cost_usd": round(sum(c.cost_usd for c in self.calls), 6),
+            "api_calls": len(calls),
+            "input_tokens": sum(c.input_tokens for c in calls),
+            "output_tokens": sum(c.output_tokens for c in calls),
+            "cost_usd": round(sum(c.cost_usd for c in calls), 6),
             "models_used": sorted({
-                c.response_model_id or c.model_id for c in self.calls
+                c.response_model_id or c.model_id for c in calls
             }),
             "by_call": by_call,
         }
