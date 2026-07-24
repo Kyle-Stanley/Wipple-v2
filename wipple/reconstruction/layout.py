@@ -15,8 +15,8 @@ density rules, header semantics, or pixel geometry decide PDF page assembly.
 
 from __future__ import annotations
 
-from .layout_validation import select_layout
-from .reconstruction import (
+from .scoring import select_layout
+from .candidates import (
     can_recover_headers_as_row,
     can_join_horizontally,
     can_join_vertically,

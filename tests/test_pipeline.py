@@ -8,12 +8,12 @@ sys.path.insert(0, "tests")
 import numpy as np
 import pytest
 
-import wipple.extraction as extraction
-import wipple.fallback as fallback
-from wipple.graph import build_graph
-from wipple.model_client import Metrics
-from wipple.parsing import parse_cell, parse_table
-from wipple.wip_validator import validate_wip
+import wipple.documents.extraction as extraction
+import wipple.pipeline.fallback as fallback
+from wipple.pipeline.graph import build_graph
+from wipple.core.model_client import Metrics
+from wipple.accounting.parsing import parse_cell, parse_table
+from wipple.accounting.wip import validate_wip
 from synth import raw_table, rows_numeric
 
 
@@ -377,7 +377,7 @@ def test_e2e_extraction_failure_reported(patch_client):
     class Boom:
         def generate(self, *a, **k):
             raise RuntimeError("model down")
-    import wipple.extraction as ex
+    import wipple.documents.extraction as ex
     ex_client = Boom()
     import pytest as _;  # noqa
     # patch directly

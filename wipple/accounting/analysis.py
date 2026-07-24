@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .state import WippleState
-from .wip_validator import VAR_NAMES
+from ..core.state import WippleState
+from .wip import VAR_NAMES
 
 TUNE = {
     # Billing-position signals are ratios against what is LEFT of the job:

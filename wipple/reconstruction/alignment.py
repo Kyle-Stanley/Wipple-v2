@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .schemas import CC_LATTICE
-from .wip_validator import RULES
+from ..accounting.schemas import CC_LATTICE
+from ..accounting.wip import RULES
 
 _SHIFTS = (1, 2, -1, -2)
 
@@ -142,8 +142,8 @@ def check_bands(matrix, mapping, schema, failures, band_of_row,
         sweep_schema = schema
         clean = np.array([r for r in band_of_row if r not in rows])
         if clean.size >= min_band:
-            from .cc_validator import validate_cc
-            from .wip_validator import validate_wip
+            from ..accounting.cc import validate_cc
+            from ..accounting.wip import validate_wip
             validators = [(schema, validate_cc if schema == "cc"
                            else validate_wip)]
             if not mapping:

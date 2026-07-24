@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-from wipple.docgraph import run_document
+from wipple.pipeline.document import run_document
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

@@ -1,6 +1,6 @@
 import numpy as np
 
-from wipple.analysis import compute_signals
+from wipple.accounting.analysis import compute_signals
 
 
 def signal_ids(core):

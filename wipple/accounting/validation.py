@@ -10,9 +10,9 @@ from __future__ import annotations
 import numpy as np
 
 from .parsing import parse_table
-from .state import WippleState
-from .cc_validator import validate_cc
-from .wip_validator import VAR_NAMES, ValidationResult, validate_wip
+from ..core.state import WippleState
+from .cc import validate_cc
+from .wip import VAR_NAMES, ValidationResult, validate_wip
 
 # Only money-like variables have meaningful column totals. Percentages are
 # intentionally excluded even when the validator maps them. The period block

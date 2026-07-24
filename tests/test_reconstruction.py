@@ -1,6 +1,6 @@
 """Table reconstruction tests: grids first, accounting semantics later."""
 
-from wipple.reconstruction import (
+from wipple.reconstruction.candidates import (
     can_join_horizontally,
     can_join_vertically,
     enumerate_layouts,
@@ -8,7 +8,7 @@ from wipple.reconstruction import (
     join_vertical,
     normalize_fragment,
 )
-from wipple.layout import assemble
+from wipple.reconstruction.layout import assemble
 from synth import raw_table
 
 

@@ -10,9 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from .cc_validator import validate_cc
-from .parsing import parse_table
-from .wip_validator import ValidationResult, validate_wip
+from ..accounting.cc import validate_cc
+from ..accounting.parsing import parse_table
+from ..accounting.wip import ValidationResult, validate_wip
 
 
 @dataclass(frozen=True)

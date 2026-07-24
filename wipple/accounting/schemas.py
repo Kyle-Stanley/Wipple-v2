@@ -15,7 +15,7 @@ unambiguous about which schema produced it.
 
 from __future__ import annotations
 
-from .wip_validator import VAR_NAMES as WIP_VAR_NAMES
+from .wip import VAR_NAMES as WIP_VAR_NAMES
 
 CC_VAR_NAMES = {
     "RT": "Total Contract Revenue",

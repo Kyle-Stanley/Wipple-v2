@@ -3,7 +3,7 @@ Corpus gates: the document acceptance suite. Zero model calls, zero API keys --
 fragments are injected from the layout engine, so assertions are exact against
 known ground truth.
 
-Run: python -m wipple.gates
+Run: python -m wipple.support.gates
 """
 
 from __future__ import annotations
@@ -11,14 +11,14 @@ from __future__ import annotations
 import numpy as np
 
 from .corpus import build_book, layout_fragments, render_pdf, render_png
-from .cc_validator import validate_cc
-from .wip_validator import validate_wip
-from .parsing import parse_table
-from .layout import assemble
-from .splitting import find_cc_block
-from .block_misalign import check_bands
-from .validation import run_schema_race, serialize_validation
-from .docgraph import run_document
+from ..accounting.cc import validate_cc
+from ..accounting.wip import validate_wip
+from ..accounting.parsing import parse_table
+from ..reconstruction.layout import assemble
+from ..reconstruction.splitting import find_cc_block
+from ..reconstruction.alignment import check_bands
+from ..accounting.validation import run_schema_race, serialize_validation
+from ..pipeline.document import run_document
 
 PASS, FAIL = "PASS", "FAIL"
 _results = []

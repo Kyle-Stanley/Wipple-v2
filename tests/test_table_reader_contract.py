@@ -1,6 +1,6 @@
 """The page vision call is a table reader, not an accounting agent."""
 
-from wipple.extraction import CHUNK_OUTPUT_SCHEMA, CHUNK_PROMPT
+from wipple.documents.extraction import CHUNK_OUTPUT_SCHEMA, CHUNK_PROMPT
 
 
 def test_chunk_prompt_is_schema_blind():

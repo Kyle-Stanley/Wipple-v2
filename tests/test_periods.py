@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from wipple.docgraph import emit_doc_node, run_document
-from wipple.periods import extract_period_end
+from wipple.pipeline.document import emit_doc_node, run_document
+from wipple.documents.periods import extract_period_end
 
 
 def test_period_end_is_exact_or_missing():

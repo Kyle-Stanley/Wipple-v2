@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import logging
 
-from .model_client import Metrics, extract_json, get_client
-from .state import WippleState
-from .schemas import ALL_VAR_NAMES as VAR_NAMES
+from ..core.model_client import Metrics, extract_json, get_client
+from ..core.state import WippleState
+from ..accounting.schemas import ALL_VAR_NAMES as VAR_NAMES
 
 logger = logging.getLogger(__name__)
 

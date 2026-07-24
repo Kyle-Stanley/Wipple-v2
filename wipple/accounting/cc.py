@@ -37,9 +37,8 @@ from __future__ import annotations
 import numpy as np
 
 from .schemas import CC_LATTICE, CC_VAR_NAMES, PERIOD_SWAP
-from .wip_validator import (FAILED, INSUFFICIENT, SUCCESS, Config, Finding,
-                            RowFailure, ValidationResult, Witness,
-                            _classify_error)
+from .wip import (FAILED, INSUFFICIENT, SUCCESS, Config, Finding,
+                  RowFailure, ValidationResult, Witness, _classify_error)
 
 
 def _fit_triple(a: np.ndarray, b: np.ndarray, s: np.ndarray, cfg: Config):

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 def make_xlsx():
     sys.path.insert(0, ".")
-    from wipple.demo import demo_raw_table_12
+    from wipple.support.demo import demo_raw_table_12
     rt = demo_raw_table_12()
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "WIP"
     ws.append(["Anytown Builders, Inc."]); ws.append([])
@@ -32,7 +32,7 @@ def test_xlsx_upload_end_to_end():
 
 
 def test_sniffing():
-    from wipple.ingest import sniff
+    from wipple.documents.ingest import sniff
     assert sniff(b"%PDF-1.7 etc") == "application/pdf"
     assert sniff(b"\x89PNG\r\n\x1a\n....") == "image/png"
     assert sniff(b"\xff\xd8\xff\xe0..") == "image/jpeg"

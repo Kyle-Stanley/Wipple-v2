@@ -26,7 +26,7 @@ jobs:
           set +e
           python -m pytest tests/ -q > pytest.log 2>&1
           pytest_status=$?
-          python -m wipple.gates > gates.log 2>&1
+          python -m wipple.support.gates > gates.log 2>&1
           gates_status=$?
           set -e
           echo "pytest_status=$pytest_status" >> "$GITHUB_OUTPUT"
