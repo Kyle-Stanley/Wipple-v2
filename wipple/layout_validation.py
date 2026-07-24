@@ -1,8 +1,8 @@
 """Cheap accounting evidence for choosing among plausible table layouts.
 
 Reconstruction has already used grid shape to eliminate impossible joins before
-this module runs.  These functions do not emit user findings, apply corrections,
-run analysis, or permanently classify a table.  They ask the existing WIP and
+this module runs. These functions do not emit user findings, apply corrections,
+run analysis, or permanently classify a table. They ask the existing WIP and
 CC validators how coherently each candidate grid behaves.
 """
 
@@ -22,7 +22,8 @@ class SchemaEvidence:
     rank: int
     numeric_columns: int
     explained_columns: int
-    witness_families: int
+    row_count: int
+    witness_families: tuple[str, ...]
     witnessed_row_weight: float
     failures: int
     findings: int
@@ -34,11 +35,11 @@ class SchemaEvidence:
 
     @property
     def key(self) -> tuple:
-        """Lexicographic evidence only; no subjective continuation features."""
+        """Table-local evidence only; no continuation heuristics."""
         return (
             self.rank,
             round(self.coverage, 9),
-            self.witness_families,
+            len(self.witness_families),
             round(self.witnessed_row_weight, 6),
             -self.failures,
             -self.findings,
@@ -60,30 +61,40 @@ class LayoutEvidence:
 
     @property
     def key(self) -> tuple:
-        """Whole-layout accounting coherence.
+        """Whole-layout coherence without rewarding arbitrary partitioning.
 
-        Scores are aggregated over all selected logical tables.  Table count is
-        deliberately absent: math-equivalent "one long table" versus "two
-        separate tables" must remain ambiguous instead of being resolved by an
-        arbitrary preference for more or fewer tables.
+        A schedule split into two page tables should not receive twice the rank
+        or twice the formula-family credit of the same rows assembled vertically.
+        Coverage is weighted by table cells; witness row-weight is additive, so
+        equivalent partitions naturally tie. Exact ties remain ambiguous.
         """
         fits = [table.best for table in self.tables if table.best is not None]
-        numeric = sum(fit.numeric_columns for fit in fits)
-        explained = sum(fit.explained_columns for fit in fits)
-        coverage = explained / max(numeric, 1)
+        if not fits:
+            return (0, 0.0, 0, 0.0, 0.0, 0.0,
+                    -sum(1 for table in self.tables if not table.parseable))
+
+        weighted_numeric = sum(fit.numeric_columns * max(fit.row_count, 1)
+                               for fit in fits)
+        weighted_explained = sum(fit.explained_columns * max(fit.row_count, 1)
+                                 for fit in fits)
+        coverage = weighted_explained / max(weighted_numeric, 1)
+        families = {family for fit in fits for family in fit.witness_families}
+        total_rows = sum(max(fit.row_count, 1) for fit in fits)
+        failure_rate = sum(fit.failures for fit in fits) / max(total_rows, 1)
+        finding_rate = sum(fit.findings for fit in fits) / max(total_rows, 1)
+
         return (
-            sum(fit.rank for fit in fits),
+            min(fit.rank for fit in fits),
             round(coverage, 9),
-            sum(fit.witness_families for fit in fits),
+            len(families),
             round(sum(fit.witnessed_row_weight for fit in fits), 6),
-            -sum(fit.failures for fit in fits),
-            -sum(fit.findings for fit in fits),
+            -round(failure_rate, 9),
+            -round(finding_rate, 9),
             -sum(1 for table in self.tables if not table.parseable),
         )
 
 
 def _rank(result: ValidationResult) -> int:
-    # Mirrors the existing schema race: witnessed mapping > mapping > nothing.
     if result.mapping and result.witnesses:
         return 2
     if result.mapping:
@@ -92,9 +103,11 @@ def _rank(result: ValidationResult) -> int:
 
 
 def _evidence(schema: str, result: ValidationResult,
-              numeric_columns: int) -> SchemaEvidence:
-    families = {getattr(witness, "family", None) or witness.relation
-                for witness in result.witnesses}
+              numeric_columns: int, row_count: int) -> SchemaEvidence:
+    families = tuple(sorted({
+        str(getattr(witness, "family", None) or witness.relation)
+        for witness in result.witnesses
+    }))
     row_weight = sum(float(witness.weight) * int(witness.n_rows)
                      for witness in result.witnesses)
     return SchemaEvidence(
@@ -102,7 +115,8 @@ def _evidence(schema: str, result: ValidationResult,
         rank=_rank(result),
         numeric_columns=numeric_columns,
         explained_columns=len(result.mapping),
-        witness_families=len(families),
+        row_count=row_count,
+        witness_families=families,
         witnessed_row_weight=row_weight,
         failures=len(result.failures),
         findings=len(result.findings),
@@ -125,8 +139,9 @@ def evaluate_table(table: dict) -> TableEvidence:
     wip_result = validate_wip(matrix, job_labels=labels)
     cc_result = validate_cc(matrix, job_labels=labels)
     numeric_columns = int(matrix.shape[1])
-    wip = _evidence("wip", wip_result, numeric_columns)
-    cc = _evidence("cc", cc_result, numeric_columns)
+    row_count = int(matrix.shape[0])
+    wip = _evidence("wip", wip_result, numeric_columns, row_count)
+    cc = _evidence("cc", cc_result, numeric_columns, row_count)
     best = wip if wip.key >= cc.key else cc
     return TableEvidence(shape=shape, parseable=True,
                          best=best, wip=wip, cc=cc)
@@ -137,19 +152,13 @@ def evaluate_layout(layout: Iterable[dict]) -> LayoutEvidence:
 
 
 def rank_layouts(layouts: list[list[dict]]) -> list[tuple[list[dict], LayoutEvidence]]:
-    """Return strongest-first candidates without forcing an ambiguous winner."""
     ranked = [(layout, evaluate_layout(layout)) for layout in layouts]
     ranked.sort(key=lambda item: item[1].key, reverse=True)
     return ranked
 
 
 def select_layout(layouts: list[list[dict]]) -> dict:
-    """Select only when validator evidence has one unique best layout.
-
-    Exact accounting ties remain explicit.  A later policy may use additional
-    deterministic document evidence, but this layer will not invent a geometric
-    or semantic tiebreaker.
-    """
+    """Select only when validator evidence has one unique best layout."""
     ranked = rank_layouts(layouts)
     if not ranked:
         return {"status": "no_tables", "layout": None, "candidates": []}
