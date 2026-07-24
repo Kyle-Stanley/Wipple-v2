@@ -46,6 +46,41 @@ def invoke(graph):
     })
 
 
+def shadow_audit_regression_table():
+    """Anonymous dense WIP reproducing the downstream-column cascade."""
+    headers = [
+        "Job #", "Contract Value", "Estimated Cost", "Estimated GP",
+        "Earned Revenue", "Cost to Date", "Earned GP", "Billings",
+        "Cost to Complete", "Underbillings", "Overbillings",
+    ]
+    rows = []
+    clean_totals = np.zeros(10)
+    for copy in range(4):
+        for name, V, C, G, D, Q, _P, E, B, U, O in rows_numeric():
+            if len(rows) == 28:
+                break
+            values = np.asarray(
+                [V, C, G, E, D, E - D, B, Q, U, O], dtype=float)
+            clean_totals += values
+            rows.append(
+                [f"{name}-{copy + 1}"]
+                + [f"{value:.2f}" for value in values])
+        if len(rows) == 28:
+            break
+
+    # Two D errors poison the virtual E/Q predictions. Each omitted physical
+    # column then has one independent bad cell of its own.
+    rows[0][5] = f"{float(rows[0][5]) / 10:.2f}"
+    rows[9][5] = f"{float(rows[9][5]) + 90000:.2f}"
+    rows[18][4] = rows[17][4]                 # neighboring E transplant
+    rows[27][8] = f"{float(rows[27][8]) + 7000000:.2f}"
+
+    stated = clean_totals.copy()
+    stated[3] -= 9_000_000                    # separate E total-row error
+    rows.append(["TOTAL"] + [f"{value:.2f}" for value in stated])
+    return {"headers": headers, "rows": rows}
+
+
 # ---------------------------------------------------------------- parse unit
 
 def test_parse_cells():
@@ -62,6 +97,11 @@ def test_parse_cells():
     assert parse_cell("1.234.567,89", "eu")[0] == 1234567.89
     v, fl = parse_cell("45.2%")
     assert v == 45.2 and "pct_glyph" in fl
+    assert parse_cell("$(171,759.47)") == (
+        -171759.47, ["paren_negative"])
+    assert parse_cell("($171,759.47)") == (
+        -171759.47, ["paren_negative"])
+    assert parse_cell("$-") == (0.0, ["dash_as_zero"])
 
 
 def test_parse_table_structure():
@@ -179,6 +219,52 @@ def test_repeatedly_wrong_underbillings_column_is_never_admitted():
     assert source_u["provenance"] == "unassigned"
     assert source_u["variable"] is None
     assert derived_u["provenance"] == "virtual"
+
+
+def test_dense_wip_audits_omitted_physical_columns():
+    """Bad D cells cannot make downstream printed E/Q errors disappear."""
+    raw = shadow_audit_regression_table()
+    parsed = parse_table(raw["rows"], headers=raw["headers"])
+    result = validate_wip(parsed.matrix, parsed.job_labels)
+
+    assert result.status == "validation_failed"
+    assert result.mapping[3] == "E"
+    assert result.mapping[7] == "Q"
+    assert result.diagnostics["shadow_columns_promoted"] == {3: "E", 7: "Q"}
+    assert [(f.row_label, f.culprit_variable)
+            for f in result.findings] == [
+        ("J-101-1", "D"),
+        ("J-102-2", "D"),
+        ("J-103-3", "E"),
+        ("J-104-4", "Q"),
+    ]
+    by_row = {f.row_label: f for f in result.findings}
+    assert by_row["J-103-3"].proposed_correction == 300000.0
+    assert by_row["J-104-4"].classification == "extra_character"
+
+
+def test_dense_wip_totals_cover_recovered_columns():
+    raw = shadow_audit_regression_table()
+    section = build_graph().invoke({
+        "raw_table": raw,
+        "pdf_bytes": b"",
+        "source_name": "anonymous-regression.csv",
+        "extraction_tier": "primary",
+        "reextract_count": 1,
+        "extraction_attempts": [],
+        "_metrics": Metrics(),
+    })["report"]
+
+    assert [(f["row_label"], f["culprit_variable"])
+            for f in section["findings"]] == [
+        ("J-101-1", "D"),
+        ("J-102-2", "D"),
+        ("J-103-3", "E"),
+        ("J-104-4", "Q"),
+    ]
+    totals = section["analysis"]["totals_after_corrections"]
+    assert not totals[4]["matches_after_corrections"]
+    assert totals[8]["matches_after_corrections"]
 
 
 def test_bad_stated_total_does_not_block_a_proven_row_correction(patch_client):

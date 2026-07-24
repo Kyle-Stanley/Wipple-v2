@@ -138,6 +138,11 @@ def parse_cell(raw: str, convention: str = "us",
 
     if s == "":
         return 0.0, ["blank_as_zero"]
+    # Accounting formats commonly place the currency symbol outside the
+    # sign wrapper: ``$(1,234.56)`` and ``$-``. Strip that presentation layer
+    # before interpreting dashes or parentheses, then strip it once more
+    # after opening parentheses to also support ``($1,234.56)``.
+    s = s.lstrip(CURRENCY).strip()
     if s in DASH_TOKENS:
         return 0.0, ["dash_as_zero"]
 
@@ -153,6 +158,8 @@ def parse_cell(raw: str, convention: str = "us",
         flags.append("pct_glyph")
 
     s = s.strip().lstrip(CURRENCY).rstrip("%").strip()
+    if s in DASH_TOKENS:
+        return 0.0, flags + ["dash_as_zero"]
     s = s.replace(" ", "")
     if s.startswith("-"):
         negative = not negative
