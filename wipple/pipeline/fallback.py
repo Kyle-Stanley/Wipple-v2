@@ -1,6 +1,10 @@
 """
-Header fallback + disambiguator: the ONLY nodes allowed to read headers
-semantically.
+General header fallback + mapping disambiguator.
+
+The schema race has one separate, narrower text use: exact title/header
+vocabulary can resolve the sparse WIP/CC triangle because those two schemas
+are algebraically identical there. This module handles column mapping only
+after the math reports insufficient information.
 
 fallback   -- INSUFFICIENT without a competing mapping: the document is too
               sparse for the math to certify. The LLM assigns variables from

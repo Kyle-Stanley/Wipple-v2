@@ -6,10 +6,11 @@ owns (writes) them; everything else treats them as read-only.
 
 Design rules
 ------------
-- Headers are QUARANTINED: they live in `raw_table["headers"]` and may be
-  read only by the fallback and disambiguator nodes (semantic use) and by
-  the parse node for FORMATTING decisions only (e.g. a '%' in a header may
-  inform percent-scale normalization, never variable assignment).
+- Headers are QUARANTINED: they live in `raw_table["headers"]`. The parse node
+  may use them for formatting decisions, fallback/disambiguation may use them
+  when math cannot map a sparse table, and schema arbitration may consult
+  exact title/header vocabulary only for the algebraically identical sparse
+  WIP/CC triangle. They never create a math-certified column mapping.
 - `validation` is a plain serializable dict (numpy already converted), so
   LangGraph checkpointing works if we turn it on later. The live
   ValidationResult object never enters state.
@@ -26,6 +27,7 @@ class RawTable(TypedDict):
     """Verbatim output of the vision extraction call (post JSON-parse)."""
     headers: list[str]          # quarantined -- see module docstring
     rows: list[list[str]]       # cell strings exactly as printed on the page
+    title_texts: list[str]      # exact attached titles, if printed
     page_count: int
     notes: list[str]            # extractor's own remarks (legacy section path)
 

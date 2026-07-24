@@ -33,10 +33,13 @@ def _checks_for(mapping: dict, schema: str):
     have = set(mapping.values())
     if schema == "cc":
         out = []
-        for (a, b, s) in CC_LATTICE + [("BC", "RR", "RT")]:
+        for (a, b, s) in CC_LATTICE:
             if {a, b, s} <= have:
                 out.append((f"{s} = {a} + {b}", s, (a, b),
                             lambda A, B: A + B, "money"))
+        if {"BC", "RT"} <= have:
+            out.append(("BC = RT", "BC", ("RT",),
+                        lambda RT: RT, "money"))
         return out
     return [(r.name, r.out, r.ins, r.fn, r.kind) for r in RULES
             if not r.clipped and r.out in have and set(r.ins) <= have]

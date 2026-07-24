@@ -55,13 +55,14 @@ def g1_cc_engine():
     r3 = validate_cc(np.column_stack([RT, KT, GT]))
     gate("G1b 3-col certifies", r3.status == "success"
          and sorted(r3.mapping.values()) == ["GT", "KT", "RT"])
-    B = np.round(RT * rng.uniform(0.90, 0.99, n))
-    M5 = np.column_stack([RT, KT, GT, B, RT - B,
+    B = RT.copy()
+    M5 = np.column_stack([RT, KT, GT, B, np.round(RT * 0.05),
                           rng.integers(2019, 2026, n).astype(float)])
     r5 = validate_cc(M5)
-    gate("G1c B/RR vs KT/GT tiebreak + year noise unassigned",
+    gate("G1c completed billings equal revenue; retainage/year unassigned",
          r5.status == "success" and r5.mapping.get(1) == "KT"
-         and r5.mapping.get(3) == "BC" and 5 not in r5.mapping)
+         and r5.mapping.get(3) == "BC"
+         and 4 not in r5.mapping and 5 not in r5.mapping)
     M9e = M9.copy()
     M9e[4, 4] *= 10
     re_ = validate_cc(M9e)

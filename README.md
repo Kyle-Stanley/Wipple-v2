@@ -12,9 +12,10 @@ ingest -> chunk -> extract page grids -> assemble logical tables -> validate/ana
 ```
 
 The page vision call is deliberately schema-blind. It returns visible table
-grids (`headers` and `rows`) plus one separate exact reporting-period phrase
-when printed on the page. It does not classify WIP/CC, count rows, infer page
-continuations, interpret the date, or produce corrections.
+grids (`headers` and `rows`), the exact printed title attached to each table,
+and one separate exact reporting-period phrase when printed on the page. It
+does not classify WIP/CC, count rows, infer page continuations, interpret the
+date, or produce corrections.
 
 `wipple/reconstruction/layout.py` owns reconstruction:
 
@@ -27,7 +28,10 @@ continuations, interpret the date, or produce corrections.
 No bounding boxes, pixel geometry, label-overlap thresholds, numeric-density
 continuation rules, or page-level accounting classification decide assembly.
 Schema selection, corrections, and underwriting analysis happen only after the
-logical tables exist.
+logical tables exist. Numeric identities decide schema except for the sparse
+revenue/cost/profit triangle, where WIP and completed contracts are
+algebraically identical; only there may an exact printed title or
+schema-specific header resolve the type.
 
 ## Per-section graph
 

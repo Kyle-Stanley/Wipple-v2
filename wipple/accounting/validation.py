@@ -12,6 +12,7 @@ import numpy as np
 from .parsing import parse_table
 from ..core.state import WippleState
 from .cc import validate_cc
+from .semantics import resolve_schema_text
 from .wip import VAR_NAMES, ValidationResult, validate_wip
 
 # Only money-like variables have meaningful column totals. Percentages are
@@ -446,7 +447,17 @@ def validate_node(state: WippleState) -> dict:
             "diagnostics": {},
         }}
     labels = state.get("job_labels")
-    chosen, race = run_schema_race(matrix, labels)
+    raw = state.get("raw_table") or {}
+    doc_headers = raw.get("headers") or []
+    numeric_headers = [
+        doc_headers[j] if j < len(doc_headers) else ""
+        for j in (state.get("numeric_col_map") or [])
+    ]
+    title_texts = raw.get("title_texts")
+    if title_texts is None and raw.get("title_text"):
+        title_texts = [raw["title_text"]]
+    chosen, race = run_schema_race(
+        matrix, labels, headers=numeric_headers, title_texts=title_texts)
     out = serialize_validation(chosen)
     out["schema"] = race["chosen"]
     out.setdefault("diagnostics", {})["schema_race"] = race
@@ -493,19 +504,52 @@ def _race_score(r: ValidationResult, n_cols: int) -> float:
     return w * (len(r.mapping) / max(n_cols, 1))
 
 
-def run_schema_race(matrix, labels):
-    """Both engines run on every logical table; certification decides the
-    schema. No classifier, no header semantics -- the numbers vote."""
+def run_schema_race(matrix, labels, headers=None, title_texts=None):
+    """Run both engines, consulting printed text only for algebraic ties.
+
+    The sparse CC triangle ``cost + profit = revenue`` is identical to the
+    WIP triangle ``estimated cost + profit = contract value``. In that one
+    underdetermined case, an exact attached title or schema-specific header
+    may select between the already available interpretations. Text never
+    creates a column mapping.
+    """
     wip = validate_wip(matrix, job_labels=labels)
     cc = validate_cc(matrix, job_labels=labels)
     m = matrix.shape[1]
     kw = (_race_rank(wip, m), _race_score(wip, m))
     kc = (_race_rank(cc, m), _race_score(cc, m))
     chosen, name = (wip, "wip") if kw >= kc else (cc, "cc")
-    return chosen, {"chosen": name,
-                    "wip": {"status": wip.status, "rank": kw[0],
-                            "score": round(kw[1], 3),
-                            "explained": len(wip.mapping)},
-                    "cc": {"status": cc.status, "rank": kc[0],
-                           "score": round(kc[1], 3),
-                           "explained": len(cc.mapping)}}
+
+    cc_vars = set(cc.mapping.values())
+    cc_triangle_only = (
+        bool(cc.witnesses)
+        and {"RT", "KT", "GT"} <= cc_vars
+        and cc_vars <= {"RT", "KT", "GT"}
+    )
+    text_evidence = None
+    resolution = "math"
+    if cc_triangle_only:
+        text_evidence = resolve_schema_text(
+            headers=headers, title_texts=title_texts)
+        if text_evidence["chosen"] == "wip":
+            chosen, name = wip, "wip"
+            resolution = f"text_{text_evidence['source']}"
+        elif text_evidence["chosen"] == "cc":
+            chosen, name = cc, "cc"
+            resolution = f"text_{text_evidence['source']}"
+        else:
+            # Preserve the existing numeric result, but disclose that the
+            # schema itself was not identifiable from the sparse equation.
+            resolution = "unresolved_sparse_triangle"
+
+    return chosen, {
+        "chosen": name,
+        "resolution": resolution,
+        "text_evidence": text_evidence,
+        "wip": {"status": wip.status, "rank": kw[0],
+                "score": round(kw[1], 3),
+                "explained": len(wip.mapping)},
+        "cc": {"status": cc.status, "rank": kc[0],
+               "score": round(kc[1], 3),
+               "explained": len(cc.mapping)},
+    }

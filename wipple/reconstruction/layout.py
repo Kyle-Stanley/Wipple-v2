@@ -30,6 +30,7 @@ from .candidates import (
 def _public_table(table: dict) -> dict:
     """Return the logical-table contract consumed by the document graph."""
     return {
+        "title_texts": list(table.get("title_texts") or []),
         "headers": list(table.get("headers") or []),
         "rows": [list(row) for row in (table.get("rows") or [])],
         "row_prov": [list(item) for item in (table.get("row_prov") or [])],

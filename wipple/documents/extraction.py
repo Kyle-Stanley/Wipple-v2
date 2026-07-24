@@ -125,6 +125,7 @@ Return ONLY a JSON object with this exact shape:
   "reporting_period_text": "<exact printed reporting-period phrase or null>",
   "tables": [
     {
+      "title_text": "<exact printed title attached to this table, or null>",
       "headers": ["<column header 1>", "..."],
       "rows": [["<cell>", "<cell>", "..."], ...]
     }
@@ -145,15 +146,19 @@ Rules -- these matter more than anything else:
 6. Do not include repeated header rows as data rows.
 7. Include printed total and subtotal rows as ordinary rows. Downstream code
    determines how they are used.
-8. If the page visibly contains multiple separate tables, return each as its
+8. For title_text, copy only the exact printed title or section heading
+   visibly attached to that table, such as "Schedule of Completed Contracts".
+   Return null when the table has no printed title on this page. Do not
+   classify the table or invent a title.
+9. If the page visibly contains multiple separate tables, return each as its
    own item in top-to-bottom reading order.
-9. Exclude narrative paragraphs, page numbers, signatures, letterhead, and
+10. Exclude narrative paragraphs, page numbers, signatures, letterhead, and
    other non-tabular page content.
-10. For reporting_period_text, copy only an exact phrase printed on this page
+11. For reporting_period_text, copy only an exact phrase printed on this page
     that states a reporting or period-end date, such as "Year ended December
     31, 2025". Return null when no such phrase is printed. Do not infer a date,
     classify the document, or use dates found only inside table rows.
-11. If there is no table on the page, return an empty tables array. Still
+12. If there is no table on the page, return an empty tables array. Still
     return reporting_period_text when a reporting-period phrase is visible.
 
 Return the JSON object and nothing else."""
@@ -165,11 +170,12 @@ CHUNK_OUTPUT_SCHEMA = {
         "tables": {"type": "array", "items": {
             "type": "object",
             "properties": {
+                "title_text": {"type": ["string", "null"]},
                 "headers": {"type": "array", "items": {"type": "string"}},
                 "rows": {"type": "array", "items": {
                     "type": "array", "items": {"type": "string"}}},
             },
-            "required": ["headers", "rows"],
+            "required": ["title_text", "headers", "rows"],
             "additionalProperties": False,
         }},
     },
@@ -222,6 +228,8 @@ def extract_chunks_node(state) -> dict:
                     "chunk_id": ch["chunk_id"],
                     "pages": ch["pages"],
                     "table_index": table_index,
+                    "title_text": (str(table.get("title_text"))
+                                   if table.get("title_text") else None),
                     "headers": [str(h) for h in table.get("headers", [])],
                     "rows": [[str(c) for c in row]
                              for row in table.get("rows", [])],

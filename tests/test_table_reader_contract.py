@@ -6,9 +6,9 @@ from wipple.documents.extraction import CHUNK_OUTPUT_SCHEMA, CHUNK_PROMPT
 def test_chunk_prompt_is_schema_blind():
     lower = CHUNK_PROMPT.lower()
     assert "work-in-progress" not in lower
-    assert "completed contract" not in lower
     assert "classify" in lower and "do not" in lower
     assert "table detector and table reader" in lower
+    assert '"type"' not in lower
 
 
 def test_chunk_prompt_does_not_request_derived_metadata():
@@ -24,5 +24,12 @@ def test_chunk_schema_keeps_page_date_separate_from_grids():
     assert set(CHUNK_OUTPUT_SCHEMA["properties"]) == {
         "reporting_period_text", "tables"}
     table = CHUNK_OUTPUT_SCHEMA["properties"]["tables"]["items"]
-    assert set(table["properties"]) == {"headers", "rows"}
-    assert set(table["required"]) == {"headers", "rows"}
+    assert set(table["properties"]) == {"title_text", "headers", "rows"}
+    assert set(table["required"]) == {"title_text", "headers", "rows"}
+
+
+def test_chunk_prompt_copies_titles_without_classifying():
+    lower = CHUNK_PROMPT.lower()
+    assert "schedule of completed contracts" in lower
+    assert "copy only the exact printed title" in lower
+    assert "do not" in lower and "classify the table" in lower

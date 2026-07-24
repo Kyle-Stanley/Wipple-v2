@@ -1888,8 +1888,8 @@ function mergePeriodObservations(observations){
   const id=authority.jobId||ordered.find(o=>o.jobId)?.jobId||"";
   const deduplicated=new Set(ordered.map(o=>o.type)).size>1;
   const derived=deriveCanonicalVars(vars);
-  /* A completed-contract billing gap is retainage/remaining billings, not a
-     WIP underbilling. Likewise an exactly complete WIP has no remaining
+  /* Completed-contract billings equal total revenue. Retainage is already
+     billed/receivable, not a WIP underbilling. Likewise an exactly complete WIP has no remaining
      performance through which an under/overbilling can unwind. */
   if(authority.type==="cc"||derived.P>=1-1e-6){
     derived.U=0;derived.O=0;derived.N=0;
