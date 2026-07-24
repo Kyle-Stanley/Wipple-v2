@@ -244,6 +244,17 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .batch-progress-top span{font-size:12px;color:var(--muted);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .batch-progress-track{height:7px;border-radius:999px;background:#E1DDD1;overflow:hidden}
 .batch-progress-track span{display:block;width:0;height:100%;border-radius:inherit;background:var(--sage-deep);transition:width .25s ease}
+/* Concurrent batch: one lane per document, each narrating its own stream. */
+.batch-lanes{max-width:560px;max-height:330px;overflow-y:auto;margin:0 auto;display:flex;flex-direction:column;gap:6px;text-align:left}
+.lane{display:grid;grid-template-columns:20px minmax(0,1fr) minmax(0,1.3fr);align-items:center;gap:10px;
+  padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);font-size:12.5px}
+.lane.queued{opacity:.5}
+.lane-dot{display:grid;place-items:center;width:20px;height:20px;border-radius:999px;flex:none;
+  background:#E4E9E1;color:var(--sage-deep);font-size:11px;font-weight:700}
+.lane.failed .lane-dot{background:#F2DDD6;color:var(--brick)}
+.lane-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane-msg{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:620px){.lane{grid-template-columns:20px minmax(0,1fr)}.lane-msg{grid-column:2}}
 .log{max-width:560px;max-height:330px;overflow:hidden;margin:0 auto}
 .log .ln{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);
   font-size:14.5px;color:var(--muted);animation:rise .35s ease both}
@@ -640,6 +651,7 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
       <span id="batchProgressFile"></span></div>
     <div class="batch-progress-track" aria-hidden="true"><span id="batchProgressBar"></span></div>
   </div>
+  <div class="batch-lanes hidden" id="batchLanes"></div>
   <div class="log" id="log"></div>
 </section>
 
@@ -984,25 +996,57 @@ dz.addEventListener("drop",e=>{
 });
 
 let RUNNING=false,DOTS=0,LATEST_PROGRESS=null;
+function animatedLines(){
+  // Batch runs narrate several documents at once: every in-flight lane keeps
+  // its own ticking line. A single scan still animates its newest log line.
+  if(!$("#batchLanes").classList.contains("hidden"))
+    return [...document.querySelectorAll("#batchLanes .lane.processing .lane-msg")];
+  return LATEST_PROGRESS?[LATEST_PROGRESS]:[];
+}
 setInterval(()=>{
-  if(!RUNNING||!LATEST_PROGRESS)return;
+  if(!RUNNING)return;
   DOTS=(DOTS+1)%4;
-  const base=LATEST_PROGRESS.dataset.base||LATEST_PROGRESS.textContent.replace(/\.*$/,"");
-  LATEST_PROGRESS.textContent=base+".".repeat(DOTS);
+  for(const el of animatedLines()){
+    const base=el.dataset.base||el.textContent.replace(/\.*$/,"");
+    el.textContent=base+".".repeat(DOTS);
+  }
 },450);
 function finishProgressLine(){
-  if(LATEST_PROGRESS&&LATEST_PROGRESS.dataset.base){
-    LATEST_PROGRESS.textContent=LATEST_PROGRESS.dataset.base;
-  }
+  for(const el of animatedLines())
+    if(el.dataset.base)el.textContent=el.dataset.base;
 }
-function showBatchProgress(completed,total,file=""){
+function showBatchProgress(completed,total,running=0){
   $("#batchProgress").classList.remove("hidden");
   $("#batchProgressCount").textContent=`${completed} of ${total} complete`;
-  $("#batchProgressFile").textContent=file;
+  $("#batchProgressFile").textContent=running?`${running} reading in parallel`:"";
   $("#batchProgressBar").style.width=`${total?100*completed/total:0}%`;
 }
 function resetProgressStage(){
   finishProgressLine();DOTS=0;LATEST_PROGRESS=null;$("#log").innerHTML="";
+}
+function laneIcon(status){
+  return status==="ready"?"✓":status==="failed"?"!":status==="processing"?"·":"";
+}
+function renderBatchLanes(){
+  const el=$("#batchLanes");
+  el.innerHTML=BATCH_ITEMS.map((item,i)=>`<div class="lane ${item.status}" data-lane="${i}">
+    <span class="lane-dot" aria-hidden="true">${laneIcon(item.status)}</span>
+    <span class="lane-name" title="${htmlEsc(item.name)}">${htmlEsc(item.name)}</span>
+    <span class="lane-msg"></span></div>`).join("");
+  el.classList.remove("hidden");$("#log").classList.add("hidden");
+  BATCH_ITEMS.forEach((_,i)=>updateBatchLane(i));
+}
+function updateBatchLane(i){
+  const item=BATCH_ITEMS[i],row=$(`#batchLanes .lane[data-lane="${i}"]`);
+  if(!row)return;
+  row.className=`lane ${item.status}`;
+  row.querySelector(".lane-dot").textContent=laneIcon(item.status);
+  const msg=row.querySelector(".lane-msg"),base=String(item.line||"").replace(/\.*$/,"");
+  msg.dataset.base=base;msg.textContent=base;
+}
+function hideBatchLanes(){
+  $("#batchLanes").classList.add("hidden");$("#batchLanes").innerHTML="";
+  $("#log").classList.remove("hidden");
 }
 
 let SOURCE_FILE=null,SOURCE_URL=null,SOURCE_KIND="";
@@ -1048,7 +1092,8 @@ async function readStream(url,opts,onProgress=addLine){
   return report;
 }
 async function stream(url,opts){
-  show("processing");$("#batchProgress").classList.add("hidden");$("#log").innerHTML="";
+  show("processing");$("#batchProgress").classList.add("hidden");hideBatchLanes();
+  $("#log").innerHTML="";
   RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
   try{
     const doc=await readStream(url,opts);
@@ -1359,36 +1404,48 @@ function batchValidation(item){
   }
   return{kind:"ok",icon:"✓",text:"All checks passed"+tally};
 }
+/* Documents are independent runs on the server -- nothing in the graph is
+   shared between them -- so a batch is limited only by how many streams we
+   are willing to hold open. Four keeps us well inside the browser's per-host
+   connection cap while turning a 4-document wait into roughly one. */
+const BATCH_CONCURRENCY=4;
 async function scanBatch(files){
   resetBatch();clearSourceFile();BATCH_MODE=true;
   BATCH_ITEMS=files.map((file,i)=>({id:i,file,name:file.name||`Schedule ${i+1}`,
-    status:"queued",doc:null,error:"",reviewState:null,periodEnd:"",scheduleType:""}));
-  show("processing");resetProgressStage();showBatchProgress(0,BATCH_ITEMS.length);
+    status:"queued",doc:null,error:"",line:"Queued",reviewState:null,
+    periodEnd:"",scheduleType:""}));
+  show("processing");resetProgressStage();renderBatchLanes();
+  showBatchProgress(0,BATCH_ITEMS.length);
   $("#nav").classList.add("hidden");$("#tagline").classList.remove("hidden");
   RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
   const model=$("#model")?.value||"";
-  for(let i=0;i<BATCH_ITEMS.length;i++){
-    const item=BATCH_ITEMS[i];item.status="processing";
-    resetProgressStage();showBatchProgress(i,BATCH_ITEMS.length,item.name);
-    addLine("Reading and validating schedule");
-    const fd=new FormData();fd.append("file",item.file);
-    if(model)fd.append("model",model);
-    try{
-      item.doc=await readStream(API+"/api/scan",{method:"POST",body:fd},
-        message=>addLine(message));
-      item.error=batchDocError(item.doc);
-      item.status=item.error?"failed":"ready";
-      if(item.status==="ready")initBatchMetadata(item);
-      addLine(item.status==="ready"?"Ready for review":"Needs attention");
-    }catch(e){
-      item.error=String(e);item.status="failed";
-      addLine("Could not be processed");
+  let next=0,completed=0,running=0;
+  const tick=()=>showBatchProgress(completed,BATCH_ITEMS.length,running);
+  async function worker(){
+    while(next<BATCH_ITEMS.length){
+      const i=next++,item=BATCH_ITEMS[i];
+      item.status="processing";item.line="Reading and validating schedule";
+      running++;updateBatchLane(i);tick();
+      const fd=new FormData();fd.append("file",item.file);
+      if(model)fd.append("model",model);
+      try{
+        item.doc=await readStream(API+"/api/scan",{method:"POST",body:fd},
+          message=>{item.line=message;updateBatchLane(i);});
+        item.error=batchDocError(item.doc);
+        item.status=item.error?"failed":"ready";
+        if(item.status==="ready")initBatchMetadata(item);
+        item.line=item.status==="ready"?"Ready for review":"Needs attention";
+      }catch(e){
+        item.error=String(e);item.status="failed";
+        item.line="Could not be processed";
+      }
+      running--;completed++;updateBatchLane(i);tick();
     }
-    showBatchProgress(i+1,BATCH_ITEMS.length,item.name);
-    await new Promise(resolve=>setTimeout(resolve,220));
   }
+  const lanes=Math.min(BATCH_CONCURRENCY,BATCH_ITEMS.length);
+  await Promise.all(Array.from({length:lanes},worker));
   RUNNING=false;finishProgressLine();BATCH_ACTIVE=-1;
-  setTimeout(renderBatch,350);
+  setTimeout(()=>{hideBatchLanes();renderBatch();},450);
 }
 function saveActiveBatchReview(){
   if(!BATCH_MODE||VIEW==="batch"||BATCH_ACTIVE<0||!BATCH_ITEMS[BATCH_ACTIVE])return;
