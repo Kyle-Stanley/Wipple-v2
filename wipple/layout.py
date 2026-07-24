@@ -5,8 +5,12 @@ joins are mechanically possible. For each neighboring pair, existing WIP/CC math
 compares at most three layouts: keep separate, join vertically, join horizontally.
 A successful join collapses on a stack and may then join the preceding block.
 
+Image strips are the one explicit structural constraint: the chunker already knows
+they are overlapping slices of one image, so a shape-compatible vertical join is
+performed directly and duplicate physical rows are removed deterministically.
+
 No document-wide layout search, label-overlap continuation thresholds, numeric-
-density rules, header semantics, or pixel geometry decide assembly.
+density rules, header semantics, or pixel geometry decide PDF page assembly.
 """
 
 from __future__ import annotations
@@ -45,9 +49,16 @@ def _pair_candidates(left: dict, right: dict) -> list[list[dict]]:
 
 
 def _reduce_tail(stack: list[dict]) -> None:
-    """Collapse the newest pair while validator evidence supports a join."""
+    """Collapse the newest pair while structure/math supports a join."""
     while len(stack) >= 2:
         left, right = stack[-2], stack[-1]
+
+        # Overlapping image strips are not an inferred page relationship. The
+        # chunker explicitly created them from one image and marked the overlap.
+        if right.get("overlaps_prev") and can_join_vertically(left, right):
+            stack[-2:] = [join_vertical(left, right)]
+            continue
+
         candidates = _pair_candidates(left, right)
         if len(candidates) == 1:
             return
