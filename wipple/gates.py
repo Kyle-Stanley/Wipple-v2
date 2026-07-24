@@ -1,9 +1,9 @@
 """
-Corpus gates: the v3 acceptance suite. Zero model calls, zero API keys --
-fragments are injected from the layout engine, so every assertion is exact
-to the dollar against known ground truth.
+Corpus gates: the document acceptance suite. Zero model calls, zero API keys --
+fragments are injected from the layout engine, so assertions are exact against
+known ground truth.
 
-Run:  python -m wipple.gates
+Run: python -m wipple.gates
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from .corpus import build_book, layout_fragments, render_pdf, render_png
 from .cc_validator import validate_cc
 from .wip_validator import validate_wip
 from .parsing import parse_table
-from .stitching import stitch
+from .layout import assemble
 from .splitting import find_cc_block
 from .block_misalign import check_bands
 from .validation import run_schema_race, serialize_validation
@@ -69,7 +69,6 @@ def g1_cc_engine():
     gate("G1d planted error -> exact culprit + correction",
          f is not None and f.culprit_variable == "KC"
          and abs(f.proposed_correction - M9[4, 4]) < 1.0)
-    # schema race, both directions
     book = build_book(seed=42, wip_errors=0)
     pr = parse_table(book["wip"]["rows"], headers=book["wip"]["headers"])
     chosen, race = run_schema_race(pr.matrix, pr.job_labels)
@@ -78,45 +77,53 @@ def g1_cc_engine():
     gate("G1f race: CC table -> cc engine", race["chosen"] == "cc")
 
 
-def g3_stitcher():
+def g3_assembly():
     book = build_book(seed=42)
-    t = stitch(layout_fragments(book, cc_placement="own_page")[0])
+    t = assemble(layout_fragments(book, cc_placement="own_page")[0])
     gate("G3a plain 5-pager -> 2 logical tables",
          len(t) == 2 and len(t[0]["rows"]) == 49 and len(t[1]["rows"]) == 13)
-    t = stitch(layout_fragments(book, cc_placement="consolidated",
-                                page_subtotals=True)[0])
+
+    t = assemble(layout_fragments(book, cc_placement="consolidated",
+                                  page_subtotals=True)[0])
     gate("G3b consolidated -> 1 logical table",
          len(t) == 1 and len(t[0]["rows"]) == 68)
-    t = stitch(layout_fragments(book, vsplit=(6, True))[0])
+
+    t = assemble(layout_fragments(book, vsplit=(6, True))[0])
     w = [x for x in t if len(x["rows"]) > 20][0]
     gate("G3c columnar split rejoined (names repeated)",
          w["joined_columns"] and len(w["headers"]) == 11
          and len(w["rows"]) == 49)
-    t = stitch(layout_fragments(book, vsplit=(6, False))[0])
+
+    t = assemble(layout_fragments(book, vsplit=(6, False))[0])
     w = [x for x in t if len(x["rows"]) > 20][0]
     gate("G3d columnar split rejoined (positional)",
          w["joined_columns"] and len(w["headers"]) == 11)
-    t = stitch(layout_fragments(book, vsplit=(6, True), drop_row=(1, 4))[0])
-    iss = [i for x in t for i in x["issues"]]
-    gate("G3e dropped continuation row -> hjoin_missing_row",
-         any(i["kind"] == "hjoin_missing_row" for i in iss))
+
+    frags = layout_fragments(book, vsplit=(6, True), drop_row=(1, 4))[0]
+    raw_cells = sum(len(row) for frag in frags for row in frag["rows"])
+    t = assemble(frags)
+    assembled_cells = sum(len(row) for table in t for row in table["rows"])
+    gate("G3e incompatible horizontal join preserves every source cell",
+         assembled_cells == raw_cells)
+
     frags = layout_fragments(book)[0][:2]
     frags[1] = {**frags[1], "rows": [list(r) for r in frags[0]["rows"][-3:]]
                 + [list(r) for r in frags[1]["rows"]], "overlaps_prev": True}
     frags[1]["rows"][1][4] = "999,999"
-    t = stitch(frags)
-    gate("G3f strip overlap deduped, disagreement witnessed",
+    t = assemble(frags)
+    gate("G3f declared strip overlap deduped, disagreement witnessed",
          len(t[0]["rows"]) == 24 and any(i["kind"] == "overlap_mismatch"
                                          for i in t[0]["issues"]))
 
 
 def g4_splitter():
     book = build_book(seed=9, wip_errors=0)
-    t = stitch(layout_fragments(book, cc_placement="consolidated")[0])[0]
+    t = assemble(layout_fragments(book, cc_placement="consolidated")[0])[0]
     pr = parse_table(t["rows"], headers=t["headers"])
     v = validate_wip(pr.matrix, job_labels=pr.job_labels)
     seg = find_cc_block(pr.matrix, v.mapping)
     gate("G4a consolidated splits at the exact row", seg["split_at"] == 48)
+
     book2 = build_book(seed=11, wip_errors=0)
     V, C = book2["wip"]["true"][10][0], book2["wip"]["true"][10][1]
     book2["wip"]["true"][10] = [V, C, V - C, C, 0, 1.0, V, V, 0, 0]
@@ -124,7 +131,7 @@ def g4_splitter():
     nm = book2["wip"]["rows"][10][0]
     book2["wip"]["rows"][10] = [nm, F(V), F(C), F(V - C), F(C), "0",
                                 "100.0%", F(V), F(V), "-", "-"]
-    t2 = stitch(layout_fragments(book2)[0])[0]
+    t2 = assemble(layout_fragments(book2)[0])[0]
     pr2 = parse_table(t2["rows"], headers=t2["headers"])
     v2 = validate_wip(pr2.matrix, job_labels=pr2.job_labels)
     seg2 = find_cc_block(pr2.matrix, v2.mapping)
@@ -135,7 +142,7 @@ def g4_splitter():
 def g5_misalignment():
     book = build_book(seed=5, wip_errors=0)
     frags, _ = layout_fragments(book, shift_chunk=(2, 4))
-    t = [x for x in stitch(frags) if len(x["rows"]) > 20][0]
+    t = [x for x in assemble(frags) if len(x["rows"]) > 20][0]
     pr = parse_table(t["rows"], headers=t["headers"])
     v = serialize_validation(validate_wip(pr.matrix,
                                           job_labels=pr.job_labels))
@@ -178,7 +185,7 @@ def g6_document():
          == "verified_mapping_with_findings")
     gate("G6b CC section routed through disambiguation honestly",
          cc["report"]["overall_status"] in ("disambiguated", "verified"))
-    # consolidated end-to-end: split inside the document graph
+
     book2 = build_book(seed=9, wip_errors=0)
     frags2, _ = layout_fragments(book2, cc_placement="consolidated")
     rep2, _ = run_document(fragments=frags2, source_name="g6-consolidated")
@@ -186,10 +193,10 @@ def g6_document():
              for s in t["sections"]]
     gate("G6c consolidated document splits into wip + cc sections",
          ("wip", 49) in secs2 and any(ty == "cc" for ty, _ in secs2))
-    # v2 single-table regression through the DOCUMENT graph
+
     book3 = build_book(seed=21, n_wip=12, wip_errors=1)
     frag = [{"chunk_id": 0, "pages": [1], "headers": book3["wip"]["headers"],
-             "rows": book3["wip"]["rows"], "position": 0, "notes": []}]
+             "rows": book3["wip"]["rows"], "table_index": 0}]
     rep3, _ = run_document(fragments=frag, source_name="g6-single")
     s3 = rep3["tables"][0]["sections"][0]["report"]
     gate("G6d single-table regression: v2 behavior preserved",
@@ -200,9 +207,9 @@ def g6_document():
 def g7_concordance():
     book = build_book(seed=3, n_wip=14, wip_errors=0)
     hdrs = list(book["wip"]["headers"])
-    hdrs[4] = "Billed to Date"          # header lies: column is Cost to Date
+    hdrs[4] = "Billed to Date"
     frag = [{"chunk_id": 0, "pages": [1], "headers": hdrs,
-             "rows": book["wip"]["rows"], "position": 0, "notes": []}]
+             "rows": book["wip"]["rows"], "table_index": 0}]
     rep, _ = run_document(fragments=frag, source_name="g7")
     disc = rep["document"]["concordance"]["discordant"]
     gate("G7 lying header -> discordance finding, math outranks label",
@@ -212,7 +219,7 @@ def g7_concordance():
 def main():
     g0_corpus()
     g1_cc_engine()
-    g3_stitcher()
+    g3_assembly()
     g4_splitter()
     g5_misalignment()
     g6_document()
