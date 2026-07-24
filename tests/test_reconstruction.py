@@ -1,6 +1,6 @@
 """Table reconstruction tests: grids first, accounting semantics later."""
 
-from wipple.reconstruction import (
+from wipple.reconstruction.candidates import (
     can_join_horizontally,
     can_join_vertically,
     enumerate_layouts,
@@ -8,7 +8,7 @@ from wipple.reconstruction import (
     join_vertical,
     normalize_fragment,
 )
-from wipple.layout import assemble
+from wipple.reconstruction.layout import assemble
 from synth import raw_table
 
 
@@ -68,6 +68,17 @@ def test_horizontal_is_possible_for_same_rows():
     joined = join_horizontal(a, b)
     assert (joined["n_rows"], joined["n_cols"]) == (22, 15)
     assert all(len(prov) == 2 for prov in joined["row_prov"])
+
+
+def test_attached_title_survives_continuation_assembly():
+    first = fragment(1, 4, 5)
+    first["title_text"] = "SCHEDULE OF COMPLETED CONTRACTS"
+    second = fragment(2, 3, 5, headers=False)
+
+    joined = join_vertical(
+        normalize_fragment(first), normalize_fragment(second))
+
+    assert joined["title_texts"] == ["SCHEDULE OF COMPLETED CONTRACTS"]
 
 
 def test_equal_shapes_preserve_both_real_interpretations():

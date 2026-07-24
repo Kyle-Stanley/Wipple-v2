@@ -1,6 +1,10 @@
 """
-Header fallback + disambiguator: the ONLY nodes allowed to read headers
-semantically.
+General header fallback + mapping disambiguator.
+
+The schema race has one separate, narrower text use: exact title/header
+vocabulary can resolve the sparse WIP/CC triangle because those two schemas
+are algebraically identical there. This module handles column mapping only
+after the math reports insufficient information.
 
 fallback   -- INSUFFICIENT without a competing mapping: the document is too
               sparse for the math to certify. The LLM assigns variables from
@@ -20,9 +24,9 @@ from __future__ import annotations
 
 import logging
 
-from .model_client import Metrics, extract_json, get_client
-from .state import WippleState
-from .schemas import ALL_VAR_NAMES as VAR_NAMES
+from ..core.model_client import Metrics, extract_json, get_client
+from ..core.state import WippleState
+from ..accounting.schemas import ALL_VAR_NAMES as VAR_NAMES
 
 logger = logging.getLogger(__name__)
 

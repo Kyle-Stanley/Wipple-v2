@@ -21,18 +21,18 @@ from langgraph.graph import END, StateGraph
 import re
 from typing import Any, Optional, TypedDict
 
-from . import ingest as ingest_mod
-from .block_misalign import check_bands
-from .chunking import chunk_document
-from .concordance import concordance_node
-from .extraction import extract_chunks_node
+from ..documents import ingest as ingest_mod
+from ..reconstruction.alignment import check_bands
+from ..documents.chunking import chunk_document
+from ..accounting.concordance import concordance_node
+from ..documents.extraction import extract_chunks_node
 from .graph import build_graph
-from .layout import assemble
-from .model_client import Metrics
-from .parsing import parse_table
-from .periods import extract_period_end
-from .splitting import find_cc_block, split_sections
-from .validation import run_schema_race, serialize_validation
+from ..reconstruction.layout import assemble
+from ..core.model_client import Metrics
+from ..accounting.parsing import parse_table
+from ..documents.periods import extract_period_end
+from ..reconstruction.splitting import find_cc_block, split_sections
+from ..accounting.validation import run_schema_race, serialize_validation
 
 
 class DocState(TypedDict, total=False):
@@ -73,6 +73,7 @@ def ingest_doc_node(state: DocState) -> dict:
                                 state.get("source_name", ""))
     frag = {"chunk_id": 0, "pages": [1], "headers": raw.get("headers", []),
             "rows": raw.get("rows", []), "position": 0,
+            "title_text": None,
             "notes": ["spreadsheet ingest; no vision extraction"],
             "reporting_period_text": None}
     return {"chunks": [], "fragments": [frag], "media_type": kind, **period}
@@ -187,6 +188,7 @@ def tables_node(state: DocState) -> dict:
         entry = {"pages": t["pages"], "chunks": t["chunks"],
                  "stitch_issues": t["issues"],
                  "joined_columns": t["joined_columns"],
+                 "title_texts": t.get("title_texts") or [],
                  "headers": t["headers"],
                  "numeric_col_map": pr.numeric_col_map,
                  "sections": []}
@@ -195,7 +197,13 @@ def tables_node(state: DocState) -> dict:
             out_tables.append(entry)
             continue
 
-        chosen, race = run_schema_race(pr.matrix, pr.job_labels)
+        numeric_headers = [
+            t["headers"][j] if j < len(t["headers"]) else ""
+            for j in pr.numeric_col_map
+        ]
+        chosen, race = run_schema_race(
+            pr.matrix, pr.job_labels, headers=numeric_headers,
+            title_texts=t.get("title_texts"))
         v = serialize_validation(chosen)
         v["schema"] = race["chosen"]
         entry["schema_race"] = race
@@ -224,7 +232,9 @@ def tables_node(state: DocState) -> dict:
             bad.update(mis_bad)
             if repaired is not None:
                 matrix = repaired
-                chosen, race = run_schema_race(matrix, pr.job_labels)
+                chosen, race = run_schema_race(
+                    matrix, pr.job_labels, headers=numeric_headers,
+                    title_texts=t.get("title_texts"))
                 v = serialize_validation(chosen)
                 v["schema"] = race["chosen"]
                 entry["schema_race"] = race
@@ -254,7 +264,8 @@ def tables_node(state: DocState) -> dict:
         for sec in sections:
             final = subgraph.invoke({
                 "raw_table": {"headers": sec["headers"], "rows": sec["rows"],
-                              "page_count": 1, "notes": []},
+                              "page_count": 1, "notes": [],
+                              "title_texts": t.get("title_texts") or []},
                 "source_name": state.get("source_name", ""),
                 "model_override": state.get("model_override"),
                 # re-extraction budget pre-spent: the DOCUMENT graph owns

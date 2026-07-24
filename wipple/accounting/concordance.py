@@ -1,7 +1,9 @@
 """
-Header concordance: the one place header TEXT is allowed to speak, and only
-AFTER the math has ruled. Certification assigns variables from numbers
-alone; this layer then asks whether the printed header AGREES.
+Header concordance after math has assigned columns. Certification assigns
+variables from numbers alone; this layer then asks whether the printed header
+AGREES. The separate schema-arbitration exception is intentionally narrow:
+exact title/header vocabulary may resolve WIP vs CC only when the sparse
+revenue/cost/profit triangle is algebraically non-identifying.
 
   agree     -> the mapping gains a second, independent provenance
                ("math-certified, header-concordant")

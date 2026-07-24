@@ -15,7 +15,7 @@ unambiguous about which schema produced it.
 
 from __future__ import annotations
 
-from .wip_validator import VAR_NAMES as WIP_VAR_NAMES
+from .wip import VAR_NAMES as WIP_VAR_NAMES
 
 CC_VAR_NAMES = {
     "RT": "Total Contract Revenue",
@@ -28,6 +28,9 @@ CC_VAR_NAMES = {
     "GP": "Gross Profit Prior Years",
     "GC": "Gross Profit Current Year",
     "BC": "Billed to Date (Completed)",
+    # Retainage is a receivable subset of billings, not an additive component
+    # of revenue. It stays in the vocabulary for display/header concordance,
+    # but the CC math engine intentionally does not map it.
     "RR": "Retainage Receivable",
 }
 

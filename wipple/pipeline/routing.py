@@ -21,9 +21,9 @@ Provenance tiers (load-bearing for underwriter trust, not UI polish):
 
 from __future__ import annotations
 
-from .state import WippleState
-from .validation import OCR_SHAPED
-from .schemas import ALL_VAR_NAMES as VAR_NAMES
+from ..core.state import WippleState
+from ..accounting.validation import OCR_SHAPED
+from ..accounting.schemas import ALL_VAR_NAMES as VAR_NAMES
 
 MAX_REEXTRACTS = 1
 

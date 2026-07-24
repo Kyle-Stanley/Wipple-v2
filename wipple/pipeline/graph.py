@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from .extraction import extract_node, re_extract_node
+from ..documents.extraction import extract_node, re_extract_node
 from .fallback import disambiguate_node, fallback_node
-from .model_client import Metrics
-from .analysis import analyze_node
+from ..core.model_client import Metrics
+from ..accounting.analysis import analyze_node
 from .routing import emit_node, route_after_extract, route_after_validate
-from .state import WippleState
-from .validation import parse_node, validate_node
+from ..core.state import WippleState
+from ..accounting.validation import parse_node, validate_node
 
 
 def build_graph():

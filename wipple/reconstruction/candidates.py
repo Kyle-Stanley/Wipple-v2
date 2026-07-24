@@ -61,8 +61,15 @@ def normalize_fragment(fragment: dict, ordinal: int = 0) -> Table:
 
     table_index = fragment.get("table_index", fragment.get("position", ordinal))
     source_id = (pages[0], int(table_index))
+    title_texts = fragment.get("title_texts")
+    if title_texts is None:
+        title = fragment.get("title_text")
+        title_texts = [] if not title else [str(title)]
+    title_texts = list(dict.fromkeys(
+        str(title) for title in title_texts if str(title).strip()))
 
     return {
+        "title_texts": title_texts,
         "headers": headers,
         "rows": rows,
         "row_prov": [list(item) for item in provenance],
@@ -192,6 +199,9 @@ def join_vertical(left: Table, right: Table) -> Table:
             left["rows"], right_rows, right_prov, issues)
 
     result = {
+        "title_texts": list(dict.fromkeys(
+            list(left.get("title_texts") or [])
+            + list(right.get("title_texts") or []))),
         "headers": list(headers),
         "rows": deepcopy(left["rows"]) + right_rows,
         "row_prov": deepcopy(left["row_prov"]) + right_prov,
@@ -292,6 +302,9 @@ def join_horizontal(left: Table, right: Table) -> Table:
     provenance = [list(lp) + list(rp)
                   for lp, rp in zip(left["row_prov"], right["row_prov"])]
     result = {
+        "title_texts": list(dict.fromkeys(
+            list(left.get("title_texts") or [])
+            + list(right.get("title_texts") or []))),
         "headers": (list(left["headers"])
                     + [right["headers"][j] for j in right_columns]),
         "rows": rows,

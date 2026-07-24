@@ -3,7 +3,7 @@ Corpus gates: the document acceptance suite. Zero model calls, zero API keys --
 fragments are injected from the layout engine, so assertions are exact against
 known ground truth.
 
-Run: python -m wipple.gates
+Run: python -m wipple.support.gates
 """
 
 from __future__ import annotations
@@ -11,14 +11,14 @@ from __future__ import annotations
 import numpy as np
 
 from .corpus import build_book, layout_fragments, render_pdf, render_png
-from .cc_validator import validate_cc
-from .wip_validator import validate_wip
-from .parsing import parse_table
-from .layout import assemble
-from .splitting import find_cc_block
-from .block_misalign import check_bands
-from .validation import run_schema_race, serialize_validation
-from .docgraph import run_document
+from ..accounting.cc import validate_cc
+from ..accounting.wip import validate_wip
+from ..accounting.parsing import parse_table
+from ..reconstruction.layout import assemble
+from ..reconstruction.splitting import find_cc_block
+from ..reconstruction.alignment import check_bands
+from ..accounting.validation import run_schema_race, serialize_validation
+from ..pipeline.document import run_document
 
 PASS, FAIL = "PASS", "FAIL"
 _results = []
@@ -55,13 +55,14 @@ def g1_cc_engine():
     r3 = validate_cc(np.column_stack([RT, KT, GT]))
     gate("G1b 3-col certifies", r3.status == "success"
          and sorted(r3.mapping.values()) == ["GT", "KT", "RT"])
-    B = np.round(RT * rng.uniform(0.90, 0.99, n))
-    M5 = np.column_stack([RT, KT, GT, B, RT - B,
+    B = RT.copy()
+    M5 = np.column_stack([RT, KT, GT, B, np.round(RT * 0.05),
                           rng.integers(2019, 2026, n).astype(float)])
     r5 = validate_cc(M5)
-    gate("G1c B/RR vs KT/GT tiebreak + year noise unassigned",
+    gate("G1c completed billings equal revenue; retainage/year unassigned",
          r5.status == "success" and r5.mapping.get(1) == "KT"
-         and r5.mapping.get(3) == "BC" and 5 not in r5.mapping)
+         and r5.mapping.get(3) == "BC"
+         and 4 not in r5.mapping and 5 not in r5.mapping)
     M9e = M9.copy()
     M9e[4, 4] *= 10
     re_ = validate_cc(M9e)

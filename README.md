@@ -12,11 +12,12 @@ ingest -> chunk -> extract page grids -> assemble logical tables -> validate/ana
 ```
 
 The page vision call is deliberately schema-blind. It returns visible table
-grids (`headers` and `rows`) plus one separate exact reporting-period phrase
-when printed on the page. It does not classify WIP/CC, count rows, infer page
-continuations, interpret the date, or produce corrections.
+grids (`headers` and `rows`), the exact printed title attached to each table,
+and one separate exact reporting-period phrase when printed on the page. It
+does not classify WIP/CC, count rows, infer page continuations, interpret the
+date, or produce corrections.
 
-`wipple/layout.py` owns reconstruction:
+`wipple/reconstruction/layout.py` owns reconstruction:
 
 1. derive each returned grid's row/column shape in Python;
 2. rule out mechanically impossible adjacent-page joins;
@@ -27,7 +28,10 @@ continuations, interpret the date, or produce corrections.
 No bounding boxes, pixel geometry, label-overlap thresholds, numeric-density
 continuation rules, or page-level accounting classification decide assembly.
 Schema selection, corrections, and underwriting analysis happen only after the
-logical tables exist.
+logical tables exist. Numeric identities decide schema except for the sparse
+revenue/cost/profit triangle, where WIP and completed contracts are
+algebraically identical; only there may an exact printed title or
+schema-specific header resolve the type.
 
 ## Per-section graph
 
@@ -47,24 +51,17 @@ Every logical-table row retains `(chunk_id, page, local_row)` provenance. Findin
 and failures are mapped back to their source page. Horizontally reconstructed rows
 retain provenance from every contributing page band.
 
-## Module map
+## Package map
 
-- `wipple/extraction.py` — schema-blind page table reader
-- `wipple/reconstruction.py` — shape-only candidate generation and joins
-- `wipple/layout_validation.py` — cheap validator-backed layout comparison
-- `wipple/layout.py` — public fragment-to-logical-table assembly facade
-- `wipple/docgraph.py` — document orchestration and page-aware re-extraction
-- `wipple/wip_validator.py` — header-blind WIP validation
-- `wipple/cc_validator.py` — header-blind completed-contract validation
-- `wipple/parsing.py` — deterministic strings-to-matrix parsing
-- `wipple/validation.py` — schema validation and serialization
-- `wipple/splitting.py` — final WIP-format completed-contract row handling
-- `wipple/block_misalign.py` — page-band alignment repair
-- `wipple/concordance.py` — cross-table/document reconciliation
-- `wipple/graph.py` — per-section LangGraph
-- `wipple/analysis.py` — KPIs, signals, and correction application
-- `wipple/model_client.py` — model client and metrics
-- `wipple/ingest.py` — PDF/image/spreadsheet ingestion
+- `wipple/core/` — shared graph state, model clients, and metrics
+- `wipple/documents/` — ingestion, page chunking, table reading, and dates
+- `wipple/reconstruction/` — candidate joins, scoring, splitting, and alignment
+- `wipple/accounting/` — parsing, WIP/CC schemas, validation, and analysis
+- `wipple/pipeline/` — per-section and document-level orchestration
+- `wipple/support/` — demo data, deterministic corpus, and acceptance gates
+
+The root `wipple` package remains the small public API for `build_graph`,
+`run_pipeline`, parsing helpers, and the WIP validator.
 
 ## Parse-layer decisions
 

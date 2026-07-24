@@ -27,9 +27,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from wipple.demo import demo_raw_table
-from wipple.docgraph import build_doc_graph
-from wipple.model_client import MODEL_REGISTRY, Metrics
+from wipple.support.demo import demo_raw_table
+from wipple.pipeline.document import build_doc_graph
+from wipple.core.model_client import MODEL_REGISTRY, Metrics
 
 app = FastAPI(title="wipple")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],

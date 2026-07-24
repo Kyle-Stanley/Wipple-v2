@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .schemas import CC_LATTICE
-from .wip_validator import RULES
+from ..accounting.schemas import CC_LATTICE
+from ..accounting.wip import RULES
 
 _SHIFTS = (1, 2, -1, -2)
 
@@ -33,10 +33,13 @@ def _checks_for(mapping: dict, schema: str):
     have = set(mapping.values())
     if schema == "cc":
         out = []
-        for (a, b, s) in CC_LATTICE + [("BC", "RR", "RT")]:
+        for (a, b, s) in CC_LATTICE:
             if {a, b, s} <= have:
                 out.append((f"{s} = {a} + {b}", s, (a, b),
                             lambda A, B: A + B, "money"))
+        if {"BC", "RT"} <= have:
+            out.append(("BC = RT", "BC", ("RT",),
+                        lambda RT: RT, "money"))
         return out
     return [(r.name, r.out, r.ins, r.fn, r.kind) for r in RULES
             if not r.clipped and r.out in have and set(r.ins) <= have]
@@ -142,8 +145,8 @@ def check_bands(matrix, mapping, schema, failures, band_of_row,
         sweep_schema = schema
         clean = np.array([r for r in band_of_row if r not in rows])
         if clean.size >= min_band:
-            from .cc_validator import validate_cc
-            from .wip_validator import validate_wip
+            from ..accounting.cc import validate_cc
+            from ..accounting.wip import validate_wip
             validators = [(schema, validate_cc if schema == "cc"
                            else validate_wip)]
             if not mapping:

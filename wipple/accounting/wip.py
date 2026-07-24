@@ -1,5 +1,5 @@
 """
-wip_validator.py
+accounting/wip.py
 ================
 Header-blind validation engine for contractor Work-in-Progress (WIP) schedules.
 

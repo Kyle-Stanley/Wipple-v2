@@ -15,8 +15,8 @@ density rules, header semantics, or pixel geometry decide PDF page assembly.
 
 from __future__ import annotations
 
-from .layout_validation import select_layout
-from .reconstruction import (
+from .scoring import select_layout
+from .candidates import (
     can_recover_headers_as_row,
     can_join_horizontally,
     can_join_vertically,
@@ -30,6 +30,7 @@ from .reconstruction import (
 def _public_table(table: dict) -> dict:
     """Return the logical-table contract consumed by the document graph."""
     return {
+        "title_texts": list(table.get("title_texts") or []),
         "headers": list(table.get("headers") or []),
         "rows": [list(row) for row in (table.get("rows") or [])],
         "row_prov": [list(item) for item in (table.get("row_prov") or [])],

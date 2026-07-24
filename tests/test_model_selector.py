@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import wipple.extraction as extraction
-from wipple.model_client import MODEL_REGISTRY, TIERS, ModelClient
+import wipple.documents.extraction as extraction
+from wipple.core.model_client import MODEL_REGISTRY, TIERS, ModelClient
 
 
 def test_ui_model_values_are_registered():

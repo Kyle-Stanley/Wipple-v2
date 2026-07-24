@@ -20,11 +20,10 @@ structure is additive triples:
    precision; violations become RowFailures, and single-culprit rows become
    Findings with proposed corrections classified by the shared OCR taxonomy.
 
-Leftovers: a column ~= RT with no triple participation is Billed to Date
-(identified, not verified -- provenance says so honestly); a pair closing
-RR = RT - B certifies retainage. Everything else (year completed, memo
-columns) participates in no identity and falls out unassigned, which is the
-engine's existing definition of noise.
+Leftovers: an unassigned column equal to RT on completed jobs may be certified
+as Billed to Date. Retainage is already billed and receivable; it is NOT
+unbilled revenue and therefore participates in no revenue identity. Retainage,
+year completed, and other memo columns fall out unassigned.
 
 Dominance (Total >= components) is an orientation PRIOR only: per-row
 violations -- negative current-year GP on a prior-year job is warranty/
@@ -37,9 +36,8 @@ from __future__ import annotations
 import numpy as np
 
 from .schemas import CC_LATTICE, CC_VAR_NAMES, PERIOD_SWAP
-from .wip_validator import (FAILED, INSUFFICIENT, SUCCESS, Config, Finding,
-                            RowFailure, ValidationResult, Witness,
-                            _classify_error)
+from .wip import (FAILED, INSUFFICIENT, SUCCESS, Config, Finding,
+                  RowFailure, ValidationResult, Witness, _classify_error)
 
 
 def _fit_triple(a: np.ndarray, b: np.ndarray, s: np.ndarray, cfg: Config):
@@ -47,6 +45,15 @@ def _fit_triple(a: np.ndarray, b: np.ndarray, s: np.ndarray, cfg: Config):
     resid = a + b - s
     fin = np.isfinite(resid)
     tol = np.maximum(cfg.ident_abs, cfg.ident_rel * np.abs(s))
+    ok = fin & (np.abs(np.nan_to_num(resid)) <= np.nan_to_num(tol) + 1.0)
+    return ok, int(fin.sum())
+
+
+def _fit_equal(a: np.ndarray, b: np.ndarray, cfg: Config):
+    """Rows where two completed-contract measures are equal."""
+    resid = a - b
+    fin = np.isfinite(resid)
+    tol = np.maximum(cfg.ident_abs, cfg.ident_rel * np.abs(b))
     ok = fin & (np.abs(np.nan_to_num(resid)) <= np.nan_to_num(tol) + 1.0)
     return ok, int(fin.sum())
 
@@ -127,10 +134,9 @@ def _assemble(cols: np.ndarray, triples: list, cfg: Config):
                                                          rt)))
         else:
             period = (a, b)           # (RP, RC) -- order unknowable from math
-    # B + RR = RT is structurally identical to KT + GT = RT. Economic
-    # tiebreak: billed-to-date on closed jobs runs nearer RT than cost does,
-    # so the LOWER big-addend share is the cost/gp pair; the other pair stays
-    # unassigned here and _leftovers certifies it as (BC, RR).
+    # More than one stable additive pair may close to RT. Keep the lower
+    # large-addend share as cost/gross-profit; contract-component additions
+    # are left unexplained rather than mislabeled as billings/retainage.
     measure = min(measure_cands, key=lambda t: t[1])[0] if measure_cands \
         else None
     if len(measure_cands) > 1:
@@ -184,25 +190,24 @@ def _assemble(cols: np.ndarray, triples: list, cfg: Config):
 
 
 def _leftovers(cols, mapping, triples, cfg):
-    """Assign B (and RR when the retainage identity closes) from leftovers."""
+    """Certify an optional printed Billed to Date column by BC = RT."""
     m = cols.shape[1]
     inv = {v: k for k, v in mapping.items()}
     rt = inv.get("RT")
     if rt is None:
         return
     left = [j for j in range(m) if j not in mapping]
-    # RR = RT - B as a triple: (B, RR, RT)
-    for (a, b, s) in triples:
-        if s == rt and a in left and b in left:
-            sa = _median_share(cols, a, rt)
-            big, small = (a, b) if (np.isfinite(sa) and sa >= 0.5) else (b, a)
-            mapping[big], mapping[small] = "BC", "RR"
-            return
+    allowed_bad = max(1, int(np.floor((1 - cfg.ident_frac) * cols.shape[0])))
+    equal = []
     for j in left:
-        sh = _median_share(cols, j, rt)
-        if np.isfinite(sh) and 0.80 <= sh <= 1.02:
-            mapping[j] = "BC"          # identified by prior only, unwitnessed
-            return
+        ok, nfin = _fit_equal(cols[:, j], cols[:, rt], cfg)
+        if nfin >= cfg.min_rows and nfin - int(ok.sum()) <= allowed_bad:
+            equal.append(j)
+    # More than one duplicate-total leftover is not semantically identifiable
+    # from values alone. Header concordance may describe it later, but the CC
+    # validator will not guess which duplicate is billings.
+    if len(equal) == 1:
+        mapping[equal[0]] = "BC"
 
 
 def _certify(cols, mapping, labels, cfg, row_index):
@@ -210,7 +215,7 @@ def _certify(cols, mapping, labels, cfg, row_index):
     inv = {v: k for k, v in mapping.items()}
     witnesses, failures = [], []
     tol = cfg.money_obs_tol * 3 + cfg.cert_slack   # three observed cells
-    for (va, vb, vs) in CC_LATTICE + [("BC", "RR", "RT")]:
+    for (va, vb, vs) in CC_LATTICE:
         if not all(v in inv for v in (va, vb, vs)):
             continue
         a, b, s = inv[va], inv[vb], inv[vs]
@@ -233,6 +238,25 @@ def _certify(cols, mapping, labels, cfg, row_index):
                 observed=float(cols[r, s]),
                 expected=float(cols[r, a] + cols[r, b]),
                 difference=float(resid[r]), tolerance=tol))
+    if "BC" in inv and "RT" in inv:
+        bc, rt = inv["BC"], inv["RT"]
+        resid = cols[:, bc] - cols[:, rt]
+        fin = np.isfinite(resid)
+        bad = fin & (np.abs(np.nan_to_num(resid)) > tol)
+        rel = "BC = RT"
+        if fin.sum() >= cfg.min_rows:
+            witnesses.append(Witness(
+                relation=rel, business_form=rel, column=bc,
+                n_rows=int(fin.sum()), n_informative=int(fin.sum()),
+                max_abs_residual=float(np.nanmax(np.abs(resid[fin]))
+                                       if fin.any() else 0.0),
+                weight=1.0, family=rel))
+            for r in np.flatnonzero(bad):
+                failures.append(RowFailure(
+                    relation=rel, business_form=rel, variable="BC", column=bc,
+                    row_index=int(row_index[r]), row_label=labels[r],
+                    observed=float(cols[r, bc]), expected=float(cols[r, rt]),
+                    difference=float(resid[r]), tolerance=tol))
     return witnesses, failures
 
 
@@ -247,11 +271,36 @@ def _findings(cols, mapping, labels, cfg, failures, row_index):
         rows.setdefault(f.row_index, []).append(f)
     ridx = {int(orig): r for r, orig in enumerate(row_index)}
     out = []
-    lattice = [t for t in CC_LATTICE + [("BC", "RR", "RT")]
+    lattice = [t for t in CC_LATTICE
                if all(v in inv for v in t)]
     for orig_r, fails in rows.items():
         r = ridx[orig_r]
         failing_rels = {f.relation for f in fails}
+        if failing_rels == {"BC = RT"} and "BC" in inv and "RT" in inv:
+            # RT is independently pinned by the revenue = cost + profit
+            # lattice, so the completion equality identifies BC as the bad
+            # cell without pretending the equality alone proves direction.
+            rt_proven = any(
+                vs == "RT"
+                and abs(cols[r, inv[va]] + cols[r, inv[vb]]
+                        - cols[r, inv[vs]]) <= cfg.money_obs_tol * 3
+                for va, vb, vs in lattice
+            )
+            if rt_proven:
+                col = inv["BC"]
+                observed = float(cols[r, col])
+                proposed = float(cols[r, inv["RT"]])
+                cls, detail = _classify_error(observed, proposed)
+                out.append(Finding(
+                    row_index=orig_r, row_label=labels[r],
+                    culprit_column=col, culprit_variable="BC",
+                    candidate_variables=["BC"], exonerated_variables=["RT"],
+                    observed=observed, proposed_correction=proposed,
+                    correction_basis=["BC = RT"], confidence="high",
+                    classification=cls, classification_detail=detail,
+                    transplant_sources=[], failing_relations=["BC = RT"],
+                    proof_kind="inherited"))
+                continue
         candidates = {}
         for var in set(mapping.values()):
             involved = [t for t in lattice if var in t]
