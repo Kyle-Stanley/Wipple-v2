@@ -142,7 +142,7 @@ def test_e2e_failed_emits_finding_when_not_ocr_shaped(patch_client):
     assert revenue_total["computed_after_corrections"] == 3860000.0
 
 
-def test_repeated_constant_failures_collapse_to_one_structural_mapping_issue():
+def test_repeated_column_failures_collapse_to_one_structural_mapping_issue():
     bad = raw_table(with_totals=False)
     job_col = bad["headers"].index("Job #")
     under_col = bad["headers"].index("Underbillings")
@@ -151,7 +151,8 @@ def test_repeated_constant_failures_collapse_to_one_structural_mapping_issue():
         for row in bad["rows"]:
             repeated = list(row)
             repeated[job_col] = f"{row[job_col]}-{copy + 1}"
-            repeated[under_col] = "-"
+            if repeated[under_col] != "-":
+                repeated[under_col] = str((copy + 1) * 1000 + len(rows))
             rows.append(repeated)
     bad["rows"] = rows
 
@@ -178,10 +179,10 @@ def test_repeated_constant_failures_collapse_to_one_structural_mapping_issue():
         "affected_rows": 6,
         "rows": [1, 5, 9, 13, 17, 21],
         "row_count": 24,
-        "dominant_observed": 0.0,
+        "dominant_observed": None,
         "note": (
-            "6 rows in the same mapped column were read as 0 while the "
-            "identities imply different values; the column mapping or "
+            "6 rows in the same mapped column were flagged while the "
+            "identities imply varied replacements; the column mapping or "
             "extraction alignment must be reviewed as one structural issue"
         ),
     }]

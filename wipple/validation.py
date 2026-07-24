@@ -69,11 +69,11 @@ def _concentrated_column_failures(findings: list[dict],
     by_column: dict[int, list[dict]] = defaultdict(list)
     for finding in findings:
         column = finding.get("culprit_column")
-        if column is None or finding.get("proposed_correction") is None:
+        if column is None:
             continue
         by_column[int(column)].append(finding)
 
-    minimum = max(4, int(math.ceil(max(row_count, 1) * 0.20)))
+    minimum = max(4, int(math.ceil(max(row_count, 1) * 0.25)))
     issues = []
     for column, grouped in by_column.items():
         affected_rows = {
@@ -88,15 +88,10 @@ def _concentrated_column_failures(findings: list[dict],
             if item.get("observed") is not None
             and np.isfinite(float(item["observed"]))
         ]
-        proposed = {
-            round(float(item["proposed_correction"]), 2) for item in grouped
-            if np.isfinite(float(item["proposed_correction"]))
-        }
-        if not observed or len(proposed) < 2:
+        if not observed:
             continue
         dominant_value, dominant_count = Counter(observed).most_common(1)[0]
-        if dominant_count / len(observed) < 0.75:
-            continue
+        mostly_constant = dominant_count / len(observed) >= 0.75
 
         variable = next(
             (item.get("culprit_variable") for item in grouped
@@ -110,12 +105,12 @@ def _concentrated_column_failures(findings: list[dict],
             "affected_rows": len(affected_rows),
             "rows": sorted(affected_rows),
             "row_count": int(row_count),
-            "dominant_observed": dominant_value,
+            "dominant_observed": dominant_value if mostly_constant else None,
             "note": (
                 f"{len(affected_rows)} rows in the same mapped column were "
-                f"read as {dominant_value:g} while the identities imply "
-                "different values; the column mapping or extraction alignment "
-                "must be reviewed as one structural issue"
+                "flagged while the identities imply varied replacements; "
+                "the column mapping or extraction alignment must be reviewed "
+                "as one structural issue"
             ),
         })
     return issues

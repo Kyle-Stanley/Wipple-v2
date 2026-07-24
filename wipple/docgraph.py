@@ -258,17 +258,6 @@ def tables_node(state: DocState) -> dict:
             rep = final.get("report", {})
             _attach_job_identity(rep, sec["rows"], sec["headers"])
             _attach_pages(rep, sec["row_prov"])
-            parse_rows = (rep.get("parse") or {}).get("row_index") or []
-            for issue in rep.get("structural_issues", []) or []:
-                issue_chunks = set()
-                for matrix_row in issue.get("rows", []) or []:
-                    if 0 <= matrix_row < len(parse_rows):
-                        chunk = _prov_chunk(
-                            sec["row_prov"], parse_rows[matrix_row])
-                        if chunk is not None:
-                            issue_chunks.add(chunk)
-                issue["chunks"] = sorted(issue_chunks)
-                bad.update(issue_chunks)
             entry["sections"].append({
                 "type": sec["type"],
                 "schema": (rep.get("analysis") or {}).get("schema", "wip"),
