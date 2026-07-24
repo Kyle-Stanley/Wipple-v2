@@ -202,7 +202,15 @@ def tables_node(state: DocState) -> dict:
 
         # -- block misalignment: band-shaped failures -> shift sweep --------
         matrix, mis_findings = pr.matrix, []
-        if v.get("failures"):
+        partial_multipage_mapping = (
+            len(t.get("chunks") or []) > 1
+            and bool(v.get("mapping"))
+            and len(v["mapping"]) < int(pr.matrix.shape[1])
+        )
+        if (v.get("failures")
+                or v.get("status")
+                == "insufficient_information_for_validation"
+                or partial_multipage_mapping):
             band_of_row = {mr: _prov_chunk(t["row_prov"], raw)
                            for mr, raw in enumerate(pr.row_index)
                            if _prov_chunk(t["row_prov"], raw) is not None}

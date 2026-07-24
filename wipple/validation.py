@@ -7,9 +7,6 @@ graph state stays checkpoint-safe -- numpy never crosses a node boundary.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-import math
-
 import numpy as np
 
 from .parsing import parse_table
@@ -52,69 +49,6 @@ CLASSIFICATION_LABELS = {
     "ambiguous_multi_cell": "multiple cells",
     "unresolved": "unresolved",
 }
-
-STRUCTURAL_MAPPING_FAILURE = "structural_mapping_failure"
-
-
-def _concentrated_column_failures(findings: list[dict],
-                                  row_count: int) -> list[dict]:
-    """Collapse a repeated constant-column failure into a mapping issue.
-
-    One or two isolated substitutions are cell findings. A large share of the
-    table allegedly containing the same printed value in one mapped column,
-    while the identities imply varied replacements, is evidence that the
-    column hypothesis or extracted alignment is wrong. Those rows must not
-    become dozens of accepted corrections.
-    """
-    by_column: dict[int, list[dict]] = defaultdict(list)
-    for finding in findings:
-        column = finding.get("culprit_column")
-        if column is None:
-            continue
-        by_column[int(column)].append(finding)
-
-    minimum = max(4, int(math.ceil(max(row_count, 1) * 0.25)))
-    issues = []
-    for column, grouped in by_column.items():
-        affected_rows = {
-            int(item["row_index"]) for item in grouped
-            if item.get("row_index") is not None
-        }
-        if len(affected_rows) < minimum:
-            continue
-
-        observed = [
-            round(float(item["observed"]), 2) for item in grouped
-            if item.get("observed") is not None
-            and np.isfinite(float(item["observed"]))
-        ]
-        if not observed:
-            continue
-        dominant_value, dominant_count = Counter(observed).most_common(1)[0]
-        mostly_constant = dominant_count / len(observed) >= 0.75
-
-        variable = next(
-            (item.get("culprit_variable") for item in grouped
-             if item.get("culprit_variable")),
-            None,
-        )
-        issues.append({
-            "kind": "column_mapping_failure",
-            "column": column,
-            "variable": variable,
-            "affected_rows": len(affected_rows),
-            "rows": sorted(affected_rows),
-            "row_count": int(row_count),
-            "dominant_observed": dominant_value if mostly_constant else None,
-            "note": (
-                f"{len(affected_rows)} rows in the same mapped column were "
-                "flagged while the identities imply varied replacements; "
-                "the column mapping or extraction alignment must be reviewed "
-                "as one structural issue"
-            ),
-        })
-    return issues
-
 
 def _trailing_total_evidence(matrix) -> dict | None:
     """Return evidence that the final parsed row is an aggregate total.
@@ -516,30 +450,13 @@ def validate_node(state: WippleState) -> dict:
     out = serialize_validation(chosen)
     out["schema"] = race["chosen"]
     out.setdefault("diagnostics", {})["schema_race"] = race
-    structural_issues = _concentrated_column_failures(
-        out.get("findings") or [], int(matrix.shape[0]))
-    if structural_issues:
-        rejected_columns = {issue["column"] for issue in structural_issues}
-        out["structural_issues"] = structural_issues
-        out["rejected_mapping"] = dict(out.get("mapping") or {})
-        out["mapping"] = {}
-        out["virtuals"] = {}
-        out["findings"] = [
-            finding for finding in (out.get("findings") or [])
-            if finding.get("culprit_column") not in rejected_columns
-        ]
-        out["status"] = STRUCTURAL_MAPPING_FAILURE
-        out["reason"] = (
-            "repeated failures in one mapped column indicate a structural "
-            "column-identification or extraction-alignment failure"
-        )
 
     # Totals are assessed only after row-level validation/corrections are fully
     # determined. Unmapped numeric columns (including currently ignored period
     # columns) are outside the totals scope by construction.
     parse_report = state.get("parse_report") or {}
     stated_total_row = parse_report.get("stated_total_row")
-    if race["chosen"] == "wip" and not structural_issues:
+    if race["chosen"] == "wip":
         out["totals"] = _assess_stated_totals(
             matrix, chosen, stated_total_row)
         mapped = {int(c) for c in chosen.mapping}
@@ -554,11 +471,14 @@ def validate_node(state: WippleState) -> dict:
     return {"validation": out}
 
 
-def _race_rank(r: ValidationResult) -> int:
+def _race_rank(r: ValidationResult, n_cols: int) -> int:
     """SUCCESS and FAILED both mean the mapping CERTIFIED (failed = certified
-    mapping, wrong values -- exactly the state that carries findings); a
-    mapping without witnesses ranks below both; nothing ranks last."""
-    if r.mapping and r.witnesses:
+    mapping, wrong values -- exactly the state that carries findings). A
+    witnessed sub-lattice explaining less than half the table remains partial
+    evidence rather than a schema verdict; a mapping without witnesses ranks
+    there too, and nothing ranks last."""
+    coverage = len(r.mapping) / max(n_cols, 1)
+    if r.mapping and r.witnesses and coverage >= 0.5:
         return 2
     if r.mapping:
         return 1
@@ -579,8 +499,8 @@ def run_schema_race(matrix, labels):
     wip = validate_wip(matrix, job_labels=labels)
     cc = validate_cc(matrix, job_labels=labels)
     m = matrix.shape[1]
-    kw = (_race_rank(wip), _race_score(wip, m))
-    kc = (_race_rank(cc), _race_score(cc, m))
+    kw = (_race_rank(wip, m), _race_score(wip, m))
+    kc = (_race_rank(cc, m), _race_score(cc, m))
     chosen, name = (wip, "wip") if kw >= kc else (cc, "cc")
     return chosen, {"chosen": name,
                     "wip": {"status": wip.status, "rank": kw[0],

@@ -86,8 +86,9 @@ class LayoutEvidence:
         )
 
 
-def _rank(result: ValidationResult) -> int:
-    if result.mapping and result.witnesses:
+def _rank(result: ValidationResult, numeric_columns: int) -> int:
+    coverage = len(result.mapping) / max(numeric_columns, 1)
+    if result.mapping and result.witnesses and coverage >= 0.5:
         return 2
     if result.mapping:
         return 1
@@ -104,7 +105,11 @@ def _evidence(schema: str, result: ValidationResult,
                      for witness in result.witnesses)
     return SchemaEvidence(
         schema=schema,
-        rank=_rank(result),
+        # A witnessed three-column corner inside a much wider table is real
+        # arithmetic, but not a coherent explanation of that table. Requiring
+        # the schema to explain at least half the numeric grid prevents sparse
+        # CC addition from defeating a viable WIP continuation.
+        rank=_rank(result, numeric_columns),
         numeric_columns=numeric_columns,
         explained_columns=len(result.mapping),
         row_count=row_count,

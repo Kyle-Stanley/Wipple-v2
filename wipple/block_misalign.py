@@ -110,7 +110,7 @@ def check_bands(matrix, mapping, schema, failures, band_of_row,
     Returns (repaired_matrix|None, findings, bad_chunks)."""
     mapping = {int(k): v for k, v in mapping.items()}
     scaled = set(scaled)
-    if not failures:
+    if not band_of_row:
         return None, [], []
     fail_rows = {}
     for f in failures:
@@ -124,10 +124,13 @@ def check_bands(matrix, mapping, schema, failures, band_of_row,
         rows = sorted(rows)
         failing = [r for r in rows if r in fail_rows]
         others = [r for r in fail_rows if band_of_row.get(r) != cid]
-        if len(rows) < min_band or len(failing) / len(rows) < frac:
+        if len(rows) < min_band:
             continue
-        if len(others) > 0.2 * len(fail_rows):
-            continue          # failures not band-shaped; not this pathology
+        if failures:
+            if len(failing) / len(rows) < frac:
+                continue
+            if len(others) > 0.2 * len(fail_rows):
+                continue      # failures not band-shaped; not this pathology
         band = np.array(rows)
 
         # A corrupted band degrades IDENTIFICATION, not just certification:
@@ -136,15 +139,36 @@ def check_bands(matrix, mapping, schema, failures, band_of_row,
         # held out, and sweep against that mapping. (The repair is still
         # only a hypothesis until the whole repaired table re-certifies.)
         sweep_map = mapping
+        sweep_schema = schema
         clean = np.array([r for r in band_of_row if r not in rows])
         if clean.size >= min_band:
             from .cc_validator import validate_cc
             from .wip_validator import validate_wip
-            vfn = validate_cc if schema == "cc" else validate_wip
-            vsub = vfn(matrix[clean])
-            if vsub.mapping and len(vsub.mapping) > len(mapping):
+            validators = [(schema, validate_cc if schema == "cc"
+                           else validate_wip)]
+            if not mapping:
+                other = ("wip", validate_wip) if schema == "cc" \
+                    else ("cc", validate_cc)
+                validators.append(other)
+            candidates = []
+            for candidate_schema, vfn in validators:
+                vsub = vfn(matrix[clean])
+                weight = sum(w.weight for w in vsub.witnesses)
+                coverage = len(vsub.mapping) / max(matrix.shape[1], 1)
+                candidates.append((
+                    int(bool(vsub.mapping and vsub.witnesses)),
+                    weight * coverage,
+                    len(vsub.mapping),
+                    candidate_schema,
+                    vsub,
+                ))
+            _, _, _, candidate_schema, vsub = max(
+                candidates, key=lambda item: item[:3])
+            if vsub.mapping and (
+                    not mapping or len(vsub.mapping) > len(mapping)):
                 sweep_map = {int(k): v for k, v in vsub.mapping.items()}
-        checks = _checks_for(sweep_map, schema)
+                sweep_schema = candidate_schema
+        checks = _checks_for(sweep_map, sweep_schema)
         if not checks:
             bad_chunks.append(cid)
             continue
