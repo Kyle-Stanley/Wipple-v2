@@ -11,6 +11,7 @@
   --paper:#F2EFE6; --surface:#FBFAF7; --ink:#20251F; --muted:#6C7165;
   --sage:#5C7160; --sage-deep:#3A4C3E; --brick:#A3402F; --amber:#92671E;
   --line:#DDD8C9; --line-soft:#E8E4D7;
+  --brand:#497753;   /* sampled from the logo mark itself */
 }
 *{box-sizing:border-box;margin:0}
 html{scroll-behavior:smooth}
@@ -33,9 +34,21 @@ header{padding:22px 32px;margin:0 calc(50% - 50vw);display:flex;align-items:base
 
 /* landing */
 #landing{padding:9vh 0 12vh}
-h1{font:500 44px/1.15 Fraunces,serif;letter-spacing:-.015em;max-width:17ch}
+/* The source lockup is 511x431, so anything up to 215px tall still renders
+   sharp on a 2x display. Past that it needs re-exporting, not stretching. */
+/* Centered mark over a left-aligned value prop: `auto` side margins only,
+   so the headline and subhead keep their own left edge. */
+.hero-logo{display:block;height:132px;width:auto;margin:0 auto 44px}
+@media(max-width:620px){.hero-logo{height:100px;margin-bottom:20px}}
+h1{font:600 26px/1.3 Inter,system-ui,sans-serif;letter-spacing:-.015em;max-width:30ch}
 h1 em{font-style:normal;color:var(--sage-deep)}
 .sub{margin:18px 0 40px;color:var(--muted);max-width:52ch}
+/* The brand name lifts out of the muted subhead in the logo's own green
+   rather than the darker --sage-deep used for in-copy emphasis. */
+.sub em{font-style:normal;font-weight:600;color:var(--brand)}
+/* The headline belongs to the sentence under it, not to the logo above it.
+   Scoped to the landing: .sub is also a subtitle in the print report. */
+#landing .sub{margin-top:6px}
 .drop{border:1.5px dashed var(--line);border-radius:14px;background:var(--surface);
   padding:46px 32px;text-align:center;transition:border-color .15s}
 .drop.on{border-color:var(--sage)}
@@ -600,8 +613,10 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
 </header>
 
 <section id="landing">
-  <h1>WIP schedules, extracted and <em>verified</em>.</h1>
-  <p class="sub">Wipple reads a work-in-progress schedule, checks every job against the accounting identities that should hold between its columns, flags and corrects transcription errors, and scores what matters for underwriting. Anything it cannot verify is labeled unverified.</p>
+  <img class="hero-logo" src="/static/logo/wipple-text-logo.png" alt="wipple"
+       onerror="this.onerror=null;this.src='/static/logo/logo2_bw.png'">
+  <h1>From dense tables to instant insight.</h1>
+  <p class="sub"><em>Wipple</em> scans financials, finds and corrects errors, and delivers underwriting-ready analysis.</p>
   <div class="drop" id="drop">
     <strong>Drop one or more WIP schedules</strong>
     <p>PDF, Excel, CSV, or photos of the schedules · nothing is stored</p>
