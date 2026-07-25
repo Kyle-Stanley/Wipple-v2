@@ -2641,7 +2641,7 @@ function renderCertificate(rep){
     return `<tr><td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name">TOTAL</span></div><small>${label}</small></td>
       <td class="mny"><span class="bad">$${fmt$(t.stated)}</span></td>
       <td class="mny">$${fmt$(t.proposedCorrection)}</td>
-      <td class="cause-cell">does not equal the sum of the independently validated jobs</td>
+      <td class="cause-cell">does not match job sum</td>
       <td style="text-align:right">${use}</td></tr>`;
   };
   const hasCorrections=findings.length||totalCorrs.length;
