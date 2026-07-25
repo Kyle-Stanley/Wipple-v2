@@ -33,7 +33,10 @@ header{padding:22px 32px;margin:0 calc(50% - 50vw);display:flex;align-items:base
 .tag{font-size:13px;color:var(--muted)}
 
 /* landing */
-#landing{padding:9vh 0 12vh}
+#landing{padding:9vh 0 12vh;text-align:center}
+/* max-width keeps the measure readable, so the blocks need auto side margins
+   to sit centered rather than centering their text inside a left-hung box. */
+#landing h1,#landing .sub{margin-left:auto;margin-right:auto}
 /* The source lockup is 511x431, so anything up to 215px tall still renders
    sharp on a 2x display. Past that it needs re-exporting, not stretching. */
 /* Centered mark over a left-aligned value prop: `auto` side margins only,
@@ -599,7 +602,9 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
 <body>
 <div class="wrap">
 <header>
-  <div class="mark"><img src="/static/logo/logo2_bw.png" alt="wipple" style="height:30px;display:block" onerror="this.outerHTML='w<span>i</span>pple'"></div>
+  <!-- Starts hidden because the landing is the default view; show() reveals
+       it on every other view. -->
+  <div class="mark" style="visibility:hidden"><img src="/static/logo/logo2_bw.png" alt="wipple" style="height:30px;display:block" onerror="this.outerHTML='w<span>i</span>pple'"></div>
   <nav id="nav" class="hidden" style="display:flex;gap:8px">
     <button class="btn" onclick="location.reload()">New scan</button>
     <button class="btn hidden" id="navBatch">Validations</button>
@@ -715,7 +720,11 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
 const API="";  /* serving this file from Firebase/elsewhere? set to your Railway URL, e.g. "https://yourapp.up.railway.app" (no trailing slash) */
 const $=s=>document.querySelector(s);
 const show=id=>{for(const s of["landing","processing","certificate","dash","batch","matching","consolidated","timeseries","err"])
-  $("#"+s).classList.toggle("hidden",s!==id)};
+  $("#"+s).classList.toggle("hidden",s!==id);
+  // The landing carries its own lockup, so the header mark is redundant there.
+  // Hidden rather than removed: the header is space-between, and dropping the
+  // mark from the flow would pull the tagline over to the left.
+  $("header .mark").style.visibility=id==="landing"?"hidden":""};
 const fmtM=x=>{if(x==null)return"—";const a=Math.abs(x),
   s=a>=1e6?(a/1e6).toFixed(a>=1e7?1:2)+"M":a>=1e3?(a/1e3).toFixed(0)+"k":a.toFixed(0);
   return x<0?`($${s})`:`$${s}`};
