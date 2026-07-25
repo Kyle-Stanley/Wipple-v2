@@ -1276,7 +1276,7 @@ function defaultAcceptedCorrections(rep){
 let REPORT=null;          /* the ACTIVE section's v2-shaped report */
 let ACCEPTED=new Set();   /* suggested corrections currently included */
 let DOC=null,SECTIONS=[],SECSTATE=[],ACTIVE=0,VIEW="certificate";
-let BATCH_ITEMS=[],BATCH_ACTIVE=-1,BATCH_MODE=false;
+let BATCH_ITEMS=[],BATCH_ACTIVE=-1,BATCH_MODE=false,BATCH_RUN=null;
 let MATCH_STATE=null;
 let BATCH_ANALYSIS_MODE=false;
 let ANALYSIS_SCOPE="portfolio";
@@ -1353,10 +1353,33 @@ function setSingleNav(active){
 }
 
 function resetBatch(){
-  BATCH_ITEMS=[];BATCH_ACTIVE=-1;BATCH_MODE=false;MATCH_STATE=null;
+  BATCH_ITEMS=[];BATCH_ACTIVE=-1;BATCH_MODE=false;BATCH_RUN=null;MATCH_STATE=null;
   BATCH_ANALYSIS_MODE=false;ANALYSIS_SCOPE="portfolio";
   BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
   BILLING_TRAJECTORY_SHOW_ALL=false;
+}
+function runDuration(seconds){
+  if(!(seconds>0))return"";
+  if(seconds<60)return`${seconds.toFixed(1)}s`;
+  const m=Math.floor(seconds/60);
+  return`${m}m ${Math.round(seconds-60*m)}s`;
+}
+/* One reference line under the batch: what the whole upload cost in time and
+   money. The elapsed figure is the batch's wall clock -- summing the
+   documents' own elapsed_seconds would double-count the overlap they were
+   run with, and report a number nobody waited. */
+function batchRunFoot(){
+  const bits=[];
+  if(BATCH_ITEMS.length)
+    bits.push(`${BATCH_ITEMS.length} document${BATCH_ITEMS.length===1?"":"s"}`);
+  const elapsed=runDuration(BATCH_RUN?.seconds);
+  if(elapsed)bits.push(elapsed);
+  const metrics=BATCH_ITEMS.map(x=>x.doc?.metrics).filter(Boolean);
+  const calls=metrics.reduce((n,m)=>n+(+m.api_calls||0),0);
+  const cost=metrics.reduce((n,m)=>n+(+m.cost_usd||0),0);
+  if(calls)bits.push(`${calls} model call${calls===1?"":"s"}`);
+  if(cost)bits.push(`total $${cost.toFixed(4)}`);
+  return bits.join(" · ");
 }
 function batchDocError(doc){
   if(!doc)return"Processing did not return a report.";
@@ -1419,6 +1442,7 @@ async function scanBatch(files){
   $("#nav").classList.add("hidden");$("#tagline").classList.remove("hidden");
   RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
   const model=$("#model")?.value||"";
+  const startedAt=performance.now();
   let next=0,completed=0,running=0;
   const tick=()=>showBatchProgress(completed,BATCH_ITEMS.length,running);
   async function worker(){
@@ -1444,6 +1468,8 @@ async function scanBatch(files){
   }
   const lanes=Math.min(BATCH_CONCURRENCY,BATCH_ITEMS.length);
   await Promise.all(Array.from({length:lanes},worker));
+  // Wall clock, not the sum of the documents': they overlapped on purpose.
+  BATCH_RUN={seconds:(performance.now()-startedAt)/1000};
   RUNNING=false;finishProgressLine();BATCH_ACTIVE=-1;
   setTimeout(()=>{hideBatchLanes();renderBatch();},450);
 }
@@ -1491,6 +1517,7 @@ function renderBatch(){
     </div>
   </div>
   ${groupHTML}${failedHTML}
+  <p class="foot">${batchRunFoot()}</p>
 `;
   $("#batch").querySelectorAll(".batch-review").forEach(b=>b.onclick=()=>reviewBatchItem(+b.dataset.batch,"certificate"));
   $("#batch").querySelectorAll(".batch-analysis").forEach(b=>b.onclick=()=>renderBatchItemAnalysis(+b.dataset.batch));
@@ -2641,7 +2668,7 @@ function renderCertificate(rep){
     return `<tr><td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name">TOTAL</span></div><small>${label}</small></td>
       <td class="mny"><span class="bad">$${fmt$(t.stated)}</span></td>
       <td class="mny">$${fmt$(t.proposedCorrection)}</td>
-      <td class="cause-cell">does not equal the sum of the independently validated jobs</td>
+      <td class="cause-cell">does not match job sum</td>
       <td style="text-align:right">${use}</td></tr>`;
   };
   const hasCorrections=findings.length||totalCorrs.length;
