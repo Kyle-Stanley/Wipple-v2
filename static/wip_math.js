@@ -185,5 +185,123 @@
     return inferred;
   }
 
-  return { deriveCanonicalVars, mappingReadiness, inferCorroboratingColumns };
+  const FIXED_MAPPING_RULES = [
+    { id: "estimated-profit", label: "Contract value = estimated cost + estimated profit",
+      output: "G", variables: ["V", "C", "G"], expected: (v) => v.V - v.C, kind: "money" },
+    { id: "earned-revenue", label: "Earned revenue = contract value × cost to date ÷ estimated cost",
+      output: "E", variables: ["V", "C", "D", "E"], expected: (v) => v.C ? v.V * v.D / v.C : NaN, kind: "money" },
+    { id: "cost-to-complete", label: "Estimated cost = cost to date + cost to complete",
+      output: "Q", variables: ["C", "D", "Q"], expected: (v) => v.C - v.D, kind: "money" },
+    { id: "earned-profit", label: "Earned gross profit = earned revenue − cost to date",
+      output: "H", variables: ["E", "D", "H"], expected: (v) => v.E - v.D, kind: "money" },
+    { id: "net-billing", label: "Net billing position = billings − earned revenue",
+      output: "N", variables: ["E", "B", "N"], expected: (v) => v.B - v.E, kind: "money" },
+    { id: "underbillings", label: "Underbillings = max(earned revenue − billings, 0)",
+      output: "U", variables: ["E", "B", "U"], expected: (v) => Math.max(v.E - v.B, 0), kind: "money", magnitude: true },
+    { id: "overbillings", label: "Overbillings = max(billings − earned revenue, 0)",
+      output: "O", variables: ["E", "B", "O"], expected: (v) => Math.max(v.B - v.E, 0), kind: "money", magnitude: true },
+    { id: "remaining-revenue", label: "Remaining revenue = contract value − earned revenue",
+      output: "R", variables: ["V", "E", "R"], expected: (v) => v.V - v.E, kind: "money" },
+    { id: "remaining-billings", label: "Remaining billings = contract value − billings",
+      output: "RB", variables: ["V", "B", "RB"], expected: (v) => v.V - v.B, kind: "money" },
+    { id: "gross-margin", label: "Gross margin % = estimated profit ÷ contract value",
+      output: "M", variables: ["V", "G", "M"], expected: (v) => v.V ? v.G / v.V : NaN, kind: "pct" },
+    { id: "percent-complete-cost", label: "Percent complete = cost to date ÷ estimated cost",
+      output: "P", variables: ["C", "D", "P"], expected: (v) => v.C ? v.D / v.C : NaN, kind: "pct" },
+    { id: "percent-complete-revenue", label: "Percent complete = earned revenue ÷ contract value",
+      output: "P", variables: ["V", "E", "P"], expected: (v) => v.V ? v.E / v.V : NaN, kind: "pct" },
+    { id: "percent-billed", label: "Percent billed = billings ÷ contract value",
+      output: "PB", variables: ["V", "B", "PB"], expected: (v) => v.V ? v.B / v.V : NaN, kind: "pct" },
+  ];
+
+  function fixedAuditTolerance(observed, expected, kind) {
+    if (kind === "pct") return Math.max(0.002, 1e-9 * Math.abs(expected));
+    return corroborationTolerance(observed, expected);
+  }
+
+  function auditFixedMapping(rows, mapping, labels = []) {
+    const columnByVariable = {};
+    Object.entries(mapping || {}).forEach(([column, variable]) => {
+      if (variable && columnByVariable[variable] == null)
+        columnByVariable[variable] = +column;
+    });
+    const available = FIXED_MAPPING_RULES.filter((rule) =>
+      rule.variables.every((variable) => columnByVariable[variable] != null));
+    const relations = [];
+    const failedByRow = new Map();
+    const checkedJobs = new Set();
+
+    for (const rule of available) {
+      const failures = [];
+      let checkedRows = 0;
+      (rows || []).forEach((row, rowIndex) => {
+        const values = {};
+        for (const variable of rule.variables) {
+          const raw = row?.[columnByVariable[variable]];
+          const value = raw === null || raw === "" ? NaN : +raw;
+          if (!Number.isFinite(value)) return;
+          values[variable] = value;
+        }
+        const expected = +rule.expected(values);
+        if (!Number.isFinite(expected)) return;
+        const printed = values[rule.output];
+        const observed = rule.magnitude ? Math.abs(printed) : printed;
+        const tolerance = fixedAuditTolerance(observed, expected, rule.kind);
+        checkedRows += 1;
+        checkedJobs.add(rowIndex);
+        if (Math.abs(observed - expected) <= tolerance) return;
+
+        const failure = {
+          rowIndex,
+          rowLabel: String(labels[rowIndex] || `Row ${rowIndex + 1}`),
+          relation: rule.label,
+          relationId: rule.id,
+          variables: [...rule.variables],
+          outputVariable: rule.output,
+          observed: printed,
+          expected,
+          difference: observed - expected,
+          tolerance,
+        };
+        failures.push(failure);
+        const grouped = failedByRow.get(rowIndex) || {
+          rowIndex,
+          rowLabel: failure.rowLabel,
+          relations: [],
+          variables: new Set(),
+          details: [],
+        };
+        grouped.relations.push(rule.label);
+        rule.variables.forEach((variable) => grouped.variables.add(variable));
+        grouped.details.push(failure);
+        failedByRow.set(rowIndex, grouped);
+      });
+      if (checkedRows >= 3)
+        relations.push({ id: rule.id, label: rule.label, checkedRows, failures });
+    }
+
+    const retained = new Set(relations.map((relation) => relation.id));
+    const failedRows = [...failedByRow.values()].map((failure) => ({
+      ...failure,
+      relations: failure.relations.filter((_, index) =>
+        retained.has(failure.details[index]?.relationId)),
+      details: failure.details.filter((detail) => retained.has(detail.relationId)),
+      variables: [...failure.variables],
+    })).filter((failure) => failure.details.length);
+
+    return {
+      relations,
+      failedRows,
+      checkedRows: checkedJobs.size,
+      passed: relations.length > 0 && failedRows.length === 0,
+      limited: true,
+    };
+  }
+
+  return {
+    deriveCanonicalVars,
+    mappingReadiness,
+    inferCorroboratingColumns,
+    auditFixedMapping,
+  };
 });
