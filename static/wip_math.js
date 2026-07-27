@@ -21,11 +21,14 @@
     if (!has("V") && has("C") && has("G")) out.V = out.C + out.G;
     if (!has("C") && has("V") && has("G")) out.C = out.V - out.G;
     if (!has("G") && has("V") && has("C")) out.G = out.V - out.C;
+    if (!has("C") && has("D") && has("Q")) out.C = out.D + out.Q;
 
     // Dollar anchors may close the progress side in either direction. A
     // printed percentage is deliberately never used to reverse-engineer
     // dollars: schedules commonly round or truncate it.
     if (!has("D") && has("C") && has("Q")) out.D = out.C - out.Q;
+    if (!has("D") && has("E") && has("H")) out.D = out.E - out.H;
+    if (!has("E") && has("D") && has("H")) out.E = out.D + out.H;
     if (!has("D") && has("E") && has("C") && has("V") && out.V !== 0)
       out.D = out.E * out.C / out.V;
     if (!has("P") && has("D") && has("C") && out.C !== 0) out.P = out.D / out.C;
@@ -39,7 +42,11 @@
     if (!has("B") && has("E") && has("N")) out.B = out.E + out.N;
     if (!has("B") && has("E") && has("U") && has("O"))
       out.B = out.E + Math.abs(out.O) - Math.abs(out.U);
+    if (!has("B") && has("V") && has("RB")) out.B = out.V - out.RB;
 
+    if (!has("V") && has("E") && has("R")) out.V = out.E + out.R;
+    if (!has("E") && has("V") && has("R")) out.E = out.V - out.R;
+    if (!has("V") && has("B") && has("RB")) out.V = out.B + out.RB;
     if (!has("R") && has("V") && has("E")) out.R = out.V - out.E;
     if (!has("RB") && has("V") && has("B")) out.RB = out.V - out.B;
     if (!has("M") && has("G") && has("V") && out.V !== 0) out.M = out.G / out.V;
@@ -78,12 +85,12 @@
   ];
   const CORROBORATION_REASONS = {
     V: "Matches estimated cost + estimated profit",
-    C: "Matches contract value − estimated profit",
+    C: "Matches the independently implied estimated cost",
     G: "Matches contract value − estimated cost",
-    D: "Matches calculated costs to date",
+    D: "Matches the independently implied costs to date",
     Q: "Matches estimated cost − costs to date",
-    E: "Matches calculated earned revenue",
-    B: "Matches earned revenue + billing position",
+    E: "Matches the independently implied earned revenue",
+    B: "Matches the independently implied billings",
     H: "Matches earned revenue − costs to date",
     N: "Matches billings − earned revenue",
     U: "Matches calculated underbillings",
@@ -98,6 +105,35 @@
     // $1,000 (0.002%) while retaining the existing ~$2 absolute floor.
     const scale = Math.max(Math.abs(observed), Math.abs(expected), 1);
     return Math.max(2.05, scale * 0.00002);
+  }
+
+  function allowedCorroborationMisses(count) {
+    // A wrong value in any input can spoil a prediction for an otherwise-correct
+    // target column. Keep the bar high (roughly 88% agreement), while allowing
+    // a 25–40 job schedule to survive three or four planted OCR errors.
+    return Math.min(4, Math.max(2, Math.floor(count * 0.12)));
+  }
+
+  function corroborationStats(actualRows, derivedRows, variable) {
+    const comparable = actualRows.map(({ value, index }) => ({
+      actual: variable === "U" || variable === "O" ? Math.abs(value) : value,
+      expected: +derivedRows[index]?.[variable],
+    })).filter(({ expected }) => Number.isFinite(expected));
+    const informative = comparable.filter(({ actual: observed, expected }) => {
+      const tolerance = corroborationTolerance(observed, expected);
+      return Math.abs(observed) > tolerance || Math.abs(expected) > tolerance;
+    });
+    if (informative.length < 3) return null;
+    const matchedRows = informative.filter(({ actual: observed, expected }) =>
+      Math.abs(observed - expected) <= corroborationTolerance(observed, expected)).length;
+    const allowedMisses = allowedCorroborationMisses(informative.length);
+    const requiredRows = Math.max(3, informative.length - allowedMisses);
+    if (matchedRows < requiredRows) return null;
+    return {
+      matchedRows,
+      comparedRows: informative.length,
+      mismatches: informative.length - matchedRows,
+    };
   }
 
   function inferCorroboratingColumns(rows, mapping, ignoredColumns = []) {
@@ -124,39 +160,18 @@
 
     for (let column = 0; column < width; column += 1) {
       if (usedColumns.has(column) || ignored.has(column)) continue;
-      const actual = (rows || []).map((row) => {
+      const actualRows = (rows || []).map((row, index) => {
         const raw = row[column];
-        return raw === null || raw === "" ? NaN : +raw;
-      });
-      const actualRows = actual.map((value, index) => ({ value, index }))
-        .filter(({ value }) => Number.isFinite(value));
+        const value = raw === null || raw === "" ? NaN : +raw;
+        return { value, index };
+      }).filter(({ value }) => Number.isFinite(value));
       if (actualRows.length < 3) continue;
 
       const matches = [];
       for (const variable of CORROBORATION_VARS) {
         if (usedVariables.has(variable)) continue;
-        const comparable = actualRows.map(({ value, index }) => ({
-          actual: variable === "U" || variable === "O" ? Math.abs(value) : value,
-          expected: +derivedRows[index][variable],
-        })).filter(({ expected }) => Number.isFinite(expected));
-        const informative = comparable.filter(({ actual: observed, expected }) => {
-          const tolerance = corroborationTolerance(observed, expected);
-          return Math.abs(observed) > tolerance || Math.abs(expected) > tolerance;
-        });
-        if (informative.length < 3) continue;
-
-        const matchedRows = informative.filter(({ actual: observed, expected }) =>
-          Math.abs(observed - expected) <= corroborationTolerance(observed, expected)).length;
-        const allowedMisses = Math.min(2, Math.floor(informative.length * 0.2));
-        const requiredRows = Math.max(3, informative.length - allowedMisses);
-        if (matchedRows >= requiredRows) {
-          matches.push({
-            variable,
-            matchedRows,
-            comparedRows: informative.length,
-            mismatches: informative.length - matchedRows,
-          });
-        }
+        const stats = corroborationStats(actualRows, derivedRows, variable);
+        if (stats) matches.push({ variable, ...stats });
       }
       if (matches.length === 1) candidatesByColumn.set(column, matches[0]);
     }
@@ -180,8 +195,44 @@
         matchedRows: match.matchedRows,
         comparedRows: match.comparedRows,
         mismatches: match.mismatches,
+        confirmed: false,
       };
     });
+
+    // A manually/header-mapped physical column may also be independently
+    // checkable. Remove that one column from the inputs before predicting it so
+    // the check can never certify a value with itself.
+    anchors.forEach(([columnText, variable]) => {
+      const column = +columnText;
+      const otherAnchors = anchors.filter(([other]) => +other !== column);
+      const otherDerived = (rows || []).map((row) => {
+        const printed = {};
+        otherAnchors.forEach(([otherColumn, otherVariable]) => {
+          const raw = row[+otherColumn];
+          const value = raw === null || raw === "" ? NaN : +raw;
+          if (Number.isFinite(value)) printed[otherVariable] = value;
+        });
+        return deriveCanonicalVars(printed);
+      });
+      const actualRows = (rows || []).map((row, index) => {
+        const raw = row[column];
+        const value = raw === null || raw === "" ? NaN : +raw;
+        return { value, index };
+      }).filter(({ value }) => Number.isFinite(value));
+      const stats = corroborationStats(actualRows, otherDerived, variable);
+      if (!stats) return;
+      const rowNote = stats.mismatches
+        ? ` · ${stats.matchedRows} of ${stats.comparedRows} rows`
+        : ` · all ${stats.comparedRows} rows`;
+      inferred[column] = {
+        variable,
+        reason: (CORROBORATION_REASONS[variable] || "Matches the calculated value") + rowNote,
+        rows: (rows || []).length,
+        ...stats,
+        confirmed: true,
+      };
+    });
+
     return inferred;
   }
 
