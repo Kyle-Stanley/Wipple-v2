@@ -33,7 +33,7 @@
       out.D = out.E * out.C / out.V;
     if (!has("P") && has("D") && has("C") && out.C !== 0) out.P = out.D / out.C;
     if (!has("Q") && has("C") && has("D")) out.Q = out.C - out.D;
-    if (!has("E") && has("D") && has("C") && has("V") && out.C !== 0)
+    if (!has("E") && has("D") && has("C") && has("V") && out.V !== 0)
       out.E = out.D / out.C * out.V;
 
     // Under/over columns are stored as positive magnitudes. Together they
@@ -108,10 +108,11 @@
   }
 
   function allowedCorroborationMisses(count) {
-    // A wrong value in any input can spoil a prediction for an otherwise-correct
-    // target column. Keep the bar high (roughly 88% agreement), while allowing
-    // a 25–40 job schedule to survive three or four planted OCR errors.
-    return Math.min(4, Math.max(2, Math.floor(count * 0.12)));
+    // Tiny samples cannot safely absorb misses: one coincidental relationship
+    // can otherwise make a column ambiguous. Once there are at least ten rows,
+    // allow two poisoned inputs; larger schedules may tolerate roughly 12%,
+    // capped at four misses.
+    return Math.min(4, Math.max(count >= 10 ? 2 : 0, Math.floor(count * 0.12)));
   }
 
   function corroborationStats(actualRows, derivedRows, variable) {
