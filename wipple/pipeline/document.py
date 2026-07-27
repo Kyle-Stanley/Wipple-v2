@@ -32,7 +32,7 @@ from ..core.model_client import Metrics
 from ..accounting.parsing import parse_table
 from ..documents.periods import extract_period_end
 from ..reconstruction.splitting import find_cc_block, split_sections
-from ..accounting.validation import run_schema_race, serialize_validation
+from ..accounting.validation import parse_node, validate_node
 
 
 class DocState(TypedDict, total=False):
@@ -179,67 +179,78 @@ def _attach_job_identity(report: dict, raw_rows: list,
 
 
 def tables_node(state: DocState) -> dict:
-    """Per logical table: parse -> schema race -> misalignment sweep ->
-    split -> per-section v2 subgraph. Returns assembled tables + the chunks
-    that need re-extraction."""
+    """Per logical table: canonical parse -> one schema race -> optional
+    repair/split -> per-section analysis. An unchanged single section reuses
+    the exact parse and validation dictionaries instead of recomputing them."""
     subgraph = build_graph()
     metrics = state["_metrics"]
     out_tables, bad = [], set(state.get("failed_chunks") or [])
 
     for t in state.get("logical_tables") or []:
-        pr = parse_table(t["rows"], headers=t["headers"])
+        raw_table = {
+            "headers": t["headers"],
+            "rows": t["rows"],
+            "page_count": 1,
+            "notes": [],
+            "title_texts": t.get("title_texts") or [],
+        }
+        # Keep the ParseResult only for structural metadata used by the band
+        # checker. parse_node is the canonical parse used by the final section
+        # graph: it also separates and preserves a trailing stated-total row.
+        structural = parse_table(t["rows"], headers=t["headers"])
+        parsed = parse_node({"raw_table": raw_table})
+        parsed_matrix = parsed.get("matrix")
+        parsed_report = parsed.get("parse_report") or {}
+        parsed_row_index = parsed_report.get("row_index") or []
+
         entry = {"pages": t["pages"], "chunks": t["chunks"],
                  "stitch_issues": t["issues"],
                  "joined_columns": t["joined_columns"],
                  "title_texts": t.get("title_texts") or [],
                  "headers": t["headers"],
-                 "numeric_col_map": pr.numeric_col_map,
+                 "numeric_col_map": parsed.get("numeric_col_map") or [],
                  "sections": []}
-        if pr.matrix is None:
+        if parsed_matrix is None:
             entry["note"] = "no numeric body after parse"
             out_tables.append(entry)
             continue
 
-        numeric_headers = [
-            t["headers"][j] if j < len(t["headers"]) else ""
-            for j in pr.numeric_col_map
-        ]
-        chosen, race = run_schema_race(
-            pr.matrix, pr.job_labels, headers=numeric_headers,
-            title_texts=t.get("title_texts"))
-        v = serialize_validation(chosen)
-        v["schema"] = race["chosen"]
+        validation_state = {**parsed, "raw_table": raw_table}
+        v = validate_node(validation_state)["validation"]
+        race = (v.get("diagnostics") or {}).get("schema_race") or {
+            "chosen": v.get("schema", "wip")}
         entry["schema_race"] = race
 
         # -- block misalignment: band-shaped failures -> shift sweep --------
-        matrix, mis_findings = pr.matrix, []
+        matrix, mis_findings = parsed_matrix, []
         partial_multipage_mapping = (
             len(t.get("chunks") or []) > 1
             and bool(v.get("mapping"))
-            and len(v["mapping"]) < int(pr.matrix.shape[1])
+            and len(v["mapping"]) < int(parsed_matrix.shape[1])
         )
         if (v.get("failures")
                 or v.get("status")
                 == "insufficient_information_for_validation"
                 or partial_multipage_mapping):
             band_of_row = {mr: _prov_chunk(t["row_prov"], raw)
-                           for mr, raw in enumerate(pr.row_index)
+                           for mr, raw in enumerate(parsed_row_index)
                            if _prov_chunk(t["row_prov"], raw) is not None}
             repaired, mis_findings, mis_bad = check_bands(
-                pr.matrix, v["mapping"], v["schema"], v["failures"],
-                band_of_row, scaled=pr.percent_scaled_cols)
-            for f in mis_findings:
-                f["pages"] = sorted({_page_of(t["row_prov"], pr.row_index[mr])
-                                     for mr in f.get("rows", [])
-                                     if mr < len(pr.row_index)} - {None})
+                parsed_matrix, v["mapping"], v["schema"], v["failures"],
+                band_of_row, scaled=structural.percent_scaled_cols)
+            for finding in mis_findings:
+                finding["pages"] = sorted({
+                    _page_of(t["row_prov"], parsed_row_index[mr])
+                    for mr in finding.get("rows", [])
+                    if mr < len(parsed_row_index)} - {None})
             bad.update(mis_bad)
             if repaired is not None:
                 matrix = repaired
-                chosen, race = run_schema_race(
-                    matrix, pr.job_labels, headers=numeric_headers,
-                    title_texts=t.get("title_texts"))
-                v = serialize_validation(chosen)
-                v["schema"] = race["chosen"]
+                repaired_state = {**parsed, "matrix": matrix,
+                                  "raw_table": raw_table}
+                v = validate_node(repaired_state)["validation"]
+                race = (v.get("diagnostics") or {}).get("schema_race") or {
+                    "chosen": v.get("schema", "wip")}
                 entry["schema_race"] = race
                 entry["misalignment_repaired"] = True
         entry["misalignment_findings"] = mis_findings
@@ -253,27 +264,46 @@ def tables_node(state: DocState) -> dict:
         if v["schema"] == "wip" and v.get("mapping"):
             seg = find_cc_block(matrix, v["mapping"])
         sections = split_sections(t["rows"], t["headers"], t["row_prov"],
-                                  pr.row_index, seg)
+                                  parsed_row_index, seg)
         if v["schema"] == "cc" and len(sections) == 1:
             sections[0]["type"] = "cc"
         if seg.get("lone_rows"):
+            labels = parsed.get("job_labels") or []
             entry["notes"] = [
-                f"row {pr.job_labels[r]!r} is complete (E=V, D=C, Q=0, "
+                f"row {labels[r]!r} is complete (E=V, D=C, Q=0, "
                 "P=100%) but still carried in progress -- finished job not "
                 "yet closed out of the WIP"
-                for r in seg["lone_rows"]]
+                for r in seg["lone_rows"] if r < len(labels)]
 
-        # -- per-section: the v2 engine, one clean table at a time ----------
+        # -- per-section: reuse exact parse/validation when raw input is same -
         for sec in sections:
+            sec_raw = {
+                "headers": sec["headers"], "rows": sec["rows"],
+                "page_count": 1, "notes": [],
+                "title_texts": t.get("title_texts") or [],
+            }
+            unchanged = (
+                not entry.get("misalignment_repaired")
+                and sec_raw["headers"] == raw_table["headers"]
+                and sec_raw["rows"] == raw_table["rows"]
+            )
+            if unchanged:
+                sec_parsed = parsed
+                sec_validation = v
+            else:
+                sec_parsed = parse_node({"raw_table": sec_raw})
+                sec_validation = validate_node(
+                    {**sec_parsed, "raw_table": sec_raw})["validation"]
+
             final = subgraph.invoke({
-                "raw_table": {"headers": sec["headers"], "rows": sec["rows"],
-                              "page_count": 1, "notes": [],
-                              "title_texts": t.get("title_texts") or []},
+                **sec_parsed,
+                "validation": sec_validation,
+                "raw_table": sec_raw,
                 "source_name": state.get("source_name", ""),
                 "model_override": state.get("model_override"),
                 # re-extraction budget pre-spent: the DOCUMENT graph owns
                 # re-extraction (it knows which chunk); the section engine
-                # must never loop back to a perception step it doesn't have.
+                # must never loop back to a perception step it does not have.
                 "extraction_tier": "primary", "reextract_count": 1,
                 "extraction_attempts": [], "_metrics": metrics,
             })

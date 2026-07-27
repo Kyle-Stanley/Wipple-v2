@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Callable, Optional
 
 import numpy as np
@@ -447,21 +448,32 @@ class InputShapeError(ValueError):
 # Small helpers
 # ---------------------------------------------------------------------------
 
-def detect_grid(vals: np.ndarray) -> Optional[float]:
-    """Coarsest display grid (ratio space) the values satisfy, or None.
-
-    Coarsest-first iteration is load-bearing (anti-bug 5): returning the
-    finest satisfying grid would make percent certification stricter than the
-    visible display precision supports."""
-    v = np.asarray(vals, dtype=float)
-    v = v[np.isfinite(v)]
-    if v.size == 0:
-        return None
+@lru_cache(maxsize=4096)
+def _detect_grid_cached(dtype: str, shape: tuple[int, ...], payload: bytes) -> Optional[float]:
+    """Pure cached implementation keyed by the finite values' exact bytes."""
+    v = np.frombuffer(payload, dtype=np.dtype(dtype)).reshape(shape)
     for g in GRIDS:
         k = np.round(v / g)
         if np.all(np.abs(v - k * g) <= 1e-9 + 1e-9 * np.abs(v)):
             return g
     return None
+
+
+def detect_grid(vals: np.ndarray) -> Optional[float]:
+    """Coarsest display grid (ratio space) the values satisfy, or None.
+
+    Coarsest-first iteration is load-bearing (anti-bug 5): returning the
+    finest satisfying grid would make percent certification stricter than the
+    visible display precision supports. The same candidate column/scale arrays
+    recur across many hypotheses, so cache the exact finite vector. The cache
+    is bounded and the key contains dtype, shape, and bytes; equal inputs take
+    the identical numeric path while unrelated documents cannot grow it forever.
+    """
+    v = np.asarray(vals, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return None
+    return _detect_grid_cached(v.dtype.str, tuple(v.shape), v.tobytes())
 
 
 def _prop_tol(fn: Callable, vals: list, tols: list):
