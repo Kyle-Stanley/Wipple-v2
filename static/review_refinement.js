@@ -23,12 +23,28 @@
       #certificate .manual-audit-details>header{display:block;width:100%;margin:0 0 9px;padding:0}
       #certificate .manual-audit-details>header strong{font-size:19px;line-height:1.2;color:var(--amber)}
       #certificate .manual-audit-details>header p{display:none}
+      #certificate .manual-overlap-legend{
+        display:flex;align-items:center;gap:7px;margin:-2px 0 9px;padding:6px 8px;
+        border-radius:6px;background:#F7E9E5;color:var(--brick);font-size:9.5px;line-height:1.3
+      }
+      #certificate .manual-overlap-legend::before{
+        content:"";width:10px;height:10px;flex:0 0 auto;border:1px solid #C66E5B;
+        border-radius:3px;background:#F3DCD6
+      }
       #certificate .manual-audit-list{gap:7px}
       #certificate .manual-audit-row{padding:9px 10px;border-radius:8px}
+      #certificate .manual-audit-row.edited.review-passed{border-color:#8EAD8A;background:#FBFDFB}
       #certificate .manual-audit-row-head{align-items:center}
       #certificate .manual-audit-row-head strong{font-size:12.5px}
       #certificate .manual-audit-row-head small{font-size:10px;margin-top:1px;color:var(--brick)}
       #certificate .manual-audit-row-head .btn{padding:3px 8px}
+      #certificate .manual-review-pass{
+        display:inline-flex;align-items:center;gap:5px;color:#3E6B46;font-size:10px;font-weight:650
+      }
+      #certificate .manual-review-pass .manual-review-check{
+        display:inline-grid;place-items:center;width:14px;height:14px;border-radius:999px;
+        background:#4F7657;color:white;font-size:9px;line-height:1
+      }
       #certificate .manual-audit-facts{grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:5px;margin-top:7px}
       #certificate .manual-audit-fact{padding:5px 7px;border-radius:6px}
       #certificate .manual-audit-fact span{font-size:9px}
@@ -39,7 +55,7 @@
       #certificate .manual-audit-fact.likely-shared-input span,
       #certificate .manual-audit-fact.likely-shared-input b{color:var(--brick)}
       #certificate .manual-audit-fact.likely-shared-input::after{
-        content:"Shared by the failed checks";display:block;margin-top:2px;
+        content:"Review first";display:block;margin-top:2px;
         font-size:8.5px;font-weight:650;color:var(--brick)
       }
       #certificate .manual-audit-equations{display:none}
@@ -109,24 +125,51 @@
     return outputs.map(variableLabel);
   }
 
+  function confirmedVariables(rep) {
+    const confirmed = new Set(rep?._manualConfirmedVariables || []);
+    const rows = rep?._manualOriginalRows;
+    const mapping = rep?._manualMapping;
+    if (Array.isArray(rows) && mapping && window.WippleMath?.inferCorroboratingColumns) {
+      const matches = window.WippleMath.inferCorroboratingColumns(rows, mapping, []);
+      Object.values(matches || {}).forEach((match) => {
+        if (match?.confirmed && match.variable) confirmed.add(match.variable);
+      });
+    }
+    return confirmed;
+  }
+
   function sharedUnconfirmedVariable(rep, failure) {
     const details = failure?.details || [];
     if (details.length < 2) return null;
+
+    // Compare the inputs to each failed equation, not the result being tested.
+    // A result may feed another equation and otherwise creates a false second
+    // overlap (for example Earned Revenue alongside Cost to Date).
     const counts = new Map();
     details.forEach((detail) => {
-      new Set(detail.variables || []).forEach((variable) =>
+      const inputs = new Set((detail.variables || [])
+        .filter((variable) => variable !== detail.outputVariable));
+      inputs.forEach((variable) =>
         counts.set(variable, (counts.get(variable) || 0) + 1));
     });
-    const confirmed = new Set(rep?._manualConfirmedVariables || []);
+
+    const confirmed = confirmedVariables(rep);
     const shared = [...counts.entries()]
       .filter(([variable, count]) => count === details.length && !confirmed.has(variable))
       .map(([variable]) => variable);
     return shared.length === 1 ? shared[0] : null;
   }
 
-  function compactCard(rep, card, failure) {
-    if (card.dataset.reviewRefined === "true") return;
-    card.dataset.reviewRefined = "true";
+  function factForVariable(card, variable) {
+    const label = variableLabel(variable);
+    return [...card.querySelectorAll(".manual-audit-fact")].find((fact) =>
+      fact.querySelector("span")?.textContent.trim() === label) || null;
+  }
+
+  function compactFailedCard(rep, card, failure) {
+    if (card.dataset.reviewRefined === "failed") return;
+    card.dataset.reviewRefined = "failed";
+    card.classList.remove("review-passed");
 
     const subtitle = card.querySelector(".manual-audit-row-head small");
     const names = failedNames(failure);
@@ -135,7 +178,7 @@
       subtitle.textContent = `${count} available consistency check${count === 1 ? "" : "s"} failed: ${names.join(", ")}`;
     }
 
-    const equations = card.querySelector(".manual-audit-equations");
+    const equations = card.querySelector(":scope > .manual-audit-equations");
     if (equations) {
       const details = document.createElement("details");
       details.className = "manual-audit-why";
@@ -147,14 +190,34 @@
 
     const shared = sharedUnconfirmedVariable(rep, failure);
     if (shared) {
-      const variables = failure.variables || [];
-      const index = variables.indexOf(shared);
-      const facts = card.querySelectorAll(".manual-audit-fact");
-      if (index >= 0 && facts[index]) {
-        facts[index].classList.add("likely-shared-input");
-        facts[index].title = `${variableLabel(shared)} is the only unconfirmed value shared by every failed check. Review it first; this is not proof that it is wrong.`;
+      const fact = factForVariable(card, shared);
+      if (fact) {
+        fact.classList.add("likely-shared-input");
+        fact.title = `${variableLabel(shared)} is the only unconfirmed input shared by every failed check. Review it first; this is not proof that it is wrong.`;
       }
     }
+  }
+
+  function compactPassedCard(card) {
+    if (card.dataset.reviewRefined === "passed") return;
+    card.dataset.reviewRefined = "passed";
+    card.classList.add("review-passed");
+    card.querySelectorAll(".likely-shared-input").forEach((fact) =>
+      fact.classList.remove("likely-shared-input"));
+    const subtitle = card.querySelector(".manual-audit-row-head small");
+    if (subtitle) subtitle.innerHTML = `<span class="manual-review-pass"><span class="manual-review-check" aria-hidden="true">✓</span>Checks out against the available mapped-column math</span>`;
+  }
+
+  function updateOverlapLegend(section) {
+    const hasHighlight = !!section.querySelector(".likely-shared-input");
+    let legend = section.querySelector(":scope > .manual-overlap-legend");
+    if (hasHighlight && !legend) {
+      legend = document.createElement("div");
+      legend.className = "manual-overlap-legend";
+      legend.textContent = "Shaded value is the only unconfirmed input shared by every failed check—review it first.";
+      const header = section.querySelector(":scope > header");
+      header?.insertAdjacentElement("afterend", legend);
+    } else if (!hasHighlight) legend?.remove();
   }
 
   function refineReview() {
@@ -174,8 +237,10 @@
     const byRow = new Map(failures.map((failure) => [failure.rowIndex, failure]));
     section.querySelectorAll(".manual-audit-row[data-manual-row]").forEach((card) => {
       const failure = byRow.get(+card.dataset.manualRow);
-      if (failure) compactCard(rep, card, failure);
+      if (failure) compactFailedCard(rep, card, failure);
+      else compactPassedCard(card);
     });
+    updateOverlapLegend(section);
   }
 
   function queueRefine() {
