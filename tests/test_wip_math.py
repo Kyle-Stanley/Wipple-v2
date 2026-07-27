@@ -6,68 +6,48 @@ from pathlib import Path
 MODULE = Path(__file__).parents[1] / "static" / "wip_math.js"
 
 
-def derive(values):
-    script = """
+def run_js(expression, *args):
+    script = f"""
 const fs = require("fs");
 const source = fs.readFileSync(process.argv[1], "utf8");
-const loaded = {exports: {}};
+const loaded = {{exports: {{}}}};
 new Function("module", "exports", source)(loaded, loaded.exports);
-process.stdout.write(JSON.stringify(
-  loaded.exports.deriveCanonicalVars(JSON.parse(process.argv[2]))
-));
+const args = process.argv.slice(2).map(JSON.parse);
+process.stdout.write(JSON.stringify({expression}));
 """
     result = subprocess.run(
-        ["node", "-e", script, str(MODULE), json.dumps(values)],
+        ["node", "-e", script, str(MODULE), *[json.dumps(arg) for arg in args]],
         check=True,
         capture_output=True,
         text=True,
     )
     return json.loads(result.stdout)
+
+
+def derive(values):
+    return run_js("loaded.exports.deriveCanonicalVars(args[0])", values)
 
 
 def readiness(variables):
-    script = """
-const fs = require("fs");
-const source = fs.readFileSync(process.argv[1], "utf8");
-const loaded = {exports: {}};
-new Function("module", "exports", source)(loaded, loaded.exports);
-process.stdout.write(JSON.stringify(
-  loaded.exports.mappingReadiness(JSON.parse(process.argv[2]))
-));
-"""
-    result = subprocess.run(
-        ["node", "-e", script, str(MODULE), json.dumps(variables)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return json.loads(result.stdout)
+    return run_js("loaded.exports.mappingReadiness(args[0])", variables)
 
 
 def corroboration(rows, mapping, ignored=None):
-    script = """
-const fs = require("fs");
-const source = fs.readFileSync(process.argv[1], "utf8");
-const loaded = {exports: {}};
-new Function("module", "exports", source)(loaded, loaded.exports);
-process.stdout.write(JSON.stringify(
-  loaded.exports.inferCorroboratingColumns(
-    JSON.parse(process.argv[2]),
-    JSON.parse(process.argv[3]),
-    JSON.parse(process.argv[4])
-  )
-));
-"""
-    result = subprocess.run(
-        [
-            "node", "-e", script, str(MODULE), json.dumps(rows),
-            json.dumps(mapping), json.dumps(ignored or []),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    return run_js(
+        "loaded.exports.inferCorroboratingColumns(args[0], args[1], args[2])",
+        rows,
+        mapping,
+        ignored or [],
     )
-    return json.loads(result.stdout)
+
+
+def fixed_audit(rows, mapping, labels=None):
+    return run_js(
+        "loaded.exports.auditFixedMapping(args[0], args[1], args[2])",
+        rows,
+        mapping,
+        labels or [],
+    )
 
 
 def test_full_wip_fields_are_derived_from_validated_baselines():
@@ -220,3 +200,53 @@ def test_ambiguous_corroboration_stays_unmapped():
 
     assert "4" not in inferred
     assert "5" not in inferred
+
+
+def test_fixed_mapping_audit_flags_inconsistent_rows_without_naming_a_culprit():
+    rows = [
+        [1_000_000, 800_000, 500_000, 400_000, 450_000],
+        [2_000_000, 1_600_000, 1_000_000, 800_000, 900_000],
+        [3_000_000, 2_400_000, 1_500_000, 1_200_000, 1_350_000],
+        [4_000_000, 3_200_000, 20_000_000, 1_600_000, 1_800_000],
+    ]
+    mapping = {"0": "V", "1": "C", "2": "E", "3": "D", "4": "B"}
+
+    result = fixed_audit(rows, mapping, ["A", "B", "C", "Broken"])
+
+    assert len(result["relations"]) == 1
+    assert result["relations"][0]["id"] == "earned-revenue"
+    assert result["checkedRows"] == 4
+    assert [row["rowLabel"] for row in result["failedRows"]] == ["Broken"]
+    assert result["failedRows"][0]["variables"] == ["V", "C", "D", "E"]
+    assert "culprit" not in result["failedRows"][0]
+    assert result["limited"] is True
+
+
+def test_fixed_mapping_audit_allows_small_ratio_rounding_residue():
+    rows = [
+        [1_000_000, 800_000, 500_008, 400_000],
+        [2_000_000, 1_600_000, 1_000_014, 800_000],
+        [3_000_000, 2_400_000, 1_500_019, 1_200_000],
+    ]
+    mapping = {"0": "V", "1": "C", "2": "E", "3": "D"}
+
+    result = fixed_audit(rows, mapping)
+
+    assert len(result["relations"]) == 1
+    assert result["failedRows"] == []
+    assert result["passed"] is True
+
+
+def test_fixed_mapping_audit_does_not_claim_a_check_without_redundancy():
+    rows = [
+        [1_000_000, 800_000, 450_000],
+        [2_000_000, 1_600_000, 900_000],
+        [3_000_000, 2_400_000, 1_350_000],
+    ]
+    mapping = {"0": "V", "1": "C", "2": "B"}
+
+    result = fixed_audit(rows, mapping)
+
+    assert result["relations"] == []
+    assert result["failedRows"] == []
+    assert result["passed"] is False
