@@ -139,7 +139,6 @@ def test_unchanged_document_table_runs_one_schema_race(monkeypatch):
     assert calls == 1
 
 
-
 def test_decisive_wip_skips_cc(monkeypatch):
     raw = clean_raw_table()
     parsed = parse_node({"raw_table": raw})
