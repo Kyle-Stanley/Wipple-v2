@@ -139,6 +139,60 @@ def test_complete_mapping_corroborates_a_unique_untouched_money_column():
 
     assert inferred["4"]["variable"] == "G"
     assert "contract value" in inferred["4"]["reason"].lower()
+    assert inferred["4"]["matchedRows"] == 3
+    assert inferred["4"]["mismatches"] == 0
+
+
+def test_corroboration_accepts_small_rounding_residue_from_ratio_math():
+    rows = [
+        [1_000_000, 800_000, 500_000, 450_000, 400_006],
+        [2_000_000, 1_500_000, 800_000, 760_000, 600_011],
+        [3_000_000, 2_400_000, 1_500_000, 1_440_000, 1_200_019],
+        [4_000_000, 3_200_000, 2_000_000, 1_900_000, 1_600_028],
+    ]
+
+    inferred = corroboration(rows, {"0": "V", "1": "C", "2": "E", "3": "B"})
+
+    assert inferred["4"]["variable"] == "D"
+    assert inferred["4"]["matchedRows"] == 4
+
+
+def test_corroboration_tolerates_up_to_two_corrupted_cells_on_a_long_schedule():
+    rows = []
+    for index in range(12):
+        value = (index + 1) * 1000
+        estimated_cost = value * 0.8
+        earned = value * 0.3
+        billings = earned * 0.9
+        cost_to_date = earned * estimated_cost / value
+        if index in {3, 9}:
+            cost_to_date += 91_000
+        rows.append([value, estimated_cost, earned, billings, cost_to_date])
+
+    inferred = corroboration(rows, {"0": "V", "1": "C", "2": "E", "3": "B"})
+
+    assert inferred["4"]["variable"] == "D"
+    assert inferred["4"]["matchedRows"] == 10
+    assert inferred["4"]["comparedRows"] == 12
+    assert inferred["4"]["mismatches"] == 2
+    assert "10 of 12 rows" in inferred["4"]["reason"]
+
+
+def test_corroboration_rejects_more_than_two_corrupted_cells():
+    rows = []
+    for index in range(12):
+        value = (index + 1) * 1000
+        estimated_cost = value * 0.8
+        earned = value * 0.3
+        billings = earned * 0.9
+        cost_to_date = earned * estimated_cost / value
+        if index in {2, 6, 10}:
+            cost_to_date += 91_000
+        rows.append([value, estimated_cost, earned, billings, cost_to_date])
+
+    inferred = corroboration(rows, {"0": "V", "1": "C", "2": "E", "3": "B"})
+
+    assert "4" not in inferred
 
 
 def test_corroboration_never_changes_a_user_touched_column():
