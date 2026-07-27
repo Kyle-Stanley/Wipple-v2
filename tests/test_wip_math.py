@@ -93,6 +93,12 @@ def test_alternative_dollar_anchors_close_the_full_wip():
     assert values["P"] == 0.5
 
 
+def test_earned_profit_can_reconstruct_cost_to_date_without_percent_math():
+    values = derive({"E": 500_000, "H": 100_000})
+
+    assert values["D"] == 400_000
+
+
 def test_readiness_requires_profit_progress_and_billing():
     assert readiness(["V", "C"])["score"] == 1
     assert readiness(["V", "C", "D"])["score"] == 2
@@ -158,7 +164,27 @@ def test_corroboration_tolerates_up_to_two_corrupted_cells_on_a_long_schedule():
     assert "10 of 12 rows" in inferred["4"]["reason"]
 
 
-def test_corroboration_rejects_more_than_two_corrupted_cells():
+def test_large_schedule_corroboration_survives_three_poisoned_predictions():
+    rows = []
+    for index in range(28):
+        value = (index + 10) * 100_000
+        estimated_cost = value * 0.8
+        earned = value * 0.45
+        billings = earned * 0.93
+        cost_to_date = earned * estimated_cost / value
+        printed_value = value + (90_000 if index == 3 else 0)
+        printed_cost = estimated_cost + (70_000 if index == 11 else 0)
+        printed_earned = earned + (80_000 if index == 21 else 0)
+        rows.append([printed_value, printed_cost, printed_earned, billings, cost_to_date])
+
+    inferred = corroboration(rows, {"0": "V", "1": "C", "2": "E", "3": "B"})
+
+    assert inferred["4"]["variable"] == "D"
+    assert inferred["4"]["matchedRows"] == 25
+    assert inferred["4"]["mismatches"] == 3
+
+
+def test_corroboration_rejects_more_than_two_corrupted_cells_in_a_small_schedule():
     rows = []
     for index in range(12):
         value = (index + 1) * 1000
@@ -173,6 +199,22 @@ def test_corroboration_rejects_more_than_two_corrupted_cells():
     inferred = corroboration(rows, {"0": "V", "1": "C", "2": "E", "3": "B"})
 
     assert "4" not in inferred
+
+
+def test_mapped_cost_to_date_is_confirmed_without_self_witness():
+    rows = [
+        [1_000_000, 800_000, 500_000, 400_000, 100_000, 450_000],
+        [2_000_000, 1_600_000, 1_000_000, 800_000, 200_000, 900_000],
+        [3_000_000, 2_400_000, 1_500_000, 1_200_000, 300_000, 1_350_000],
+        [4_000_000, 3_200_000, 2_000_000, 1_600_000, 400_000, 1_800_000],
+    ]
+    mapping = {"0": "V", "1": "C", "2": "E", "3": "D", "4": "H", "5": "B"}
+
+    inferred = corroboration(rows, mapping)
+
+    assert inferred["3"]["variable"] == "D"
+    assert inferred["3"]["confirmed"] is True
+    assert inferred["3"]["matchedRows"] == 4
 
 
 def test_corroboration_never_changes_a_user_touched_column():
