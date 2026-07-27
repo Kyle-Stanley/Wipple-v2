@@ -4,13 +4,21 @@
   else {
     root.WippleMath = api;
     // Keep the mapping-page presentation isolated from the accounting helpers.
-    // index.html already loads this module, so this small browser-only loader lets
-    // the UI enhancement remain a separate static asset.
-    if (typeof document !== "undefined" && !document.querySelector("script[data-wipple-mapping-ui]")) {
-      const script = document.createElement("script");
-      script.src = "/static/mapping_ui.js";
-      script.dataset.wippleMappingUi = "true";
-      document.head.appendChild(script);
+    // index.html already loads this module, so these browser-only loaders let
+    // the UI enhancements remain separate static assets.
+    if (typeof document !== "undefined") {
+      if (!document.querySelector("script[data-wipple-mapping-ui]")) {
+        const script = document.createElement("script");
+        script.src = "/static/mapping_ui.js";
+        script.dataset.wippleMappingUi = "true";
+        document.head.appendChild(script);
+      }
+      if (!document.querySelector("script[data-wipple-review-refinement]")) {
+        const script = document.createElement("script");
+        script.src = "/static/review_refinement.js";
+        script.dataset.wippleReviewRefinement = "true";
+        document.head.appendChild(script);
+      }
     }
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
@@ -100,18 +108,11 @@
   };
 
   function corroborationTolerance(observed, expected) {
-    // Additive identities should normally agree to the dollar. Multiplication
-    // and division can leave a small rounding residue, so permit two cents per
-    // $1,000 (0.002%) while retaining the existing ~$2 absolute floor.
     const scale = Math.max(Math.abs(observed), Math.abs(expected), 1);
     return Math.max(2.05, scale * 0.00002);
   }
 
   function allowedCorroborationMisses(count) {
-    // Tiny samples cannot safely absorb misses: one coincidental relationship
-    // can otherwise make a column ambiguous. Once there are at least ten rows,
-    // allow two poisoned inputs; larger schedules may tolerate roughly 12%,
-    // capped at four misses.
     return Math.min(4, Math.max(count >= 10 ? 2 : 0, Math.floor(count * 0.12)));
   }
 
@@ -138,10 +139,8 @@
   }
 
   function inferCorroboratingColumns(rows, mapping, ignoredColumns = []) {
-    const anchors = Object.entries(mapping || {})
-      .filter(([, variable]) => variable);
-    if (!mappingReadiness(anchors.map(([, variable]) => variable)).complete)
-      return {};
+    const anchors = Object.entries(mapping || {}).filter(([, variable]) => variable);
+    if (!mappingReadiness(anchors.map(([, variable]) => variable)).complete) return {};
 
     const ignored = new Set(Array.from(ignoredColumns || [], Number));
     const usedVariables = new Set(anchors.map(([, variable]) => variable));
@@ -200,9 +199,6 @@
       };
     });
 
-    // A manually/header-mapped physical column may also be independently
-    // checkable. Remove that one column from the inputs before predicting it so
-    // the check can never certify a value with itself.
     anchors.forEach(([columnText, variable]) => {
       const column = +columnText;
       const otherAnchors = anchors.filter(([other]) => +other !== column);
@@ -274,8 +270,7 @@
   function auditFixedMapping(rows, mapping, labels = []) {
     const columnByVariable = {};
     Object.entries(mapping || {}).forEach(([column, variable]) => {
-      if (variable && columnByVariable[variable] == null)
-        columnByVariable[variable] = +column;
+      if (variable && columnByVariable[variable] == null) columnByVariable[variable] = +column;
     });
     const available = FIXED_MAPPING_RULES.filter((rule) =>
       rule.variables.every((variable) => columnByVariable[variable] != null));
@@ -328,8 +323,7 @@
         grouped.details.push(failure);
         failedByRow.set(rowIndex, grouped);
       });
-      if (checkedRows >= 3)
-        relations.push({ id: rule.id, label: rule.label, checkedRows, failures });
+      if (checkedRows >= 3) relations.push({ id: rule.id, label: rule.label, checkedRows, failures });
     }
 
     const retained = new Set(relations.map((relation) => relation.id));
