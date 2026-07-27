@@ -1,7 +1,18 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
-  else root.WippleMath = api;
+  else {
+    root.WippleMath = api;
+    // Keep the mapping-page presentation isolated from the accounting helpers.
+    // index.html already loads this module, so this small browser-only loader lets
+    // the UI enhancement remain a separate static asset.
+    if (typeof document !== "undefined" && !document.querySelector("script[data-wipple-mapping-ui]")) {
+      const script = document.createElement("script");
+      script.src = "/static/mapping_ui.js";
+      script.dataset.wippleMappingUi = "true";
+      document.head.appendChild(script);
+    }
+  }
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   function deriveCanonicalVars(values) {
     const out = { ...values };
@@ -67,19 +78,27 @@
   ];
   const CORROBORATION_REASONS = {
     V: "Matches estimated cost + estimated profit",
-    C: "Matches contract value \u2212 estimated profit",
-    G: "Matches contract value \u2212 estimated cost",
+    C: "Matches contract value − estimated profit",
+    G: "Matches contract value − estimated cost",
     D: "Matches calculated costs to date",
-    Q: "Matches estimated cost \u2212 costs to date",
+    Q: "Matches estimated cost − costs to date",
     E: "Matches calculated earned revenue",
     B: "Matches earned revenue + billing position",
-    H: "Matches earned revenue \u2212 costs to date",
-    N: "Matches billings \u2212 earned revenue",
+    H: "Matches earned revenue − costs to date",
+    N: "Matches billings − earned revenue",
     U: "Matches calculated underbillings",
     O: "Matches calculated overbillings",
-    R: "Matches contract value \u2212 earned revenue",
-    RB: "Matches contract value \u2212 billings",
+    R: "Matches contract value − earned revenue",
+    RB: "Matches contract value − billings",
   };
+
+  function corroborationTolerance(observed, expected) {
+    // Additive identities should normally agree to the dollar. Multiplication
+    // and division can leave a small rounding residue, so permit two cents per
+    // $1,000 (0.002%) while retaining the existing ~$2 absolute floor.
+    const scale = Math.max(Math.abs(observed), Math.abs(expected), 1);
+    return Math.max(2.05, scale * 0.00002);
+  }
 
   function inferCorroboratingColumns(rows, mapping, ignoredColumns = []) {
     const anchors = Object.entries(mapping || {})
@@ -119,33 +138,48 @@
         const comparable = actualRows.map(({ value, index }) => ({
           actual: variable === "U" || variable === "O" ? Math.abs(value) : value,
           expected: +derivedRows[index][variable],
-        }));
-        if (comparable.some(({ expected }) => !Number.isFinite(expected))) continue;
+        })).filter(({ expected }) => Number.isFinite(expected));
         const informative = comparable.filter(({ actual: observed, expected }) => {
-          const tolerance = 2.05 + 1e-9 * Math.abs(expected);
+          const tolerance = corroborationTolerance(observed, expected);
           return Math.abs(observed) > tolerance || Math.abs(expected) > tolerance;
         });
         if (informative.length < 3) continue;
-        const exact = comparable.every(({ actual: observed, expected }) =>
-          Math.abs(observed - expected) <= 2.05 + 1e-9 * Math.abs(expected));
-        if (exact) matches.push(variable);
+
+        const matchedRows = informative.filter(({ actual: observed, expected }) =>
+          Math.abs(observed - expected) <= corroborationTolerance(observed, expected)).length;
+        const allowedMisses = Math.min(2, Math.floor(informative.length * 0.2));
+        const requiredRows = Math.max(3, informative.length - allowedMisses);
+        if (matchedRows >= requiredRows) {
+          matches.push({
+            variable,
+            matchedRows,
+            comparedRows: informative.length,
+            mismatches: informative.length - matchedRows,
+          });
+        }
       }
       if (matches.length === 1) candidatesByColumn.set(column, matches[0]);
     }
 
     const columnsByVariable = new Map();
-    candidatesByColumn.forEach((variable, column) => {
-      const columns = columnsByVariable.get(variable) || [];
+    candidatesByColumn.forEach((match, column) => {
+      const columns = columnsByVariable.get(match.variable) || [];
       columns.push(column);
-      columnsByVariable.set(variable, columns);
+      columnsByVariable.set(match.variable, columns);
     });
     const inferred = {};
-    candidatesByColumn.forEach((variable, column) => {
-      if (columnsByVariable.get(variable).length !== 1) return;
+    candidatesByColumn.forEach((match, column) => {
+      if (columnsByVariable.get(match.variable).length !== 1) return;
+      const rowNote = match.mismatches
+        ? ` · ${match.matchedRows} of ${match.comparedRows} rows`
+        : ` · all ${match.comparedRows} rows`;
       inferred[column] = {
-        variable,
-        reason: CORROBORATION_REASONS[variable] || "Matches the calculated value",
+        variable: match.variable,
+        reason: (CORROBORATION_REASONS[match.variable] || "Matches the calculated value") + rowNote,
         rows: (rows || []).length,
+        matchedRows: match.matchedRows,
+        comparedRows: match.comparedRows,
+        mismatches: match.mismatches,
       };
     });
     return inferred;
