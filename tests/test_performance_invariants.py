@@ -6,7 +6,11 @@ import numpy as np
 
 from wipple.accounting import validation as validation_mod
 from wipple.accounting.validation import parse_node, validate_node
-from wipple.accounting.wip import _detect_grid_cached, detect_grid
+from wipple.accounting.wip import (
+    GRIDS,
+    _detect_grid_cached,
+    detect_grid,
+)
 from wipple.core.model_client import Metrics
 from wipple.pipeline.document import tables_node
 from wipple.pipeline.graph import build_graph
@@ -51,15 +55,48 @@ def logical_table(raw):
     }
 
 
+def uncached_detect_grid(vals):
+    values = np.asarray(vals, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return None
+    for grid in GRIDS:
+        rounded = np.round(values / grid)
+        if np.all(
+            np.abs(values - rounded * grid)
+            <= 1e-9 + 1e-9 * np.abs(values)
+        ):
+            return grid
+    return None
+
+
 def test_detect_grid_cache_is_exact_and_reuses_content():
-    values = np.asarray([0.125, 0.250, 0.375, np.nan])
+    vectors = [
+        np.asarray([0.125, 0.250, 0.375, np.nan]),
+        np.asarray([0.1, 0.2, 0.3]),
+        np.asarray([0.1234567, 0.2345678, np.inf]),
+        np.asarray([np.nan, np.inf]),
+    ]
     _detect_grid_cached.cache_clear()
-    expected = detect_grid(values)
-    for _ in range(7):
-        assert detect_grid(values.copy()) == expected
+    for values in vectors:
+        expected = uncached_detect_grid(values)
+        assert detect_grid(values) == expected
+        for _ in range(3):
+            assert detect_grid(values.copy()) == expected
     info = _detect_grid_cached.cache_info()
-    assert info.misses == 1
-    assert info.hits == 7
+    # The all-nonfinite vector returns before entering the cache.
+    assert info.misses == 3
+    assert info.hits == 9
+
+
+def test_real_validation_reuses_percent_grid_inputs():
+    raw = clean_raw_table()
+    parsed = parse_node({"raw_table": raw})
+    _detect_grid_cached.cache_clear()
+    validate_node({**parsed, "raw_table": raw})
+    info = _detect_grid_cached.cache_info()
+    assert info.misses > 0
+    assert info.hits > info.misses
 
 
 def test_seeded_section_graph_is_report_identical():
