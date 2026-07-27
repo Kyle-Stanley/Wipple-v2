@@ -1,5 +1,7 @@
 """Table reconstruction tests: grids first, accounting semantics later."""
 
+import numpy as np
+
 from wipple.reconstruction.candidates import (
     can_join_horizontally,
     can_join_vertically,
@@ -9,6 +11,7 @@ from wipple.reconstruction.candidates import (
     normalize_fragment,
 )
 from wipple.reconstruction.layout import assemble
+from wipple.reconstruction.alignment import check_bands
 from synth import raw_table
 
 
@@ -22,6 +25,21 @@ def fragment(page, rows, cols, table_index=0, headers=True):
         "rows": [[f"p{page}r{i}c{j}" for j in range(cols)]
                  for i in range(rows)],
     }
+
+
+def test_sparse_band_without_identities_does_not_trigger_reread():
+    matrix = np.array([
+        [100.0, 80.0, 40.0],
+        [200.0, 160.0, 80.0],
+        [300.0, 240.0, 120.0],
+    ])
+
+    repaired, findings, bad_chunks = check_bands(
+        matrix, {}, "wip", [], {0: 0, 1: 0, 2: 0})
+
+    assert repaired is None
+    assert findings == []
+    assert bad_chunks == []
 
 
 def shapes(layout):

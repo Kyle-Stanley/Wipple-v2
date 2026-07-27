@@ -3,6 +3,8 @@
 import numpy as np
 
 from wipple.accounting.cc import validate_cc
+from wipple.accounting.concordance import match_header
+from wipple.accounting.schemas import CC_VAR_NAMES, WIP_VAR_NAMES
 from wipple.accounting.validation import run_schema_race
 
 
@@ -11,6 +13,24 @@ def _triangle(n=12):
     cost = np.round(revenue * 0.82)
     profit = revenue - cost
     return revenue, cost, profit
+
+
+def test_sparse_header_matching_accepts_exact_and_clear_typo():
+    exact = match_header("Costs to Date", WIP_VAR_NAMES)
+    close = match_header("Contract Amunt", WIP_VAR_NAMES)
+
+    assert exact == {
+        "variable": "D", "match": "exact",
+        "synonym": "costs to date", "score": 1.0}
+    assert close["variable"] == "V"
+    assert close["match"] == "close"
+
+
+def test_sparse_header_matching_is_scoped_and_conservative():
+    assert match_header("Gross Profit", WIP_VAR_NAMES)["variable"] == "G"
+    assert match_header("Gross Profit", CC_VAR_NAMES)["variable"] == "GT"
+    assert match_header("Cost", WIP_VAR_NAMES) is None
+    assert match_header("Completely Unknown", WIP_VAR_NAMES) is None
 
 
 def test_retainage_is_not_treated_as_unbilled_revenue():

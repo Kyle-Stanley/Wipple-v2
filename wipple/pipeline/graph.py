@@ -3,7 +3,7 @@ Graph assembly.
 
     extract -> parse -> validate -+-> emit                       (success)
        ^                          +-> disambiguate -> emit       (ambiguous)
-       |                          +-> fallback -> emit           (sparse)
+       |                          +-> header match -> emit       (sparse)
        +------- re_extract <------+                              (ocr-shaped
                                                                   failure, x1)
 

@@ -7,8 +7,8 @@ owns (writes) them; everything else treats them as read-only.
 Design rules
 ------------
 - Headers are QUARANTINED: they live in `raw_table["headers"]`. The parse node
-  may use them for formatting decisions, fallback/disambiguation may use them
-  when math cannot map a sparse table, and schema arbitration may consult
+  may use them for formatting decisions, deterministic fallback/disambiguation
+  may use them when math cannot map a sparse table, and schema arbitration may consult
   exact title/header vocabulary only for the algebraically identical sparse
   WIP/CC triangle. They never create a math-certified column mapping.
 - `validation` is a plain serializable dict (numpy already converted), so
@@ -55,8 +55,8 @@ class WippleState(TypedDict, total=False):
     reextract_count: int
 
     # ---- fallback / disambiguate nodes ---------------------------------------
-    fallback_mapping: dict          # matrix col -> var code (LLM-assigned)
-    fallback_confidence: dict       # matrix col -> "high"|"medium"|"low"
+    fallback_mapping: dict          # matrix col -> synonym-matched var code
+    fallback_confidence: dict       # matrix col -> "exact"|"close"
     fallback_notes: str
     disambiguation: dict            # {"chosen": "best"|"competing", "rationale": str}
 

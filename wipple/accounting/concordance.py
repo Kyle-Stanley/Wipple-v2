@@ -21,6 +21,7 @@ learned overlay at runtime.
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import json
 import os
 import re
@@ -82,6 +83,46 @@ def _corpus() -> dict:
     except (OSError, ValueError):
         pass
     return corpus
+
+
+def match_header(header: str, allowed_variables) -> dict | None:
+    """Conservatively map one printed header to the synonym corpus.
+
+    Exact normalized matches win.  A fuzzy match is accepted only for a
+    reasonably descriptive header with one clear winner, so short or
+    accounting-ambiguous labels remain unassigned.
+    """
+    name = _norm(header)
+    allowed = set(allowed_variables)
+    if not name or not allowed:
+        return None
+
+    corpus = _corpus()
+    exact = corpus.get(name, set()) & allowed
+    if len(exact) == 1:
+        return {"variable": next(iter(exact)), "match": "exact",
+                "synonym": name, "score": 1.0}
+    if exact or len(name) < 6:
+        return None
+
+    best_by_variable: dict[str, tuple[float, str]] = {}
+    for synonym, variables in corpus.items():
+        score = SequenceMatcher(None, name, synonym).ratio()
+        for variable in variables & allowed:
+            if score > best_by_variable.get(variable, (0.0, ""))[0]:
+                best_by_variable[variable] = (score, synonym)
+    ranked = sorted(
+        ((score, variable, synonym)
+         for variable, (score, synonym) in best_by_variable.items()),
+        reverse=True)
+    if not ranked:
+        return None
+    best_score, variable, synonym = ranked[0]
+    runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+    if best_score < 0.90 or best_score - runner_up < 0.08:
+        return None
+    return {"variable": variable, "match": "close",
+            "synonym": synonym, "score": round(best_score, 3)}
 
 
 def _learn(name: str, var: str) -> None:
