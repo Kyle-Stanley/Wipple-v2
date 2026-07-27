@@ -183,6 +183,65 @@ h1 em{font-style:normal;color:var(--sage-deep)}
 .status-pill{font-size:10px;border-radius:999px;padding:2px 7px;background:#E4E9E1;color:var(--sage-deep);text-transform:uppercase;letter-spacing:.04em}
 .status-pill.completed{background:#E7E5DE;color:var(--muted)}
 .conflict-pill{color:var(--brick);font-size:11px}
+
+/* sparse schedule column mapping */
+#mapping{padding:24px 0 72px}
+.mapping-wide{width:min(1420px,calc(100vw - 40px));margin-left:50%;transform:translateX(-50%)}
+.mapping-head{display:flex;align-items:end;justify-content:space-between;gap:18px;margin-bottom:16px}
+.mapping-head h2{font:600 28px/1.2 Inter,system-ui,sans-serif;letter-spacing:-.015em}
+.mapping-head p{font-size:13px;color:var(--muted);margin-top:5px}
+.mapping-layout{display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:14px;align-items:start}
+.mapping-table-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:13px;overflow:hidden;min-width:0}
+.mapping-table-note{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line-soft);font-size:11.5px;color:var(--muted)}
+.mapping-table-note span:first-child{color:var(--sage-deep);font-weight:600}
+.mapping-scroll{overflow:auto;max-height:calc(100vh - 205px)}
+.mapping-grid{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:12px}
+.mapping-grid th,.mapping-grid td{min-width:152px;max-width:190px;padding:7px 9px;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);background:var(--surface);text-align:right}
+.mapping-grid th{position:sticky;top:0;z-index:3;padding:9px;background:#F7F5EF;vertical-align:top}
+.mapping-grid th:first-child,.mapping-grid td:first-child{position:sticky;left:0;z-index:2;min-width:190px;max-width:240px;text-align:left;background:var(--surface)}
+.mapping-grid th:first-child{z-index:4;background:#F7F5EF}
+.mapping-grid tr:last-child td{border-bottom:0}
+.mapping-grid th:last-child,.mapping-grid td:last-child{border-right:0}
+.mapping-doc-head{display:block;min-height:30px;margin-bottom:7px;color:var(--ink);font-size:11px;font-weight:600;line-height:1.3;white-space:normal;overflow-wrap:anywhere}
+.mapping-select{display:block;width:100%;min-height:31px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);font:500 11px Inter,system-ui,sans-serif;padding:5px 24px 5px 7px;cursor:pointer}
+.mapping-select.suggested{background:#E7EDE4;border-color:#C5D2C1;color:var(--sage-deep)}
+.mapping-select.user{background:#EEF1EA;border-color:var(--sage-deep)}
+.mapping-select.inferred{background:#E8F1F5;border-color:#B9CFD8;color:#315E70}
+.mapping-select.unmapped{color:var(--muted);font-weight:400;background:var(--surface)}
+.mapping-validation-note{display:block;min-height:13px;margin-top:4px;color:#477184;font-size:9.5px;font-weight:500;line-height:1.25;text-align:left}
+.mapping-reference{display:block;min-height:31px;padding:6px 0;color:var(--muted);font-size:10.5px;font-weight:400}
+.mapping-rail{position:sticky;top:14px;background:var(--surface);border:1px solid var(--line-soft);border-radius:13px;padding:16px;box-shadow:0 8px 28px rgba(32,37,31,.06)}
+.mapping-score{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.mapping-score strong{font:600 25px/1 Inter,system-ui,sans-serif;color:var(--sage-deep)}
+.mapping-score span{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.mapping-meter{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin:11px 0 13px}
+.mapping-meter span{height:5px;border-radius:999px;background:var(--line)}
+.mapping-meter span.on{background:var(--sage)}
+.mapping-rail h3{font:600 16px/1.3 Inter,system-ui,sans-serif;letter-spacing:-.01em}
+.mapping-rail-copy{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.5}
+.mapping-groups{margin:14px 0 15px;border-top:1px solid var(--line-soft)}
+.mapping-group{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.mapping-group-mark{display:grid;place-items:center;width:18px;height:18px;margin-top:1px;border-radius:999px;background:var(--paper);color:var(--muted);font-size:10px;font-weight:700}
+.mapping-group.done .mapping-group-mark{background:var(--sage-deep);color:white}
+.mapping-group strong{display:block;font-size:11.5px;font-weight:600}
+.mapping-group small{display:block;color:var(--muted);font-size:10.5px;line-height:1.35;margin-top:1px}
+.mapping-conflict{min-height:18px;color:var(--brick);font-size:10.5px;line-height:1.35;margin:0 0 8px}
+.mapping-rail .btn{width:100%}
+.mapping-derived{font-size:10.5px;color:var(--sage-deep);text-align:center;margin:8px 0 0}
+@media(max-width:900px){
+  .mapping-wide{width:min(100%,calc(100vw - 28px))}
+  .mapping-layout{grid-template-columns:1fr}
+  .mapping-rail{position:static;grid-row:1;padding:13px 15px}
+  .mapping-groups{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;border:0;margin:11px 0}
+  .mapping-group{border:1px solid var(--line-soft);border-radius:8px;padding:8px}
+  .mapping-scroll{max-height:60vh}
+}
+@media(max-width:620px){
+  .mapping-head{align-items:start;flex-direction:column}
+  .mapping-groups{grid-template-columns:1fr}
+  .mapping-table-note span:last-child{display:none}
+}
+
 .trend-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
 .trend-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:16px}
 .trend-card .lab{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
@@ -697,6 +756,8 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
 
 <section id="matching" class="hidden flow-page"></section>
 
+<section id="mapping" class="hidden"></section>
+
 <section id="consolidated" class="hidden flow-page"></section>
 
 <section id="timeseries" class="hidden flow-page"></section>
@@ -715,7 +776,7 @@ tfoot td{font-weight:500;border-top:1.5px solid var(--line);border-bottom:none}
 <script>
 const API="";  /* serving this file from Firebase/elsewhere? set to your Railway URL, e.g. "https://yourapp.up.railway.app" (no trailing slash) */
 const $=s=>document.querySelector(s);
-const show=id=>{for(const s of["landing","processing","certificate","dash","batch","matching","consolidated","timeseries","err"])
+const show=id=>{for(const s of["landing","processing","certificate","dash","batch","matching","mapping","consolidated","timeseries","err"])
   $("#"+s).classList.toggle("hidden",s!==id);
   // The landing carries its own lockup, so the header mark is redundant there.
   // Hidden rather than removed: the header is space-between, and dropping the
@@ -1298,6 +1359,7 @@ let ACCEPTED=new Set();   /* suggested corrections currently included */
 let DOC=null,SECTIONS=[],SECSTATE=[],ACTIVE=0,VIEW="certificate";
 let BATCH_ITEMS=[],BATCH_ACTIVE=-1,BATCH_MODE=false,BATCH_RUN=null;
 let MATCH_STATE=null;
+let COLUMN_MAPPING_STATE=new Map();
 let BATCH_ANALYSIS_MODE=false;
 let ANALYSIS_SCOPE="portfolio";
 let BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
@@ -1374,6 +1436,7 @@ function setSingleNav(active){
 
 function resetBatch(){
   BATCH_ITEMS=[];BATCH_ACTIVE=-1;BATCH_MODE=false;BATCH_RUN=null;MATCH_STATE=null;
+  COLUMN_MAPPING_STATE=new Map();
   BATCH_ANALYSIS_MODE=false;ANALYSIS_SCOPE="portfolio";
   BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
   BILLING_TRAJECTORY_SHOW_ALL=false;
@@ -1422,6 +1485,8 @@ function batchValidation(item){
   const sections=documentSections(item.doc);
   const incomplete=sections.some(section=>["unmapped","header_mapped_unverified","llm_mapped_unverified"].includes(section.rep.overall_status));
   if(incomplete)return{kind:"review",icon:"!",text:"Validation needs review"};
+  if(sections.some(section=>section.rep.overall_status==="user_mapped_unverified"))
+    return{kind:"corrected",icon:"\u2713",text:"Column mapping reviewed"};
   let checksPassed=0,checksTotal=0,nBad=0,nFixed=0,jobFixes=0,totalFixes=0;
   sections.forEach((section,si)=>{
     const rep=section.rep||{};
@@ -1613,7 +1678,7 @@ function analysisSwitcherHTML(){
    scores. IDs and names generate the candidate order.
    ----------------------------------------------------------------------- */
 const{identityScore,nameSimilarity,normId,normName,plausibleCandidate}=WippleJobMatching;
-const{deriveCanonicalVars}=WippleMath;
+const{deriveCanonicalVars,mappingReadiness,inferCorroboratingColumns}=WippleMath;
 function tableIdentity(t,i){
   const row=(t?.rows||[])[i]||{};
   const id=(t?.job_ids||[])[i]??row.job_id??"";
@@ -2136,8 +2201,11 @@ function singleValidatedTableHTML(rep){
 function renderSingleValidatedWip(){
   syncActiveSectionReview();const combined=documentAnalysisReport();
   const scope=combined._combinedSectionCount>1?` Combined across ${combined._combinedPageLabel}.`:"";
+  const manual=combined.overall_status==="user_mapped_unverified";
   $("#consolidated").innerHTML=`<div class="flow-head"><div><h2>Validated WIP</h2>
-      <p>The mathematically identified schedule, accepted corrections, and deterministic WIP calculations in one table.${scope}</p></div></div>
+      <p>${manual
+        ?"The reviewed column mapping and deterministic WIP calculations in one table."
+        :"The mathematically identified schedule, accepted corrections, and deterministic WIP calculations in one table."}${scope}</p></div></div>
     <section class="table-card"><div class="table-card-head"><div><h3>Validated schedule</h3>
       <p>Standardized column names; document headers remain page-specific on the Validation page.</p></div></div>
       ${singleValidatedTableHTML(combined)}</section>
@@ -2510,14 +2578,16 @@ function combinedWipReport(indexes){
   const uniquePages=[...new Set(pages.map(Number).filter(Number.isFinite))].sort((a,b)=>a-b);
   const pageLabel=uniquePages.length?(uniquePages[0]===uniquePages[uniquePages.length-1]
     ?`page ${uniquePages[0]}`:`pages ${uniquePages[0]}–${uniquePages[uniquePages.length-1]}`):`${ordered.length} sections`;
-  const degraded=reps.some(r=>["header_mapped_unverified","llm_mapped_unverified","unmapped"].includes(r.overall_status));
+  const degraded=reps.some(r=>["header_mapped_unverified","llm_mapped_unverified","user_mapped_unverified","unmapped"].includes(r.overall_status));
   const tuning=reps.map(r=>r.analysis?.tuning).find(Boolean)||{};
   const jobs=rows.map((vars,i)=>({label:labels[i],...vars}));
   return{
     source:(reps[0]?.source||"WIP schedule")+` · combined ${pageLabel}`,
     overall_status:degraded
-      ?(reps.some(r=>["header_mapped_unverified","llm_mapped_unverified"].includes(r.overall_status))
-        ?"header_mapped_unverified":"unmapped")
+      ?(reps.some(r=>r.overall_status==="user_mapped_unverified")
+        ?"user_mapped_unverified"
+        :reps.some(r=>["header_mapped_unverified","llm_mapped_unverified"].includes(r.overall_status))
+          ?"header_mapped_unverified":"unmapped")
       :"verified",
     validator_status:reps.some(r=>r.validator_status==="validation_failed")?"validation_failed":"success",
     findings:[],witnesses:[],metrics:DOC?.metrics||reps[0]?.metrics||{},
@@ -2537,6 +2607,238 @@ function renderDocumentAnalysis(){
   if(!BATCH_MODE)setSingleNav("analysis");
   window.scrollTo(0,0);
 }
+
+const COLUMN_MAPPING_GROUPS=[
+  {label:"Profitability",variables:["V","C","G"],
+   missing:"Any 2 · contract value, est. cost, est. profit"},
+  {label:"Progress",variables:["D","Q","E"],
+   missing:"Cost to date, cost to complete, or earned revenue"},
+  {label:"Billing",variables:["B","N","U","O"],
+   missing:"Billings, net position, or under + over"}
+];
+const COLUMN_MAPPING_OPTIONS=[
+  {label:"Profitability",variables:["V","C","G","M"]},
+  {label:"Progress",variables:["D","Q","E","H","P"]},
+  {label:"Billing",variables:["B","N","U","O","PB"]},
+  {label:"Remaining work",variables:["R","RB"]}
+];
+const SPARSE_MAPPING_STATUSES=new Set([
+  "unmapped","header_mapped_unverified","llm_mapped_unverified"
+]);
+
+function columnMappingOptions(selected){
+  const used=new Set();
+  return`<option value="">Unmapped</option>${COLUMN_MAPPING_OPTIONS.map(group=>{
+    const options=group.variables.filter(variable=>!used.has(variable)).map(variable=>{
+      used.add(variable);
+      const suffix=variable==="P"?" · reference only":"";
+      return`<option value="${variable}" ${selected===variable?"selected":""}>${htmlEsc(variableName(variable)+suffix)}</option>`;
+    }).join("");
+    return`<optgroup label="${htmlEsc(group.label)}">${options}</optgroup>`;
+  }).join("")}`;
+}
+
+function columnMappingSource(rep){
+  const raw=rep.source_table||{};
+  if(Array.isArray(raw.headers)&&Array.isArray(raw.rows)&&raw.headers.length){
+    const numeric=(rep.parse?.numeric_col_map||[]).map(Number);
+    return{headers:raw.headers.map(String),rows:raw.rows.map(row=>row.map(String)),
+      matrixByDocument:new Map(numeric.map((docColumn,matrixColumn)=>[docColumn,matrixColumn]))};
+  }
+  const table=rep.table||{},headers=(table.columns||[]).map(c=>c.header||c.name||"");
+  const rows=tableValues(table).map(row=>row.map(value=>value==null?"":String(value)));
+  return{headers,rows,matrixByDocument:new Map(headers.map((_,index)=>[index,index]))};
+}
+
+function columnMappingState(rep){
+  if(COLUMN_MAPPING_STATE.has(rep))return COLUMN_MAPPING_STATE.get(rep);
+  const mapping={};
+  (rep.table?.columns||[]).forEach((column,matrixColumn)=>{
+    if(column?.variable)mapping[matrixColumn]=column.variable;
+  });
+  const state={mapping,suggested:{...mapping},inferred:{},touched:new Set(),conflict:""};
+  COLUMN_MAPPING_STATE.set(rep,state);
+  return state;
+}
+
+function columnMappingSelectClass(state,matrixColumn){
+  const variable=state.mapping[matrixColumn];
+  if(!variable)return state.inferred[matrixColumn]
+    ?"mapping-select inferred":"mapping-select unmapped";
+  return state.touched.has(matrixColumn)
+    ?"mapping-select user":"mapping-select suggested";
+}
+
+function refreshColumnMappingInferences(rep,state){
+  state.inferred=inferCorroboratingColumns(
+    tableValues(rep.table),state.mapping,state.touched);
+}
+
+function updateColumnMappingControls(state){
+  $("#mapping").querySelectorAll(".mapping-select").forEach(select=>{
+    const matrixColumn=+select.dataset.mcol;
+    const inferred=state.inferred[matrixColumn];
+    select.value=state.mapping[matrixColumn]||inferred?.variable||"";
+    select.className=columnMappingSelectClass(state,matrixColumn);
+    const note=select.nextElementSibling;
+    if(note?.classList.contains("mapping-validation-note"))
+      note.textContent=inferred?.reason||"";
+  });
+}
+
+function columnMappingRailHTML(state){
+  const mapped=[...new Set(Object.values(state.mapping).filter(Boolean))];
+  const ready=mappingReadiness(mapped);
+  const missing=ready.groups.find(group=>!group.complete)?.id;
+  let title="Map the minimum, not every column.";
+  let copy="The three groups below are enough to calculate every core WIP value.";
+  if(ready.score===1){
+    title="Two input groups left.";
+    copy="Keep mapping only what the calculation needs.";
+  }else if(ready.score===2){
+    title=missing==="billing"?"All we need is billing."
+      :missing==="progress"?"All we need is progress."
+      :"All we need is profitability.";
+    copy="One more input group completes the WIP calculation.";
+  }else if(ready.complete){
+    title="Complete WIP calculation available.";
+    copy=Object.keys(state.inferred).length
+      ?"Additional matching columns are shown in blue."
+      :"You can stop mapping here or include optional columns.";
+  }
+  const groupRows=COLUMN_MAPPING_GROUPS.map((definition,index)=>{
+    const status=ready.groups[index],names=status.variables.map(variableName);
+    return`<div class="mapping-group ${status.complete?"done":""}">
+      <span class="mapping-group-mark">${status.complete?"\u2713":index+1}</span>
+      <span><strong>${definition.label}</strong>
+        <small>${status.complete?htmlEsc(names.join(" + ")):htmlEsc(definition.missing)}</small></span>
+    </div>`;
+  }).join("");
+  const derived=Math.max(0,Object.keys(VARIABLE_NAMES).length-mapped.length);
+  return`<div class="mapping-score"><strong>${ready.score} / ${ready.total}</strong><span>calculation inputs</span></div>
+    <div class="mapping-meter" aria-label="${ready.score} of ${ready.total} calculation input groups complete">
+      ${ready.groups.map(group=>`<span class="${group.complete?"on":""}"></span>`).join("")}</div>
+    <h3>${title}</h3><p class="mapping-rail-copy">${copy}</p>
+    <div class="mapping-groups">${groupRows}</div>
+    <p class="mapping-conflict">${htmlEsc(state.conflict||"")}</p>
+    <button class="btn primary" id="mappingAnalyze" ${ready.complete?"":"disabled"}>Analyze schedule</button>
+    ${ready.complete?`<p class="mapping-derived">${mapped.length} mapped · up to ${derived} calculated</p>`:""}`;
+}
+
+function updateColumnMappingRail(rep,state){
+  refreshColumnMappingInferences(rep,state);
+  updateColumnMappingControls(state);
+  const rail=$("#mappingRail");
+  if(!rail)return;
+  rail.innerHTML=columnMappingRailHTML(state);
+  const analyze=$("#mappingAnalyze");
+  if(analyze)analyze.onclick=()=>{
+    applyColumnMapping(rep,state);
+    const savedStates=SECSTATE.map(sectionState=>new Set(sectionState));
+    render(DOC,{states:savedStates,active:ACTIVE,view:"dash"});
+  };
+}
+
+function applyColumnMapping(rep,state){
+  const mapping={...state.mapping};
+  const displayMapping={...mapping};
+  Object.entries(state.inferred).forEach(([matrixColumn,match])=>{
+    displayMapping[matrixColumn]=match.variable;
+  });
+  (rep.table?.columns||[]).forEach((column,matrixColumn)=>{
+    const variable=displayMapping[matrixColumn]||null;
+    column.variable=variable;
+    column.variable_name=variable?variableName(variable):null;
+  });
+  (rep.columns||[]).forEach((column,matrixColumn)=>{
+    const variable=displayMapping[matrixColumn]||null;
+    column.variable=variable;
+    column.variable_name=variable?variableName(variable):null;
+    column.provenance=variable
+      ?(state.inferred[matrixColumn]?"math-corroborated"
+        :state.touched.has(matrixColumn)?"user-confirmed":"header-matched")
+      :"unassigned";
+  });
+  const values=tableValues(rep.table),labels=tableLabels(rep.table);
+  const jobs=values.map((row,rowIndex)=>{
+    const printed={};
+    Object.entries(mapping).forEach(([matrixColumn,variable])=>{
+      const value=row[+matrixColumn];
+      if(variable&&value!==null&&value!==""&&Number.isFinite(+value))
+        printed[variable]=+value;
+    });
+    return{label:labels[rowIndex]||`Row ${rowIndex+1}`,...deriveCanonicalVars(printed)};
+  });
+  rep.analysis={...(rep.analysis||{}),schema:"wip",basis:"user-mapped",
+    jobs,corrections:[],signals:[],kpis:null,
+    coverage:{...(rep.analysis?.coverage||{}),
+      mapped_cols:Object.keys(displayMapping).length,
+      numeric_cols:(rep.table?.columns||[]).length}};
+  rep.overall_status="user_mapped_unverified";
+  rep.fallback_notes="Column mapping was reviewed before analysis.";
+  rep._headerComparison=buildHeaderComparison(null,rep,[]);
+}
+
+function renderColumnMapping(sectionIndex){
+  ACTIVE=sectionIndex;REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];
+  const rep=REPORT,state=columnMappingState(rep),source=columnMappingSource(rep);
+  refreshColumnMappingInferences(rep,state);
+  const section=SECTIONS[ACTIVE],sectionNote=SECTIONS.length>1
+    ?` · ${secLabel(section).name} · ${secLabel(section).pg}`:"";
+  const header=source.headers.map((documentHeader,documentColumn)=>{
+    const matrixColumn=source.matrixByDocument.get(documentColumn);
+    const inferred=matrixColumn==null?null:state.inferred[matrixColumn];
+    const selected=matrixColumn==null?"":state.mapping[matrixColumn]||inferred?.variable||"";
+    const control=matrixColumn==null
+      ?`<span class="mapping-reference">Reference column</span>`
+      :`<select class="${columnMappingSelectClass(state,matrixColumn)}" data-mcol="${matrixColumn}"
+          aria-label="Map ${htmlEsc(documentHeader||`column ${documentColumn+1}`)}">
+          ${columnMappingOptions(selected)}</select>
+        <small class="mapping-validation-note">${htmlEsc(inferred?.reason||"")}</small>`;
+    return`<th><span class="mapping-doc-head">${htmlEsc(documentHeader||`Column ${documentColumn+1}`)}</span>${control}</th>`;
+  }).join("");
+  const body=source.rows.map(row=>`<tr>${source.headers.map((_,column)=>
+    `<td>${htmlEsc(row[column]??"")}</td>`).join("")}</tr>`).join("");
+  $("#mapping").innerHTML=`<div class="mapping-wide">
+    <div class="mapping-head"><div><h2>Map the extracted columns</h2>
+      <p>Suggested mappings are shaded. Review any column or continue when the calculation is complete${sectionNote}.</p></div></div>
+    <div class="mapping-layout">
+      <section class="mapping-table-card">
+        <div class="mapping-table-note"><span>Extracted schedule</span><span>Every printed row remains visible</span></div>
+        <div class="mapping-scroll"><table class="mapping-grid"><thead><tr>${header}</tr></thead>
+          <tbody>${body}</tbody></table></div>
+      </section>
+      <aside class="mapping-rail" id="mappingRail">${columnMappingRailHTML(state)}</aside>
+    </div></div>`;
+  show("mapping");$("#secnav").classList.add("hidden");
+  const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
+  for(const id of["navMatch","navConsolidated","navTrends","navCert","navDash"])
+    $("#"+id).classList.add("hidden");
+  if(BATCH_MODE){
+    $("#navBatch").classList.remove("hidden");$("#navBatch").onclick=renderBatch;
+  }else $("#navBatch").classList.add("hidden");
+  $("#mapping").querySelectorAll(".mapping-select").forEach(select=>{
+    select.onchange=()=>{
+      const matrixColumn=+select.dataset.mcol;
+      const previous=state.mapping[matrixColumn]||state.inferred[matrixColumn]?.variable||"";
+      const variable=select.value;
+      const duplicate=variable&&Object.entries(state.mapping)
+        .find(([column,current])=>+column!==matrixColumn&&current===variable);
+      if(duplicate){
+        const otherHeader=rep.table?.columns?.[+duplicate[0]]?.header||`column ${+duplicate[0]+1}`;
+        state.conflict=`${variableName(variable)} is already mapped to “${otherHeader}”. Clear it there first.`;
+        select.value=previous;
+      }else{
+        if(variable)state.mapping[matrixColumn]=variable;else delete state.mapping[matrixColumn];
+        state.touched.add(matrixColumn);state.conflict="";
+      }
+      updateColumnMappingRail(rep,state);
+    };
+  });
+  updateColumnMappingRail(rep,state);
+  window.scrollTo(0,0);
+}
+
 function render(doc,restore=null){
   if(doc.overall_status==="pipeline_error"){
     $("#errmsg").textContent="The pipeline hit an unexpected error: "+(doc.validator_reason||"unknown")+". Try again, or try the sample schedule.";
@@ -2561,6 +2863,12 @@ function render(doc,restore=null){
     ?restore.states.map(s=>new Set(s)):defaults;
   ACTIVE=Math.max(0,Math.min(restore?.active||0,SECTIONS.length-1));
   REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];
+  const sparseSection=SECTIONS.findIndex(section=>
+    section.type==="wip"&&SPARSE_MAPPING_STATUSES.has(section.rep?.overall_status));
+  if(sparseSection>=0){
+    renderColumnMapping(sparseSection);
+    return;
+  }
   VIEW=restore?.view==="dash"?"dash":"certificate";
   renderSecnav();
   if(VIEW==="dash"){renderDash(documentAnalysisReport());show("dash");}
@@ -2601,6 +2909,9 @@ function computeValidationChecks(rep,accepted){
   }else if(o==="disambiguated"){
     C("warn","Column identification certified, with one tie",
       "The numbers allowed two readings. Column headers decided between them.");
+  }else if(o==="user_mapped_unverified"){
+    C("warn","Column mapping reviewed",
+      "Too little numeric structure for mathematical validation. The displayed column assignments were used for calculation.");
   }else{
     C("warn","Column identification not certifiable",
       o==="unmapped"
@@ -2648,11 +2959,15 @@ function computeValidationChecks(rep,accepted){
   (rep._extra||[]).forEach(x=>C(x.st,x.label,x.note));
   const nBad=checks.filter(c=>c.st==="bad").length;
   const nFixed=checks.filter(c=>c.st==="fixed").length;
+  const nWarn=checks.filter(c=>c.st==="warn").length;
   const passed=checks.filter(c=>c.st==="ok"||c.st==="fixed").length;
   const head=nBad?`${passed} of ${checks.length} checks passed`
+    :o==="user_mapped_unverified"?"Column mapping reviewed"
+    :o==="disambiguated"?"Column mapping certified"
+    :nWarn?"Validation needs review"
     :nFixed?`${checks.length} of ${checks.length} checks pass after corrections`
     :"All checks passed";
-  return{checks,nBad,nFixed,passed,head,findings,witnesses,corrsC,td};
+  return{checks,nBad,nFixed,nWarn,passed,head,findings,witnesses,corrsC,td};
 }
 function renderCertificate(rep){
   const{checks,nBad,head,findings,witnesses,corrsC,td}=computeValidationChecks(rep,ACCEPTED);
@@ -2781,7 +3096,7 @@ function renderCertificate(rep){
 
 function renderDash(rep){
   const a=rep.analysis||{},k=computeKpis(rep);
-  const degraded=["header_mapped_unverified","llm_mapped_unverified","unmapped"].includes(rep.overall_status);
+  const degraded=["header_mapped_unverified","llm_mapped_unverified","user_mapped_unverified","unmapped"].includes(rep.overall_status);
   const kpis=a.schema==="cc"?[
     ["Total revenue",fmtM(k.total_revenue)],
     ["Total cost",fmtM(k.total_cost)],
@@ -2817,7 +3132,9 @@ function renderDash(rep){
       <div class="analysis-actions"><button class="btn primary" id="openJobAnalysis">Independent job analysis</button></div></div>
     <div class="report-title"><div><h2>Underwriting report</h2>${rep.source?`<p>${htmlEsc(rep.source)}</p>`:""}</div>
       <button class="btn" id="printAnalysis">Print report</button></div>
-    ${degraded?`<div class="banner">Column names were read from headers and could not be mathematically verified. Figures below are the document's claims.</div>`:""}
+    ${degraded?`<div class="banner">${rep.overall_status==="user_mapped_unverified"
+      ?"Column assignments were reviewed before calculation but could not be mathematically certified."
+      :"Column names were read from headers and could not be mathematically verified. Figures below are the document's claims."}</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
     ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
     <div class="cols">
@@ -3742,7 +4059,7 @@ function printScheduleTable(rep){
     .filter(c=>c.variable&&PRINT_COLUMN_ORDER.includes(c.variable))
     .sort((a,b)=>PRINT_COLUMN_ORDER.indexOf(a.variable)-PRINT_COLUMN_ORDER.indexOf(b.variable));
 
-  if(!cols.length)return'<p class="empty-print">No mathematically identified WIP columns are available.</p>';
+  if(!cols.length)return'<p class="empty-print">No mapped WIP columns are available.</p>';
 
   const vals=tableValues(t).map(row=>[...row]);
   const labels=tableLabels(t);
@@ -3848,6 +4165,7 @@ function printSummary(rep){
   const a=rep.analysis||{};
   const k=computeKpis(rep);
   const isCC=a.schema==="cc";
+  const manual=rep.overall_status==="user_mapped_unverified";
   const kpis=isCC?[
     ["Total revenue",fmtM(k.total_revenue)],
     ["Total cost",fmtM(k.total_cost)],
@@ -4018,7 +4336,7 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
   <header class="report-head">
     <div>
       <h1>Underwriting report</h1>
-      <p>Validated WIP schedule</p>
+      <p>${manual?"Reviewed column mapping":"Validated WIP schedule"}</p>
     </div>
     <div class="report-meta">
       ${jobCount} jobs · ${corrections} correction${corrections===1?"":"s"} applied
@@ -4042,7 +4360,7 @@ html,body{margin:0;padding:0;color:var(--ink);font-family:Arial,Helvetica,sans-s
 
 <section class="schedule-page">
   <h2>Standardized WIP schedule</h2>
-  <p class="sub">${jobCount} jobs · mathematically identified columns shown in a consistent order</p>
+  <p class="sub">${jobCount} jobs · ${manual?"reviewed column assignments":"mathematically identified columns"} shown in a consistent order</p>
   ${printScheduleTable(rep)}
   <p class="schedule-note">Supplemental or unidentified source columns are omitted from this standardized view. Applied reviewer corrections are reflected.</p>
 </section>

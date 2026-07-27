@@ -141,6 +141,11 @@ def emit_node(state: WippleState) -> dict:
         "source": state.get("source_name", ""),
         "analysis": state.get("analysis"),
         "table": state.get("table"),
+        # Sparse schedules enter the browser-side manual mapper. Preserve the
+        # verbatim extracted grid so that review happens against the document's
+        # actual headers and printed cell strings, not a reformatted analysis
+        # table.
+        "source_table": raw if status == INSUFFICIENT else None,
         "overall_status": overall,
         "validator_status": status,
         "validator_reason": v.get("reason", ""),

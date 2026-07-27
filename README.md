@@ -73,7 +73,9 @@ The root `wipple` package remains the small public API for `build_graph`,
   fabricated numbers.
 - **Headers never create mathematical certification.** On sparse schedules,
   conservative synonym matches may assign columns as an explicitly unverified
-  fallback after deterministic math is exhausted.
+  fallback after deterministic math is exhausted. The browser then presents the
+  verbatim extracted grid for review, with a three-part readiness check for
+  profitability, progress, and billing inputs.
 
 ## Run the site
 

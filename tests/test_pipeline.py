@@ -454,6 +454,7 @@ def test_e2e_sparse_routes_to_fallback(patch_client):
     provs = {c["provenance"] for c in rep["columns"]}
     assert "header-matched" in provs
     assert {c["variable"] for c in rep["columns"]} == {"V", "C", "D", "B"}
+    assert rep["source_table"] == sparse
 
 
 def test_e2e_extraction_failure_reported(patch_client):
