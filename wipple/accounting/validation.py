@@ -13,6 +13,7 @@ from .parsing import parse_table
 from ..core.state import WippleState
 from .cc import validate_cc
 from .semantics import resolve_schema_text
+from .schemas import degenerate_wip_rows
 from .wip import VAR_NAMES, ValidationResult, validate_wip
 
 # Only money-like variables have meaningful column totals. Percentages are
@@ -504,19 +505,59 @@ def _race_score(r: ValidationResult, n_cols: int) -> float:
     return w * (len(r.mapping) / max(n_cols, 1))
 
 
-def run_schema_race(matrix, labels, headers=None, title_texts=None):
-    """Run both engines, consulting printed text only for algebraic ties.
+def _all_rows_are_completed_wip(matrix, result: ValidationResult) -> bool:
+    """Whether every row has the exact completed-job signature in WIP columns.
 
-    The sparse CC triangle ``cost + profit = revenue`` is identical to the
-    WIP triangle ``estimated cost + profit = contract value``. In that one
-    underdetermined case, an exact attached title or schema-specific header
-    may select between the already available interpretations. Text never
-    creates a column mapping.
+    A certified nondegenerate WIP cannot simultaneously be a completed-contract
+    schedule. The one legitimate overlap is a section printed in WIP layout
+    whose jobs are all complete (E=V, D=C, Q=0, P=1, U=O=0). Keep the CC check
+    for that case so the document splitter and section classifier retain their
+    existing escape hatch.
+    """
+    a = np.asarray(matrix, dtype=float)
+    if a.ndim != 2 or not result.mapping:
+        return False
+    core = {
+        variable: a[:, int(column)]
+        for column, variable in result.mapping.items()
+        if variable in {"V", "C", "D", "Q", "P", "E", "U", "O"}
+        and 0 <= int(column) < a.shape[1]
+    }
+    hits = degenerate_wip_rows(core)
+    return bool(hits) and all(
+        available >= 3 and matched == available
+        for matched, available in hits
+    )
+
+
+def run_schema_race(matrix, labels, headers=None, title_texts=None):
+    """Try WIP first; run CC only when WIP does not establish the schema.
+
+    A witnessed WIP mapping explaining at least half of the numeric columns is
+    already a schema verdict, whether its row values pass or produce findings.
+    CC remains the fallback for insufficient/partial WIP interpretations and
+    for the exact all-complete WIP-layout overlap. Printed text is consulted
+    only for the sparse additive triangle after both interpretations exist.
     """
     wip = validate_wip(matrix, job_labels=labels)
-    cc = validate_cc(matrix, job_labels=labels)
     m = matrix.shape[1]
     kw = (_race_rank(wip, m), _race_score(wip, m))
+    all_complete = _all_rows_are_completed_wip(matrix, wip)
+
+    if kw[0] == 2 and not all_complete:
+        return wip, {
+            "chosen": "wip",
+            "resolution": "wip_certified",
+            "text_evidence": None,
+            "wip": {"status": wip.status, "rank": kw[0],
+                    "score": round(kw[1], 3),
+                    "explained": len(wip.mapping)},
+            "cc": {"status": "skipped", "rank": None, "score": None,
+                   "explained": 0,
+                   "reason": "certified nondegenerate WIP mapping"},
+        }
+
+    cc = validate_cc(matrix, job_labels=labels)
     kc = (_race_rank(cc, m), _race_score(cc, m))
     chosen, name = (wip, "wip") if kw >= kc else (cc, "cc")
 
@@ -527,7 +568,7 @@ def run_schema_race(matrix, labels, headers=None, title_texts=None):
         and cc_vars <= {"RT", "KT", "GT"}
     )
     text_evidence = None
-    resolution = "math"
+    resolution = "math_all_complete_overlap" if all_complete else "math"
     if cc_triangle_only:
         text_evidence = resolve_schema_text(
             headers=headers, title_texts=title_texts)

@@ -40,10 +40,19 @@ def build_graph():
     g.add_node("analyze", analyze_node)
     g.add_node("emit", emit_node)
 
-    # Entry: demo / pre-extracted runs may inject raw_table and skip extract.
+    # Entry: the document graph may seed the exact parse + validation state
+    # it already computed for an unchanged section. Route from that result
+    # instead of parsing and running the WIP/CC race a second time.
+    def entry_node(state):
+        if state.get("matrix") is not None and state.get("validation") is not None:
+            return route_after_validate(state)
+        return "parse" if state.get("raw_table") else "extract"
+
     g.set_conditional_entry_point(
-        lambda s: "parse" if s.get("raw_table") else "extract",
-        {"parse": "parse", "extract": "extract"})
+        entry_node,
+        {"parse": "parse", "extract": "extract",
+         "emit": "analyze", "fallback": "fallback",
+         "disambiguate": "disambiguate", "re_extract": "re_extract"})
     g.add_conditional_edges("extract", route_after_extract,
                             {"parse": "parse", "emit": "emit"})
     g.add_edge("parse", "validate")
