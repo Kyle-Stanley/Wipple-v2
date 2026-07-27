@@ -415,7 +415,7 @@ def compute_signals(core, labels, derived=frozenset()):
 
 
 _PROV_RANK = ["math-verified", "math-identified", "derived",
-              "math-constrained-llm", "llm-only"]
+              "math-constrained-llm", "llm-only", "header-matched"]
 
 
 def analyze_node(state: WippleState) -> dict:
@@ -427,19 +427,28 @@ def analyze_node(state: WippleState) -> dict:
                              "basis": "none"}, "table": None}
 
     if (v.get("schema") == "cc"):
-        return _analyze_cc(matrix, v, labels)
+        cc_v = v
+        basis = "validator"
+        if (v.get("status") == "insufficient_information_for_validation"
+                and not state.get("disambiguation")
+                and state.get("fallback_mapping")):
+            cc_v = {**v, "mapping": dict(state["fallback_mapping"])}
+            basis = "headers"
+        return _analyze_cc(matrix, cc_v, labels, basis=basis)
 
     # Final mapping: validator's, swapped if disambiguation chose the rival,
-    # or the LLM fallback for sparse documents.
+    # or conservative synonym matches for a sparse document.
     mapping = {int(k): val for k, val in (v.get("mapping") or {}).items()}
     basis = "validator"
     if v.get("competing_mapping") and \
        (state.get("disambiguation") or {}).get("chosen") == "competing":
         mapping = {int(k): val for k, val in v["competing_mapping"].items()}
         basis = "validator+disambiguation"
-    if not mapping and state.get("fallback_mapping"):
+    if (v.get("status") == "insufficient_information_for_validation"
+            and not state.get("disambiguation")
+            and state.get("fallback_mapping")):
         mapping = dict(state["fallback_mapping"])
-        basis = "llm-headers"
+        basis = "headers"
 
     # Corrections are PROPOSALS and never mutate the server-side source table.
     # The review UI includes supported proposals by default, lets the reviewer
@@ -536,11 +545,8 @@ def analyze_node(state: WippleState) -> dict:
                  if w.get("column") is not None}
     var_prov = {}
     for c, var in mapping.items():
-        if basis == "llm-headers":
-            prior = ((v.get("diagnostics") or {})
-                     .get("uncertified_best_mapping") or {})
-            var_prov[var] = ("math-constrained-llm"
-                             if prior.get(c) == var else "llm-only")
+        if basis == "headers":
+            var_prov[var] = "header-matched"
         else:
             var_prov[var] = ("math-verified" if c in witnessed
                              else "math-identified")
@@ -636,7 +642,7 @@ def _table(state, mapping):
             "columns": cols, "values": values}
 
 
-def _analyze_cc(matrix, v, labels):
+def _analyze_cc(matrix, v, labels, basis="validator"):
     """Completed-contract analysis: totals, realized margin, and the one
     signal unique to closed work -- profit recognized in prior years given
     back in the current year (fade on completed jobs: warranty, claims,
@@ -674,7 +680,7 @@ def _analyze_cc(matrix, v, labels):
                               "profit given back in the current year "
                               "(warranty/claims/late costs on closed work)"})
     return {"analysis": {"kpis": kpis or None, "signals": signals,
-                         "basis": "validator", "schema": "cc"},
+                         "basis": basis, "schema": "cc"},
             "table": _table_cc(matrix, mapping, labels)}
 
 

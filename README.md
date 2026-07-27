@@ -39,7 +39,7 @@ Each reconstructed logical table is parsed and validated. Clean WIP/CC sections
 then run through the existing per-section graph:
 
 ```
-parse -> validate -> disambiguate/fallback/re-extract -> analyze -> emit
+parse -> validate -> disambiguate/header-match/re-extract -> analyze -> emit
 ```
 
 The document graph owns page-aware extraction and re-extraction. The section graph
@@ -71,8 +71,11 @@ The root `wipple` package remains the small public API for `build_graph`,
   ratio identities while retaining stated-versus-computed evidence.
 - **Confusable repair is column-gated.** Job IDs cannot be silently converted into
   fabricated numbers.
-- **Headers do not assign accounting variables.** They may support formatting or a
-  fallback question only after deterministic math is exhausted.
+- **Headers never create mathematical certification.** On sparse schedules,
+  conservative synonym matches may assign columns as an explicitly unverified
+  fallback after deterministic math is exhausted. The browser then presents the
+  verbatim extracted grid for review, with a three-part readiness check for
+  profitability, progress, and billing inputs.
 
 ## Run the site
 

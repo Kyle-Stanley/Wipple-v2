@@ -173,7 +173,8 @@ def check_bands(matrix, mapping, schema, failures, band_of_row,
                 sweep_schema = candidate_schema
         checks = _checks_for(sweep_map, sweep_schema)
         if not checks:
-            bad_chunks.append(cid)
+            # Sparse tables may have no accounting identity available to test.
+            # That is insufficient evidence, not evidence of a shifted page.
             continue
 
         bc, bp = _band_passes(matrix, band, sweep_map, checks)

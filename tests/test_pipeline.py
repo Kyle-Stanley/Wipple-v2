@@ -444,19 +444,17 @@ def test_e2e_sparse_routes_to_fallback(patch_client):
     sparse = raw_table(columns=["Job #", "Contract Price", "Est. Total Cost",
                                 "Costs to Date", "Billed to Date"],
                        with_totals=False)
-    fb_response = json.dumps({
-        "mapping": {"0": "V", "1": "C", "2": "D", "3": "B"},
-        "confidence": {"0": "high", "1": "high", "2": "high", "3": "high"},
-        "notes": "headers are unambiguous",
-    })
-    fake = patch_client([json.dumps(sparse), fb_response])
+    fake = patch_client([json.dumps(sparse)])
     final = invoke(build_graph())
     rep = final["report"]
     assert rep["validator_status"] == "insufficient_information_for_validation"
-    assert rep["overall_status"] == "llm_mapped_unverified"
-    assert any(c["purpose"] == "header_fallback" for c in fake.calls)
+    assert rep["overall_status"] == "header_mapped_unverified"
+    assert len(fake.calls) == 1
+    assert "matched from their headers" in rep["fallback_notes"]
     provs = {c["provenance"] for c in rep["columns"]}
-    assert "llm-only" in provs or "math-constrained-llm" in provs
+    assert "header-matched" in provs
+    assert {c["variable"] for c in rep["columns"]} == {"V", "C", "D", "B"}
+    assert rep["source_table"] == sparse
 
 
 def test_e2e_extraction_failure_reported(patch_client):
