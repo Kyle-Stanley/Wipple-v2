@@ -137,3 +137,106 @@ def test_unchanged_document_table_runs_one_schema_race(monkeypatch):
 
     assert result["tables"][0]["sections"]
     assert calls == 1
+
+
+
+def test_decisive_wip_skips_cc(monkeypatch):
+    raw = clean_raw_table()
+    parsed = parse_node({"raw_table": raw})
+
+    def forbidden_cc(*args, **kwargs):
+        raise AssertionError("CC validator should not run for a certified WIP")
+
+    monkeypatch.setattr(validation_mod, "validate_cc", forbidden_cc)
+    chosen, race = validation_mod.run_schema_race(
+        parsed["matrix"], parsed["job_labels"])
+
+    assert chosen.status == "success"
+    assert race["chosen"] == "wip"
+    assert race["resolution"] == "wip_certified"
+    assert race["cc"]["status"] == "skipped"
+
+
+def test_decisive_wip_with_findings_still_skips_cc(monkeypatch):
+    raw = clean_raw_table()
+    # Estimated GP remains identifiable from the other eleven rows, then fails
+    # strict certification on this planted bad cell.
+    raw["rows"][3][3] = f"{float(raw['rows'][3][3]) + 10000:.8f}"
+    parsed = parse_node({"raw_table": raw})
+
+    def forbidden_cc(*args, **kwargs):
+        raise AssertionError("CC validator should not run for a certified WIP")
+
+    monkeypatch.setattr(validation_mod, "validate_cc", forbidden_cc)
+    chosen, race = validation_mod.run_schema_race(
+        parsed["matrix"], parsed["job_labels"])
+
+    assert chosen.status == "validation_failed"
+    assert chosen.findings
+    assert race["chosen"] == "wip"
+    assert race["cc"]["status"] == "skipped"
+
+
+def test_insufficient_wip_runs_cc(monkeypatch):
+    calls = 0
+    original_cc = validation_mod.validate_cc
+
+    def counted_cc(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_cc(*args, **kwargs)
+
+    monkeypatch.setattr(validation_mod, "validate_cc", counted_cc)
+    # A pure completed-contract additive lattice has no progress/billing
+    # evidence capable of certifying the WIP schema.
+    rows = []
+    for i in range(8):
+        rt = 1_000_000 + i * 100_000
+        kt = 800_000 + i * 75_000
+        gt = rt - kt
+        rp = 600_000 + i * 45_000
+        rc = rt - rp
+        kp = 480_000 + i * 35_000
+        kc = kt - kp
+        gp = rp - kp
+        gc = rc - kc
+        rows.append([rt, kt, gt, rp, rc, kp, kc, gp, gc])
+    matrix = np.asarray(rows, dtype=float)
+
+    chosen, race = validation_mod.run_schema_race(
+        matrix, [f"CC-{i + 1}" for i in range(len(rows))])
+
+    assert calls == 1
+    assert race["cc"]["status"] != "skipped"
+    assert race["chosen"] == "cc"
+    assert chosen.mapping
+
+
+def test_all_complete_wip_layout_keeps_cc_escape_hatch(monkeypatch):
+    raw = clean_raw_table()
+    raw["rows"] = raw["rows"][:-1]
+    for row in raw["rows"]:
+        value = float(row[1])
+        cost = float(row[2])
+        row[4] = f"{cost:.8f}"   # D = C
+        row[5] = "0.00000000"   # Q = 0
+        row[6] = "1.00000000"   # P = 100%
+        row[7] = f"{value:.8f}"  # E = V
+        row[8] = f"{value:.8f}"  # B = V
+        row[9] = "0.00000000"   # U = 0
+        row[10] = "0.00000000"  # O = 0
+    parsed = parse_node({"raw_table": raw})
+    calls = 0
+    original_cc = validation_mod.validate_cc
+
+    def counted_cc(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_cc(*args, **kwargs)
+
+    monkeypatch.setattr(validation_mod, "validate_cc", counted_cc)
+    _, race = validation_mod.run_schema_race(
+        parsed["matrix"], parsed["job_labels"])
+
+    assert calls == 1
+    assert race["cc"]["status"] != "skipped"
