@@ -3,20 +3,19 @@
 
   const STYLE_ID = "wipple-review-refinement";
   let observerQueued = false;
+  let currentReport = null;
 
   function installStyles() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
-      /* Keep confirmations useful without allowing them to bury Analyze. */
       .mapping-inferred-summary{max-height:210px;overflow:hidden;display:flex;flex-direction:column}
       .mapping-inferred-summary .mapping-inferred-list{overflow:auto;padding-right:3px;overscroll-behavior:contain}
       .mapping-inferred-summary .mapping-inferred-list::-webkit-scrollbar{width:6px}
       .mapping-inferred-summary .mapping-inferred-list::-webkit-scrollbar-thumb{background:#B8C5B4;border-radius:999px}
       #mappingRail #mappingAnalyze{position:relative;z-index:1}
 
-      /* The section itself should align with its cards, not leak into the page gutter. */
       #certificate .manual-audit-details{
         width:min(920px,calc(100% - 32px));max-width:none;margin:18px auto 0;
         padding:0;border:0;background:transparent;box-sizing:border-box
@@ -83,6 +82,7 @@
     const previous = window.applyColumnMapping;
     window.applyColumnMapping = function refinedApplyColumnMapping(rep, state) {
       const result = previous.apply(this, arguments);
+      currentReport = rep;
       rep._manualConfirmedVariables = [...new Set(Object.values(state?.inferred || {})
         .filter((match) => match?.confirmed)
         .map((match) => match.variable)
@@ -90,6 +90,18 @@
       return result;
     };
     window.__wippleReviewConfirmedPatched = true;
+  }
+
+  function rememberRenderedReport() {
+    if (window.__wippleReviewRenderPatched || typeof window.renderCertificate !== "function") return;
+    const previous = window.renderCertificate;
+    window.renderCertificate = function refinedRenderCertificate(rep) {
+      currentReport = rep;
+      const result = previous.apply(this, arguments);
+      queueRefine();
+      return result;
+    };
+    window.__wippleReviewRenderPatched = true;
   }
 
   function failedNames(failure) {
@@ -147,7 +159,9 @@
 
   function refineReview() {
     observerQueued = false;
-    const rep = window.REPORT;
+    rememberConfirmedVariables();
+    rememberRenderedReport();
+    const rep = currentReport;
     const section = document.querySelector("#certificate .manual-audit-details");
     if (!section || !rep?._manualMappingAudit) return;
 
@@ -173,6 +187,7 @@
   function start() {
     installStyles();
     rememberConfirmedVariables();
+    rememberRenderedReport();
     new MutationObserver(queueRefine).observe(document.body, { childList: true, subtree: true });
     queueRefine();
   }
