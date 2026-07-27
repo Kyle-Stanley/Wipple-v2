@@ -5,7 +5,7 @@ Routing after validate (the heart of the graph):
 
   SUCCESS                          -> emit (provenance: math-verified)
   INSUFFICIENT + competing_mapping -> disambiguate (one tiny LLM question)
-  INSUFFICIENT otherwise           -> header fallback (LLM + soft constraints)
+  INSUFFICIENT otherwise           -> deterministic header matching
   FAILED + OCR-shaped findings     -> re_extract (once, escalated tier)
   FAILED otherwise / retry spent   -> emit (underwriting finding, first-class)
 
@@ -13,9 +13,7 @@ Provenance tiers (load-bearing for underwriter trust, not UI polish):
   math-verified        column sits on a witnessed identity cycle
   math-identified      column placed by peeling but not independently
                        corroborated (no failures either)
-  math-constrained-llm LLM assignment that agrees with the validator's
-                       uncertified prior
-  llm-only             LLM assignment from headers alone
+  header-matched       deterministic synonym match on a sparse schedule
   virtual              not a physical column; derived from identities
 """
 
@@ -121,9 +119,6 @@ def emit_node(state: WippleState) -> dict:
                                            else "unassigned")})
         overall = "disambiguated"
     elif status == INSUFFICIENT:
-        prior = ((v.get("diagnostics") or {})
-                 .get("uncertified_best_mapping") or {})
-        prior = {int(k): val for k, val in prior.items()}
         fb = state.get("fallback_mapping", {}) or {}
         fb_conf = state.get("fallback_confidence", {}) or {}
         for mcol in range(len(col_map)):
@@ -133,14 +128,12 @@ def emit_node(state: WippleState) -> dict:
                                 "variable": None, "variable_name": None,
                                 "provenance": "unassigned"})
                 continue
-            prov = ("math-constrained-llm" if prior.get(mcol) == var
-                    else "llm-only")
             columns.append({"col": mcol, "header": doc_header(mcol),
                             "variable": var,
                             "variable_name": VAR_NAMES.get(var, var),
-                            "provenance": prov,
-                            "llm_confidence": fb_conf.get(mcol)})
-        overall = "llm_mapped_unverified" if fb else "unmapped"
+                            "provenance": "header-matched",
+                            "header_match": fb_conf.get(mcol)})
+        overall = "header_mapped_unverified" if fb else "unmapped"
     else:
         overall = "unmapped"
 

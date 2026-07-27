@@ -1,17 +1,15 @@
 """
-General header fallback + mapping disambiguator.
+Deterministic sparse-header fallback + mapping disambiguator.
 
 The schema race has one separate, narrower text use: exact title/header
 vocabulary can resolve the sparse WIP/CC triangle because those two schemas
 are algebraically identical there. This module handles column mapping only
 after the math reports insufficient information.
 
-fallback   -- INSUFFICIENT without a competing mapping: the document is too
-              sparse for the math to certify. The LLM assigns variables from
-              headers, but it does not start from zero: the validator's
-              uncertified best mapping and its reason string are injected as
-              soft constraints, and any variable the validator did place is
-              presented as the stronger prior.
+fallback   -- INSUFFICIENT without a competing mapping: match the transcribed
+              headers against the seeded accounting synonym corpus. Exact
+              matches and one clear close match are accepted; ambiguity stays
+              unassigned. No model call is made.
 
 disambiguate -- INSUFFICIENT with a competing mapping: the math certified two
               incomparable readings. This is NOT a full remap; the LLM
@@ -26,41 +24,16 @@ import logging
 
 from ..core.model_client import Metrics, extract_json, get_client
 from ..core.state import WippleState
-from ..accounting.schemas import ALL_VAR_NAMES as VAR_NAMES
+from ..accounting.concordance import match_header
+from ..accounting.schemas import (
+    ALL_VAR_NAMES as VAR_NAMES,
+    CC_VAR_NAMES,
+    WIP_VAR_NAMES,
+)
 
 logger = logging.getLogger(__name__)
 
 _GLOSSARY = "\n".join(f"  {code}: {name}" for code, name in VAR_NAMES.items())
-
-FALLBACK_PROMPT = """You are mapping the columns of a contractor Work-in-Progress (WIP) schedule to a fixed variable schema. A deterministic math engine already tried to identify the columns from the numbers alone and could not fully certify a mapping; you are the fallback that uses the column HEADERS.
-
-Variable schema (code: meaning):
-{glossary}
-
-Columns to map (index, header, first sample values):
-{columns}
-
-What the math engine reported:
-- Reason it could not certify: {reason}
-- Its best uncertified guess (treat as a strong prior; only override with a
-  clearly contradicting header): {prior}
-
-Rules:
-1. Map each column index to ONE variable code from the schema, or to null if
-   no variable fits (e.g. a date, a job-type tag, an unrelated memo column).
-2. Never assign the same variable code to two columns.
-3. The schema is GAAP percentage-of-completion accounting. Use standard
-   surety/CPA conventions: "Billed to Date"/"BTD" is B; "Cost to Date"/"CTD"
-   /"Costs Incurred" is D; "Revenues Earned"/"Earned Revenue" is E;
-   "Contract Price"/"Contract Amount" is V; "Estimated Cost" (total, not to
-   complete) is C; "Cost to Complete"/"CTC" is Q.
-4. Report a confidence ("high"|"medium"|"low") per assignment.
-
-Return ONLY JSON:
-{{"assignments": [
-    {{"column": <col index>, "variable": "<VAR or null>",
-      "confidence": "high|medium|low"}}, ...],
-  "notes": "<one short paragraph on anything ambiguous>"}}"""
 
 DISAMBIGUATION_PROMPT = """A deterministic math engine certified TWO incomparable column mappings for a contractor WIP schedule -- the numbers alone cannot break the tie, but the column headers can.
 
@@ -78,27 +51,6 @@ The engine suggests the deciding question is: {question}
 Using ONLY the headers, decide which mapping is correct.
 Return ONLY JSON: {{"chosen": "A" or "B", "rationale": "<one sentence>"}}"""
 
-FALLBACK_OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "assignments": {"type": "array", "items": {
-            "type": "object",
-            "properties": {
-                "column": {"type": "integer"},
-                "variable": {"type": ["string", "null"],
-                             "enum": [*VAR_NAMES.keys(), None]},
-                "confidence": {"type": "string",
-                               "enum": ["high", "medium", "low"]},
-            },
-            "required": ["column", "variable", "confidence"],
-            "additionalProperties": False,
-        }},
-        "notes": {"type": "string"},
-    },
-    "required": ["assignments", "notes"],
-    "additionalProperties": False,
-}
-
 DISAMBIGUATION_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -110,60 +62,40 @@ DISAMBIGUATION_OUTPUT_SCHEMA = {
 }
 
 
-def _columns_block(state: WippleState) -> str:
+def fallback_node(state: WippleState) -> dict:
+    """Map only headers that have one conservative corpus match."""
+    v = state.get("validation", {})
+    allowed = (CC_VAR_NAMES if v.get("schema") == "cc" else WIP_VAR_NAMES)
     raw = state.get("raw_table") or {}
     headers = raw.get("headers", [])
-    rows = raw.get("rows", [])
-    lines = []
-    for mcol, j in enumerate(state.get("numeric_col_map", [])):
-        h = headers[j] if j < len(headers) else "(no header)"
-        samples = [r[j] for r in rows[:4] if j < len(r)]
-        lines.append(f"  matrix col {mcol} (doc col {j}): \"{h}\" "
-                     f"samples={samples}")
-    return "\n".join(lines) or "  (none)"
+    candidates: dict[int, dict] = {}
+    by_variable: dict[str, list[int]] = {}
+    for mcol, doc_col in enumerate(state.get("numeric_col_map", [])):
+        header = headers[doc_col] if doc_col < len(headers) else ""
+        matched = match_header(header, allowed)
+        if matched:
+            candidates[mcol] = matched
+            by_variable.setdefault(matched["variable"], []).append(mcol)
 
-
-def fallback_node(state: WippleState) -> dict:
-    v = state.get("validation", {})
-    metrics: Metrics = state["_metrics"]
-    prior = (v.get("diagnostics") or {}).get("uncertified_best_mapping") or {}
-    prompt = FALLBACK_PROMPT.format(
-        glossary=_GLOSSARY,
-        columns=_columns_block(state),
-        reason=v.get("reason", "(none given)"),
-        prior=prior or "(none)",
-    )
-    try:
-        text = get_client().generate(prompt, tier="fallback", json_only=True,
-                                     model_override=state.get("model_override") or None,
-                                     output_schema=FALLBACK_OUTPUT_SCHEMA,
-                                     metrics=metrics, purpose="header_fallback")
-        obj = extract_json(text)
-        assignments = obj.get("assignments")
-        if assignments is None:  # backwards-compatible with old/fake output
-            raw_mapping = obj.get("mapping", {}) or {}
-            conf = obj.get("confidence", {}) or {}
-        else:
-            raw_mapping = {str(a.get("column")): a.get("variable")
-                           for a in assignments}
-            conf = {str(a.get("column")): a.get("confidence")
-                    for a in assignments}
-        mapping, seen = {}, set()
-        for k, var in raw_mapping.items():
-            if var is None or var not in VAR_NAMES or var in seen:
-                continue
-            mapping[int(k)] = var
-            seen.add(var)
-        return {
-            "fallback_mapping": mapping,
-            "fallback_notes": str(obj.get("notes", "")),
-            "fallback_confidence": {int(k): str(c) for k, c in conf.items()
-                                    if int(k) in mapping},
-        }
-    except Exception as e:  # noqa: BLE001
-        logger.exception("header fallback failed")
-        return {"fallback_mapping": {},
-                "fallback_notes": f"fallback LLM call failed: {e}"}
+    # Two columns claiming the same variable is ambiguous; accept neither.
+    mapping = {
+        mcol: match["variable"] for mcol, match in candidates.items()
+        if len(by_variable[match["variable"]]) == 1
+    }
+    kinds = {
+        mcol: candidates[mcol]["match"] for mcol in mapping
+    }
+    return {
+        "fallback_mapping": mapping,
+        "fallback_confidence": kinds,
+        "fallback_notes": (
+            "Too little numeric structure for mathematical validation. "
+            "Columns were matched from their headers."
+            if mapping else
+            "Too little numeric structure for mathematical validation. "
+            "The column headers were not clear enough to match."
+        ),
+    }
 
 
 def disambiguate_node(state: WippleState) -> dict:

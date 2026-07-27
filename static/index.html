@@ -1420,7 +1420,7 @@ function batchDocSummary(doc){
 }
 function batchValidation(item){
   const sections=documentSections(item.doc);
-  const incomplete=sections.some(section=>["unmapped","llm_mapped_unverified"].includes(section.rep.overall_status));
+  const incomplete=sections.some(section=>["unmapped","header_mapped_unverified","llm_mapped_unverified"].includes(section.rep.overall_status));
   if(incomplete)return{kind:"review",icon:"!",text:"Validation needs review"};
   let checksPassed=0,checksTotal=0,nBad=0,nFixed=0,jobFixes=0,totalFixes=0;
   sections.forEach((section,si)=>{
@@ -2510,12 +2510,15 @@ function combinedWipReport(indexes){
   const uniquePages=[...new Set(pages.map(Number).filter(Number.isFinite))].sort((a,b)=>a-b);
   const pageLabel=uniquePages.length?(uniquePages[0]===uniquePages[uniquePages.length-1]
     ?`page ${uniquePages[0]}`:`pages ${uniquePages[0]}–${uniquePages[uniquePages.length-1]}`):`${ordered.length} sections`;
-  const degraded=reps.some(r=>r.overall_status==="llm_mapped_unverified"||r.overall_status==="unmapped");
+  const degraded=reps.some(r=>["header_mapped_unverified","llm_mapped_unverified","unmapped"].includes(r.overall_status));
   const tuning=reps.map(r=>r.analysis?.tuning).find(Boolean)||{};
   const jobs=rows.map((vars,i)=>({label:labels[i],...vars}));
   return{
     source:(reps[0]?.source||"WIP schedule")+` · combined ${pageLabel}`,
-    overall_status:degraded?"llm_mapped_unverified":"verified",
+    overall_status:degraded
+      ?(reps.some(r=>["header_mapped_unverified","llm_mapped_unverified"].includes(r.overall_status))
+        ?"header_mapped_unverified":"unmapped")
+      :"verified",
     validator_status:reps.some(r=>r.validator_status==="validation_failed")?"validation_failed":"success",
     findings:[],witnesses:[],metrics:DOC?.metrics||reps[0]?.metrics||{},
     _combinedSectionCount:ordered.length,_combinedPages:uniquePages,_combinedPageLabel:pageLabel,
@@ -2600,7 +2603,9 @@ function computeValidationChecks(rep,accepted){
       "The numbers allowed two readings. Column headers decided between them.");
   }else{
     C("warn","Column identification not certifiable",
-      "Too little numeric structure to verify. Columns were mapped from header text and are marked unverified.");
+      o==="unmapped"
+        ?"Too little numeric structure for mathematical validation. The column headers were not clear enough to match."
+        :"Too little numeric structure for mathematical validation. Columns were matched from their headers.");
   }
   const corrsC=(rep.analysis||{}).corrections||[];
   const corrIndexFor=f=>corrsC.findIndex(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
@@ -2776,7 +2781,7 @@ function renderCertificate(rep){
 
 function renderDash(rep){
   const a=rep.analysis||{},k=computeKpis(rep);
-  const degraded=rep.overall_status==="llm_mapped_unverified"||rep.overall_status==="unmapped";
+  const degraded=["header_mapped_unverified","llm_mapped_unverified","unmapped"].includes(rep.overall_status);
   const kpis=a.schema==="cc"?[
     ["Total revenue",fmtM(k.total_revenue)],
     ["Total cost",fmtM(k.total_cost)],

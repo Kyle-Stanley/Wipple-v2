@@ -122,10 +122,14 @@ def _narrate(node: str, up: dict, state: dict) -> list[str]:
                 elif "ambig" in st or (v.get("competing_mapping")):
                     lines.append(f"{label}: two readings both certified, "
                                  "headers broke the tie")
+                elif st == "header_mapped_unverified":
+                    lines.append(f"{label}: too little numeric structure to "
+                                 "validate mathematically; columns matched "
+                                 "from their headers")
                 else:
                     lines.append(f"{label}: too little numeric structure to "
-                                 "certify, headers used as fallback and "
-                                 "marked unverified")
+                                 "validate mathematically; headers were not "
+                                 "clear enough to match")
             note = t.get("notes") or []
             for x in note[:2]:
                 lines.append(x)
