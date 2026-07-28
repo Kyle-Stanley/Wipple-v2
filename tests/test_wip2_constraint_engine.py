@@ -23,7 +23,6 @@ def test_preparation_is_single_pass_immutable_and_collapses_duplicates():
     assert table.raw.flags.writeable is False
     assert table.magnitude.flags.writeable is False
     assert table.whole_percent.flags.writeable is False
-    assert table.duplicate_representative[-1] == 0
     assert len(table.representatives) == matrix.shape[1] - 1
     assert np.allclose(table.whole_percent[10], matrix[:, 10] / 100.0)
     ctx = wip2.RunContext(table, wip2.Config())
@@ -35,7 +34,8 @@ def test_preparation_is_single_pass_immutable_and_collapses_duplicates():
     derivation = wip2.DERIVATION_BY_ID["E_from_V_D_C"]
     predicted = ctx.derive(derivation, known)
     assert predicted is ctx.derive(derivation, known)
-    assert ctx.score(predicted, derivation) is ctx.score(predicted, derivation)
+    score = ctx.score_many(((predicted, derivation),))[0]
+    assert score is ctx.score_many(((predicted, derivation),))[0]
     assert ctx.derived_hits == 1
     assert ctx.score_hits == 1
     q_derivation = wip2.DERIVATION_BY_ID["Q_from_C_D"]
@@ -84,7 +84,7 @@ def test_complete_common_motif_skips_redundant_virtual_closure():
 
     assert len(closed) == 1
     assert len(closed[0].column_to_var) == len(table.representatives)
-    assert closed[0].derived_values == 0
+    assert ctx.derived_cache == {}
 
 
 def test_public_result_completes_virtual_frontier_only_for_finalist():

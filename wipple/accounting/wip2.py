@@ -39,7 +39,9 @@ from .wip import (
     RowFailure,
     ValidationResult,
     Witness,
+    _allowed_bad,
     _classify_error,
+    _ingest,
     _transplant_sources,
     detect_grid,
     render_report,
@@ -49,13 +51,10 @@ PCT_VARS = frozenset({"M", "P", "PB"})
 VAR_ORDER = tuple(VAR_NAMES)
 VAR_INDEX = {var: i for i, var in enumerate(VAR_ORDER)}
 VAR_BIT = {var: 1 << i for i, var in enumerate(VAR_ORDER)}
-ESTIMATE_REGION = frozenset({"V", "C", "G", "M"})
-PROGRESS_REGION = frozenset({"D", "Q", "P", "E", "H", "R"})
-BILLING_REGION = frozenset({"B", "N", "U", "O", "RB", "PB"})
 REGIONS = {
-    "estimate": ESTIMATE_REGION,
-    "progress": PROGRESS_REGION,
-    "billing": BILLING_REGION,
+    "estimate": frozenset({"V", "C", "G", "M"}),
+    "progress": frozenset({"D", "Q", "P", "E", "H", "R"}),
+    "billing": frozenset({"B", "N", "U", "O", "RB", "PB"}),
 }
 
 
@@ -133,14 +132,12 @@ class Derivation:
     fn: ArrayFn
     tol_fn: TolFn
     kind: str = "money"
-    clipped: bool = False
 
 
 @dataclass(frozen=True)
 class Identity:
     id: str
     variables: tuple[str, ...]
-    region: str
     derivations: tuple[Derivation, ...]
     verification_outputs: tuple[str, ...] = ()
     evidence: bool = True
@@ -154,8 +151,6 @@ def _derivation(
     fn: ArrayFn,
     tol_fn: TolFn,
     kind: str = "money",
-    *,
-    clipped: bool = False,
 ) -> Derivation:
     return Derivation(
         id=f"{out}_from_{'_'.join(inputs)}",
@@ -165,200 +160,165 @@ def _derivation(
         fn=fn,
         tol_fn=tol_fn,
         kind=kind,
-        clipped=clipped,
+    )
+
+
+def _additive_identity(
+    identity: str,
+    variables: tuple[str, str, str],
+    total: str,
+    left: str,
+    right: str,
+    statement: str,
+) -> Identity:
+    formulas = {
+        total: ((left, right), np.add),
+        left: ((total, right), np.subtract),
+        right: ((total, left), np.subtract),
+    }
+    return Identity(
+        identity,
+        variables,
+        tuple(
+            _derivation(
+                identity,
+                out,
+                formulas[out][0],
+                formulas[out][1],
+                _tol_sum,
+            )
+            for out in variables
+        ),
+        statement=statement,
+    )
+
+
+def _ratio_identity(
+    identity: str,
+    ratio: str,
+    numerator: str,
+    denominator: str,
+    statement: str,
+) -> Identity:
+    return Identity(
+        identity,
+        (ratio, numerator, denominator),
+        (
+            _derivation(
+                identity, ratio, (numerator, denominator),
+                np.divide, _tol_div, "pct",
+            ),
+            _derivation(
+                identity, numerator, (denominator, ratio),
+                np.multiply, _tol_mul,
+            ),
+            _derivation(
+                identity, denominator, (numerator, ratio),
+                np.divide, _tol_div,
+            ),
+        ),
+        statement=statement,
+    )
+
+
+def _product_identity(
+    identity: str,
+    variables: tuple[str, ...],
+    left: tuple[str, str],
+    right: tuple[str, str],
+    outputs: tuple[str, ...],
+    statement: str,
+    *,
+    evidence: bool = True,
+) -> Identity:
+    a, b = left
+    c, d = right
+    formulas = {
+        a: (c, d, b),
+        b: (c, d, a),
+        c: (a, b, d),
+        d: (a, b, c),
+    }
+    return Identity(
+        identity,
+        variables,
+        tuple(
+            _derivation(
+                identity,
+                out,
+                formulas[out],
+                lambda x, y, z: x * y / z,
+                _tol_mul_div,
+            )
+            for out in outputs
+        ),
+        evidence=evidence,
+        statement=statement,
     )
 
 
 def _registry() -> tuple[Identity, ...]:
-    D = _derivation
+    additive = _additive_identity
+    ratio = _ratio_identity
+    product = _product_identity
     return (
-        Identity(
-            "estimate_complement",
-            ("V", "C", "G"),
-            "estimate",
-            (
-                D("estimate_complement", "V", ("C", "G"), lambda C, G: C + G, _tol_sum),
-                D("estimate_complement", "C", ("V", "G"), lambda V, G: V - G, _tol_sum),
-                D("estimate_complement", "G", ("V", "C"), lambda V, C: V - C, _tol_sum),
-            ),
-            statement="V = C + G",
+        additive("estimate_complement", ("V", "C", "G"), "V", "C", "G", "V = C + G"),
+        additive("cost_completion", ("C", "D", "Q"), "C", "D", "Q", "C = D + Q"),
+        product(
+            "earned_revenue", ("E", "V", "D", "C"), ("E", "C"),
+            ("V", "D"), ("E", "D", "C", "V"), "E x C = V x D",
         ),
-        Identity(
-            "cost_completion",
-            ("C", "D", "Q"),
-            "progress",
-            (
-                D("cost_completion", "C", ("D", "Q"), lambda D, Q: D + Q, _tol_sum),
-                D("cost_completion", "D", ("C", "Q"), lambda C, Q: C - Q, _tol_sum),
-                D("cost_completion", "Q", ("C", "D"), lambda C, D: C - D, _tol_sum),
-            ),
-            statement="C = D + Q",
-        ),
-        Identity(
-            "earned_revenue",
-            ("E", "V", "D", "C"),
-            "progress",
-            (
-                D("earned_revenue", "E", ("V", "D", "C"), lambda V, D, C: V * D / C, _tol_mul_div),
-                D("earned_revenue", "D", ("E", "C", "V"), lambda E, C, V: E * C / V, _tol_mul_div),
-                D("earned_revenue", "C", ("V", "D", "E"), lambda V, D, E: V * D / E, _tol_mul_div),
-                D("earned_revenue", "V", ("E", "C", "D"), lambda E, C, D: E * C / D, _tol_mul_div),
-            ),
-            statement="E x C = V x D",
-        ),
-        Identity(
-            "earned_profit",
-            ("H", "E", "D"),
-            "progress",
-            (
-                D("earned_profit", "H", ("E", "D"), lambda E, D: E - D, _tol_sum),
-                D("earned_profit", "E", ("H", "D"), lambda H, D: H + D, _tol_sum),
-                D("earned_profit", "D", ("E", "H"), lambda E, H: E - H, _tol_sum),
-            ),
-            statement="H = E - D",
-        ),
-        Identity(
-            "earned_profit_margin",
-            ("H", "G", "D", "C"),
-            "progress",
-            (
-                D(
-                    "earned_profit_margin",
-                    "H",
-                    ("G", "D", "C"),
-                    lambda G, D, C: G * D / C,
-                    _tol_mul_div,
-                ),
-                D(
-                    "earned_profit_margin",
-                    "D",
-                    ("H", "C", "G"),
-                    lambda H, C, G: H * C / G,
-                    _tol_mul_div,
-                ),
-                D(
-                    "earned_profit_margin",
-                    "G",
-                    ("H", "C", "D"),
-                    lambda H, C, D: H * C / D,
-                    _tol_mul_div,
-                ),
-                D(
-                    "earned_profit_margin",
-                    "C",
-                    ("G", "D", "H"),
-                    lambda G, D, H: G * D / H,
-                    _tol_mul_div,
-                ),
-            ),
+        additive("earned_profit", ("H", "E", "D"), "E", "H", "D", "H = E - D"),
+        product(
+            "earned_profit_margin", ("H", "G", "D", "C"), ("H", "C"),
+            ("G", "D"), ("H", "D", "G", "C"), "H x C = G x D",
             evidence=False,
-            statement="H x C = G x D",
         ),
-        Identity(
-            "net_billing",
-            ("N", "E", "B"),
-            "billing",
-            (
-                D("net_billing", "N", ("E", "B"), lambda E, B: E - B, _tol_sum),
-                D("net_billing", "E", ("N", "B"), lambda N, B: N + B, _tol_sum),
-                D("net_billing", "B", ("E", "N"), lambda E, N: E - N, _tol_sum),
-            ),
-            statement="N = E - B",
-        ),
+        additive("net_billing", ("N", "E", "B"), "E", "N", "B", "N = E - B"),
         Identity(
             "billing_split",
             ("E", "B", "U", "O"),
-            "billing",
             (
-                D("billing_split", "U", ("E", "B"), lambda E, B: np.maximum(E - B, 0.0), _tol_sum, clipped=True),
-                D("billing_split", "O", ("E", "B"), lambda E, B: np.maximum(B - E, 0.0), _tol_sum, clipped=True),
-                D("billing_split", "E", ("B", "U", "O"), lambda B, U, O: B + U - O, _tol_sum),
-                D("billing_split", "B", ("E", "U", "O"), lambda E, U, O: E - U + O, _tol_sum),
+                _derivation(
+                    "billing_split", "U", ("E", "B"),
+                    lambda E, B: np.maximum(E - B, 0.0), _tol_sum,
+                ),
+                _derivation(
+                    "billing_split", "O", ("E", "B"),
+                    lambda E, B: np.maximum(B - E, 0.0), _tol_sum,
+                ),
+                _derivation(
+                    "billing_split", "E", ("B", "U", "O"),
+                    lambda B, U, O: B + U - O, _tol_sum,
+                ),
+                _derivation(
+                    "billing_split", "B", ("E", "U", "O"),
+                    lambda E, U, O: E - U + O, _tol_sum,
+                ),
             ),
             ("U", "O"),
             statement="U/O = split(E - B)",
         ),
-        Identity(
-            "backlog",
-            ("R", "V", "E"),
-            "progress",
-            (
-                D("backlog", "R", ("V", "E"), lambda V, E: V - E, _tol_sum),
-                D("backlog", "V", ("R", "E"), lambda R, E: R + E, _tol_sum),
-                D("backlog", "E", ("V", "R"), lambda V, R: V - R, _tol_sum),
-            ),
-            statement="R = V - E",
-        ),
-        Identity(
-            "remaining_billings",
-            ("RB", "V", "B"),
-            "billing",
-            (
-                D("remaining_billings", "RB", ("V", "B"), lambda V, B: V - B, _tol_sum),
-                D("remaining_billings", "V", ("RB", "B"), lambda RB, B: RB + B, _tol_sum),
-                D("remaining_billings", "B", ("V", "RB"), lambda V, RB: V - RB, _tol_sum),
-            ),
-            statement="RB = V - B",
-        ),
-        Identity(
-            "margin",
-            ("M", "G", "V"),
-            "estimate",
-            (
-                D("margin", "M", ("G", "V"), lambda G, V: G / V, _tol_div, "pct"),
-                D("margin", "G", ("V", "M"), lambda V, M: V * M, _tol_mul),
-                D("margin", "V", ("G", "M"), lambda G, M: G / M, _tol_div),
-            ),
-            statement="M = G / V",
-        ),
-        Identity(
-            "percent_complete_cost",
-            ("P", "D", "C"),
-            "progress",
-            (
-                D("percent_complete_cost", "P", ("D", "C"), lambda D, C: D / C, _tol_div, "pct"),
-                D("percent_complete_cost", "D", ("C", "P"), lambda C, P: C * P, _tol_mul),
-                D("percent_complete_cost", "C", ("D", "P"), lambda D, P: D / P, _tol_div),
-            ),
-            statement="P = D / C",
-        ),
-        Identity(
-            "percent_complete_revenue",
-            ("P", "E", "V"),
-            "progress",
-            (
-                D("percent_complete_revenue", "P", ("E", "V"), lambda E, V: E / V, _tol_div, "pct"),
-                D("percent_complete_revenue", "E", ("V", "P"), lambda V, P: V * P, _tol_mul),
-                D("percent_complete_revenue", "V", ("E", "P"), lambda E, P: E / P, _tol_div),
-            ),
-            statement="P = E / V",
-        ),
-        Identity(
-            "percent_billed",
-            ("PB", "B", "V"),
-            "billing",
-            (
-                D("percent_billed", "PB", ("B", "V"), lambda B, V: B / V, _tol_div, "pct"),
-                D("percent_billed", "B", ("V", "PB"), lambda V, PB: V * PB, _tol_mul),
-                D("percent_billed", "V", ("B", "PB"), lambda B, PB: B / PB, _tol_div),
-            ),
-            statement="PB = B / V",
-        ),
+        additive("backlog", ("R", "V", "E"), "V", "R", "E", "R = V - E"),
+        additive("remaining_billings", ("RB", "V", "B"), "V", "RB", "B", "RB = V - B"),
+        ratio("margin", "M", "G", "V", "M = G / V"),
+        ratio("percent_complete_cost", "P", "D", "C", "P = D / C"),
+        ratio("percent_complete_revenue", "P", "E", "V", "P = E / V"),
+        ratio("percent_billed", "PB", "B", "V", "PB = B / V"),
     )
 
 
 IDENTITIES = _registry()
-DERIVATIONS = tuple(
-    derivation
+DERIVATION_BY_ID = {
+    derivation.id: derivation
     for identity in IDENTITIES
     for derivation in identity.derivations
-)
-DERIVATION_BY_ID = {derivation.id: derivation for derivation in DERIVATIONS}
+}
 IDENTITY_BY_ID = {identity.id: identity for identity in IDENTITIES}
 WAITING_ON = {
     var: tuple(
         derivation
-        for derivation in DERIVATIONS
+        for derivation in DERIVATION_BY_ID.values()
         if var in derivation.inputs
     )
     for var in VAR_ORDER
@@ -376,44 +336,6 @@ def _readonly(values: np.ndarray) -> np.ndarray:
     return array
 
 
-def _ingest(columns, job_labels):
-    if columns is None:
-        raise InputShapeError("columns is None")
-    if isinstance(columns, np.ndarray):
-        if columns.ndim != 2:
-            raise InputShapeError(
-                "expected a 2-D array of shape (rows, cols); "
-                f"got ndim={columns.ndim}"
-            )
-        matrix = np.asarray(columns, dtype=float)
-    else:
-        arrays = []
-        for index, column in enumerate(columns):
-            array = np.asarray(column, dtype=float)
-            if array.ndim != 1:
-                raise InputShapeError(
-                    f"column {index} is not 1-D (ndim={array.ndim})"
-                )
-            arrays.append(array)
-        if not arrays:
-            matrix = np.empty((0, 0), dtype=float)
-        else:
-            rows = arrays[0].size
-            if any(array.size != rows for array in arrays):
-                raise InputShapeError("all columns must have the same row count")
-            matrix = np.column_stack(arrays)
-    if job_labels is None:
-        labels = [f"Job {index + 1}" for index in range(matrix.shape[0])]
-    else:
-        labels = [str(label) for label in list(job_labels)]
-        if len(labels) != matrix.shape[0]:
-            raise InputShapeError(
-                f"job_labels has {len(labels)} entries for "
-                f"{matrix.shape[0]} rows"
-            )
-    return matrix, labels
-
-
 @dataclass(frozen=True)
 class PreparedTable:
     full: np.ndarray
@@ -421,10 +343,7 @@ class PreparedTable:
     raw: np.ndarray
     magnitude: np.ndarray
     whole_percent: np.ndarray
-    finite: np.ndarray
-    active: np.ndarray
     positive: np.ndarray
-    negative: np.ndarray
     percent_ratio_valid: np.ndarray
     percent_whole_valid: np.ndarray
     percent_ratio_tol: np.ndarray
@@ -432,7 +351,6 @@ class PreparedTable:
     percent_ratio_grid: tuple[Optional[float], ...]
     percent_whole_grid: tuple[Optional[float], ...]
     median_abs: np.ndarray
-    duplicate_representative: np.ndarray
     representatives: np.ndarray
     active_overlap: np.ndarray
     sample_index: np.ndarray
@@ -445,12 +363,10 @@ class PreparedTable:
         raw = _readonly(full[complete].T)
         magnitude = _readonly(np.abs(raw))
         whole_percent = _readonly(raw / 100.0)
-        finite = _readonly(np.isfinite(raw))
         active = _readonly(
             magnitude > cfg.money_obs_tol + cfg.cert_slack
         )
         positive = _readonly(raw > cfg.money_obs_tol)
-        negative = _readonly(raw < -cfg.money_obs_tol)
         ratio_valid = _readonly(
             np.mean((raw >= -0.25) & (raw <= 2.0), axis=1) >= 0.90
         )
@@ -529,10 +445,7 @@ class PreparedTable:
             raw=raw,
             magnitude=magnitude,
             whole_percent=whole_percent,
-            finite=finite,
-            active=active,
             positive=positive,
-            negative=negative,
             percent_ratio_valid=ratio_valid,
             percent_whole_valid=whole_valid,
             percent_ratio_tol=ratio_tol,
@@ -540,7 +453,6 @@ class PreparedTable:
             percent_ratio_grid=ratio_grids,
             percent_whole_grid=whole_grids,
             median_abs=median_abs,
-            duplicate_representative=_readonly(duplicate_representative),
             representatives=representatives,
             active_overlap=active_overlap,
             sample_index=_readonly(sample_index),
@@ -563,7 +475,6 @@ class NumericValue:
     scale: float = 1.0
     grid: Optional[float] = None
     derivation: Optional[str] = None
-    input_ids: tuple[int, ...] = ()
     full: bool = False
 
 
@@ -590,7 +501,6 @@ class RunContext:
         self.score_hits = 0
         self.score_misses = 0
         self.score_batches = 0
-        self.score_predictions = 0
 
     def _id(self) -> int:
         value_id = self._next_id
@@ -681,18 +591,10 @@ class RunContext:
             tolerance=_readonly(np.maximum(tolerance, 1e-12)),
             support=support,
             derivation=derivation.id,
-            input_ids=tuple(value.id for value in inputs),
             full=full,
         )
         self.derived_cache[key] = result
         return result
-
-    def score(
-        self,
-        value: NumericValue,
-        derivation: Derivation,
-    ) -> ScoreVectors:
-        return self.score_many(((value, derivation),))[0]
 
     def score_arrays(
         self,
@@ -820,7 +722,6 @@ class RunContext:
             group = list(unique.items())
             self.score_misses += len(group)
             self.score_batches += 1
-            self.score_predictions += len(group)
             predictions = np.stack(
                 [value.values for _, value in group]
             )
@@ -859,10 +760,6 @@ class RunContext:
                 )
 
         return [self.score_cache[key] for key in keys]
-
-
-def _allowed_bad(rows: int, cfg: Config) -> int:
-    return max(1, int(np.floor((1.0 - cfg.ident_frac) * rows)))
 
 
 def _robust_prior(condition: np.ndarray, cfg: Config) -> np.ndarray:
@@ -954,6 +851,24 @@ class Fragment:
             for assignment in self.assignments
         }
 
+    @property
+    def rank(self):
+        return (-self.score, self.residual, self.assignments)
+
+
+def _best_fragments(
+    fragments: Iterable[Fragment],
+    limit: Optional[int] = None,
+) -> list[Fragment]:
+    """Deduplicate equivalent graph states and retain their strongest route."""
+    best: dict[tuple[Assignment, ...], Fragment] = {}
+    for fragment in fragments:
+        prior = best.get(fragment.assignments)
+        if prior is None or fragment.rank < prior.rank:
+            best[fragment.assignments] = fragment
+    ranked = sorted(best.values(), key=lambda fragment: fragment.rank)
+    return ranked if limit is None else ranked[:limit]
+
 
 def _canonical_assignments(
     assignments: Iterable[Assignment],
@@ -980,13 +895,6 @@ def _canonical_assignments(
     )
 
 
-def _sampled(
-    values: np.ndarray,
-    table: PreparedTable,
-) -> np.ndarray:
-    return values[..., table.sample_index]
-
-
 def _batch_matches(
     ctx: RunContext,
     predictions: np.ndarray,
@@ -997,6 +905,17 @@ def _batch_matches(
     magnitude: bool = False,
     excluded: Optional[np.ndarray] = None,
 ) -> list[StructuralMatch]:
+    if kind == "pct":
+        valid = (
+            ctx.table.percent_ratio_valid
+            | ctx.table.percent_whole_valid
+        )
+        available = available[valid[available]]
+        if available.size == 0:
+            return [
+                StructuralMatch(-1, 1.0, 10**9, 10**9, np.inf)
+                for _ in predictions
+            ]
     scores = ctx.score_arrays(
         predictions,
         predicted_tolerance,
@@ -1038,54 +957,6 @@ def _batch_matches(
     ]
 
 
-def _batch_money_matches(
-    ctx: RunContext,
-    predictions: np.ndarray,
-    predicted_tolerance: np.ndarray,
-    available: np.ndarray,
-    *,
-    magnitude: bool = False,
-    excluded: Optional[np.ndarray] = None,
-) -> list[StructuralMatch]:
-    return _batch_matches(
-        ctx,
-        predictions,
-        predicted_tolerance,
-        available,
-        kind="money",
-        magnitude=magnitude,
-        excluded=excluded,
-    )
-
-
-def _batch_percent_matches(
-    ctx: RunContext,
-    predictions: np.ndarray,
-    predicted_tolerance: np.ndarray,
-    available: np.ndarray,
-    *,
-    excluded: Optional[np.ndarray] = None,
-) -> list[StructuralMatch]:
-    possible = (
-        ctx.table.percent_ratio_valid[available]
-        | ctx.table.percent_whole_valid[available]
-    )
-    available = available[possible]
-    if available.size == 0:
-        return [
-            StructuralMatch(-1, 1.0, 10**9, 10**9, np.inf)
-            for _ in range(predictions.shape[0])
-        ]
-    return _batch_matches(
-        ctx,
-        predictions,
-        predicted_tolerance,
-        available,
-        kind="pct",
-        excluded=excluded,
-    )
-
-
 def _accepted(
     match: StructuralMatch,
     rows: int,
@@ -1113,6 +984,78 @@ def _unique_output_matches(
         selected[variable] = match
         used_columns.add(match.column)
     return selected
+
+
+def _unassigned_columns(
+    table: PreparedTable,
+    fragment: Fragment,
+) -> np.ndarray:
+    used = np.fromiter(
+        (assignment.column for assignment in fragment.assignments),
+        dtype=int,
+    )
+    return table.representatives[
+        ~np.isin(table.representatives, used)
+    ]
+
+
+def _extend_fragment(
+    base: Fragment,
+    anchor: str,
+    anchor_columns: np.ndarray,
+    matches_by_variable: dict[str, list[StructuralMatch]],
+    identifying: frozenset[str],
+    weights: dict[str, int],
+    source: str,
+    rows: int,
+    cfg: Config,
+    limit: int,
+    bonus: Optional[Callable[[dict[str, StructuralMatch]], int]] = None,
+) -> list[Fragment]:
+    """Orient a batched anchor search and retain its best graph fragments."""
+    ranked = []
+    for index, column in enumerate(anchor_columns):
+        selected = _unique_output_matches(
+            {
+                variable: matches[index]
+                for variable, matches in matches_by_variable.items()
+            },
+            rows,
+            cfg,
+        )
+        if not identifying.intersection(selected):
+            continue
+        assignments = [
+            *base.assignments,
+            Assignment(anchor, int(column)),
+            *(
+                Assignment(variable, match.column, match.scale)
+                for variable, match in selected.items()
+            ),
+        ]
+        canonical = _canonical_assignments(assignments)
+        if canonical is None:
+            continue
+        ranked.append(
+            Fragment(
+                assignments=canonical,
+                score=(
+                    base.score
+                    + 5
+                    + sum(
+                        weights[variable]
+                        + int(match.strict_bad == 0)
+                        for variable, match in selected.items()
+                    )
+                    + (bonus(selected) if bonus else 0)
+                ),
+                residual=base.residual + sum(
+                    match.residual for match in selected.values()
+                ),
+                sources=base.sources | frozenset({source}),
+            )
+        )
+    return sorted(ranked, key=lambda fragment: fragment.rank)[:limit]
 
 
 def _estimate_fragments(
@@ -1144,7 +1087,7 @@ def _estimate_fragments(
             if sufficiently_positive[int(column)]
         ]
     allowed = _allowed_bad(sample.size, cfg)
-    candidates: dict[tuple[Assignment, ...], Fragment] = {}
+    candidates = []
     if not hubs or reps.size < 3:
         return []
 
@@ -1336,11 +1279,12 @@ def _estimate_fragments(
                     ),
                 )[None, :]
                 if available.size:
-                    margin_match = _batch_percent_matches(
+                    margin_match = _batch_matches(
                         ctx,
                         margin[None, :],
                         margin_tol,
                         available,
+                        kind="pct",
                     )[0]
                     if _accepted(margin_match, sample.size, cfg):
                         base.append(
@@ -1384,21 +1328,9 @@ def _estimate_fragments(
                     ),
                     sources=frozenset({"estimate_complement"}),
                 )
-                prior = candidates.get(canonical)
-                if prior is None or (
-                    fragment.score,
-                    -fragment.residual,
-                ) > (prior.score, -prior.residual):
-                    candidates[canonical] = fragment
+                candidates.append(fragment)
 
-    return sorted(
-        candidates.values(),
-        key=lambda fragment: (
-            -fragment.score,
-            fragment.residual,
-            fragment.assignments,
-        ),
-    )[: cfg.estimate_fragments]
+    return _best_fragments(candidates, cfg.estimate_fragments)
 
 
 def _additive_hub_fallback(ctx: RunContext) -> list[int]:
@@ -1459,19 +1391,14 @@ def _progress_fragments(
     cfg = ctx.cfg
     sample = table.sample_index
     rows = sample.size
-    results: dict[tuple[Assignment, ...], Fragment] = {}
+    results = []
 
     for estimate in estimates:
         mapping = estimate.mapping
         v_column = mapping["V"].column
         c_column = mapping["C"].column
-        used = np.asarray(
-            [assignment.column for assignment in estimate.assignments],
-            dtype=int,
-        )
-        candidates = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
+        available = _unassigned_columns(table, estimate)
+        candidates = available
         if candidates.size == 0:
             continue
         V = table.raw[v_column, sample]
@@ -1513,87 +1440,41 @@ def _progress_fragments(
         )
         H_tol = E_tol + money_tol
         P_tol = _tol_div((D, C_batch), (money_tol, base_tol))
-        available = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
         matches_by_variable = {
-            "Q": _batch_money_matches(
-                ctx, Q, Q_tol, available, excluded=candidates
+            "Q": _batch_matches(
+                ctx, Q, Q_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "E": _batch_money_matches(
-                ctx, E, E_tol, available, excluded=candidates
+            "E": _batch_matches(
+                ctx, E, E_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "H": _batch_money_matches(
-                ctx, H, H_tol, available, excluded=candidates
+            "H": _batch_matches(
+                ctx, H, H_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "P": _batch_percent_matches(
-                ctx, P, P_tol, available, excluded=candidates
+            "P": _batch_matches(
+                ctx, P, P_tol, available,
+                kind="pct", excluded=candidates,
             ),
         }
-        ranked = []
-        for index, d_column in enumerate(candidates):
-            raw_matches = {
-                variable: matches[index]
-                for variable, matches in matches_by_variable.items()
-            }
-            selected = _unique_output_matches(raw_matches, rows, cfg)
-            # D must be oriented by earned/progress structure.  Q alone is
-            # only an additive complement and cannot name the axis.
-            identifying = {
-                variable
-                for variable in selected
-                if variable in {"E", "P", "H"}
-            }
-            if not identifying:
-                continue
-            assignments = list(estimate.assignments)
-            assignments.append(Assignment("D", int(d_column)))
-            score = estimate.score + 5
-            residual = estimate.residual
-            weights = {"E": 6, "P": 5, "H": 3, "Q": 2}
-            for variable, match in selected.items():
-                assignments.append(
-                    Assignment(variable, match.column, match.scale)
-                )
-                score += weights[variable]
-                if match.strict_bad == 0:
-                    score += 1
-                residual += match.residual
-            canonical = _canonical_assignments(assignments)
-            if canonical is None:
-                continue
-            ranked.append(
-                Fragment(
-                    assignments=canonical,
-                    score=score,
-                    residual=residual,
-                    sources=estimate.sources
-                    | frozenset({"progress_projection"}),
-                )
-            )
-        ranked.sort(
-            key=lambda fragment: (
-                -fragment.score,
-                fragment.residual,
-                fragment.assignments,
+        # Q alone is only an additive complement and cannot orient D.
+        results.extend(
+            _extend_fragment(
+                estimate,
+                "D",
+                candidates,
+                matches_by_variable,
+                frozenset({"E", "P", "H"}),
+                {"E": 6, "P": 5, "H": 3, "Q": 2},
+                "progress_projection",
+                rows,
+                cfg,
+                cfg.progress_per_estimate,
             )
         )
-        for fragment in ranked[: cfg.progress_per_estimate]:
-            prior = results.get(fragment.assignments)
-            if prior is None or (
-                fragment.score,
-                -fragment.residual,
-            ) > (prior.score, -prior.residual):
-                results[fragment.assignments] = fragment
 
-    return sorted(
-        results.values(),
-        key=lambda fragment: (
-            -fragment.score,
-            fragment.residual,
-            fragment.assignments,
-        ),
-    )
+    return _best_fragments(results)
 
 
 def _billing_fragments(
@@ -1604,23 +1485,15 @@ def _billing_fragments(
     cfg = ctx.cfg
     sample = table.sample_index
     rows = sample.size
-    results: dict[tuple[Assignment, ...], Fragment] = {}
+    results = []
 
     for progress_fragment in progress_fragments:
         mapping = progress_fragment.mapping
         v_column = mapping["V"].column
         c_column = mapping["C"].column
         d_column = mapping["D"].column
-        used = np.asarray(
-            [
-                assignment.column
-                for assignment in progress_fragment.assignments
-            ],
-            dtype=int,
-        )
-        candidates = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
+        available = _unassigned_columns(table, progress_fragment)
+        candidates = available
         if candidates.size == 0:
             continue
         V = table.raw[v_column, sample]
@@ -1664,103 +1537,66 @@ def _billing_fragments(
         net_tol = E_tol + base_tol
         rb_tol = base_tol + base_tol
         pb_tol = _tol_div((B, V_batch), (base_tol, base_tol))
-        available = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
         matches_by_variable = {
-            "N": _batch_money_matches(
-                ctx, N, net_tol, available, excluded=candidates
+            "N": _batch_matches(
+                ctx, N, net_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "U": _batch_money_matches(
+            "U": _batch_matches(
                 ctx,
                 U,
                 net_tol,
                 available,
+                kind="money",
                 magnitude=True,
                 excluded=candidates,
             ),
-            "O": _batch_money_matches(
+            "O": _batch_matches(
                 ctx,
                 O,
                 net_tol,
                 available,
+                kind="money",
                 magnitude=True,
                 excluded=candidates,
             ),
-            "RB": _batch_money_matches(
-                ctx, RB, rb_tol, available, excluded=candidates
+            "RB": _batch_matches(
+                ctx, RB, rb_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "PB": _batch_percent_matches(
-                ctx, PB, pb_tol, available, excluded=candidates
+            "PB": _batch_matches(
+                ctx, PB, pb_tol, available,
+                kind="pct", excluded=candidates,
             ),
         }
-        ranked = []
-        for index, b_column in enumerate(candidates):
-            raw_matches = {
-                variable: matches[index]
-                for variable, matches in matches_by_variable.items()
-            }
-            selected = _unique_output_matches(raw_matches, rows, cfg)
-            identifying = {
-                variable
-                for variable in selected
-                if variable in {"N", "U", "O", "PB"}
-            }
-            if not identifying:
-                continue
-            assignments = list(progress_fragment.assignments)
-            assignments.append(Assignment("B", int(b_column)))
-            score = progress_fragment.score + 5
-            residual = progress_fragment.residual
-            weights = {"N": 5, "U": 4, "O": 4, "PB": 5, "RB": 2}
-            for variable, match in selected.items():
-                assignments.append(
-                    Assignment(variable, match.column, match.scale)
-                )
-                score += weights[variable]
-                if match.strict_bad == 0:
-                    score += 1
-                residual += match.residual
-            if "U" in selected and "O" in selected:
-                u_column = selected["U"].column
-                o_column = selected["O"].column
-                if table.active_overlap[u_column, o_column] == 0:
-                    score += 4
-            canonical = _canonical_assignments(assignments)
-            if canonical is None:
-                continue
-            ranked.append(
-                Fragment(
-                    assignments=canonical,
-                    score=score,
-                    residual=residual,
-                    sources=progress_fragment.sources
-                    | frozenset({"billing_bridge"}),
-                )
-            )
-        ranked.sort(
-            key=lambda fragment: (
-                -fragment.score,
-                fragment.residual,
-                fragment.assignments,
+        results.extend(
+            _extend_fragment(
+                progress_fragment,
+                "B",
+                candidates,
+                matches_by_variable,
+                frozenset({"N", "U", "O", "PB"}),
+                {"N": 5, "U": 4, "O": 4, "PB": 5, "RB": 2},
+                "billing_bridge",
+                rows,
+                cfg,
+                cfg.billing_per_progress,
+                lambda selected: (
+                    4
+                    if (
+                        "U" in selected
+                        and "O" in selected
+                        and table.active_overlap[
+                            selected["U"].column,
+                            selected["O"].column,
+                        ] == 0
+                    )
+                    else 0
+                ),
             )
         )
-        for fragment in ranked[: cfg.billing_per_progress]:
-            prior = results.get(fragment.assignments)
-            if prior is None or (
-                fragment.score,
-                -fragment.residual,
-            ) > (prior.score, -prior.residual):
-                results[fragment.assignments] = fragment
 
-    return sorted(
-        results.values(),
-        key=lambda fragment: (
-            -fragment.score,
-            fragment.residual,
-            fragment.assignments,
-        ),
-    )[: cfg.assembled_states]
+    return _best_fragments(results, cfg.assembled_states)
 
 
 def _discover_states(
@@ -1807,11 +1643,7 @@ def _discover_states(
         }
         estimates = sorted(
             estimates_by_key.values(),
-            key=lambda fragment: (
-                -fragment.score,
-                fragment.residual,
-                fragment.assignments,
-            ),
+            key=lambda fragment: fragment.rank,
         )[: ctx.cfg.estimate_fragments]
         fallback_used = bool(fallback_estimates)
     estimate_proposals = len(estimates)
@@ -1859,8 +1691,6 @@ class ClosedGraph:
     known: dict[str, NumericValue]
     column_to_var: dict[int, str]
     conflicts: list[str]
-    derived_values: int
-    physical_matches: int
     certification_derivations: frozenset[str] = frozenset()
     checkable: frozenset[str] = frozenset()
     coverage: dict[str, int] = field(default_factory=dict)
@@ -1883,11 +1713,9 @@ class ClosedGraph:
 
 @dataclass(frozen=True)
 class PhysicalClaim:
-    out: str
     column: int
     scale: float
     derivation: Derivation
-    value: NumericValue
     strict_bad: int
     loose_bad: int
     residual: float
@@ -1954,11 +1782,9 @@ def _physical_claims(
         column = int(qualified[order[0]])
         claims.append(
             PhysicalClaim(
-                out=out,
                 column=column,
                 scale=float(scores.scale[column]),
                 derivation=derivation,
-                value=value,
                 strict_bad=int(scores.strict_bad[column]),
                 loose_bad=int(scores.loose_bad[column]),
                 residual=float(scores.residual[column]),
@@ -1973,9 +1799,9 @@ def _select_claims(claims: list[PhysicalClaim]) -> list[PhysicalClaim]:
     best_by_out: dict[str, PhysicalClaim] = {}
     best_by_column: dict[int, PhysicalClaim] = {}
     for claim in claims:
-        prior = best_by_out.get(claim.out)
+        prior = best_by_out.get(claim.derivation.out)
         if prior is None or claim.rank < prior.rank:
-            best_by_out[claim.out] = claim
+            best_by_out[claim.derivation.out] = claim
         prior = best_by_column.get(claim.column)
         if prior is None or claim.rank < prior.rank:
             best_by_column[claim.column] = claim
@@ -2016,8 +1842,6 @@ def _close_graph(
             known=known,
             column_to_var=column_to_var,
             conflicts=[],
-            derived_values=0,
-            physical_matches=0,
         )
 
     queue = deque(known)
@@ -2027,9 +1851,6 @@ def _close_graph(
         dict[int, tuple[Derivation, NumericValue]],
     ] = {}
     conflicts: list[str] = []
-    derived_start = ctx.derived_misses
-    physical_matches = 0
-
     while True:
         # Only derivations touched by newly grounded variables are inspected.
         while queue:
@@ -2087,20 +1908,19 @@ def _close_graph(
         if claims:
             for claim in claims:
                 if (
-                    claim.out in known
+                    claim.derivation.out in known
                     or claim.column in column_to_var
                 ):
                     continue
                 observed = ctx.observed(
-                    claim.out,
+                    claim.derivation.out,
                     claim.column,
                     scale=claim.scale,
                 )
-                known[claim.out] = observed
-                column_to_var[claim.column] = claim.out
-                pending.pop(claim.out, None)
-                queue.append(claim.out)
-                physical_matches += 1
+                known[claim.derivation.out] = observed
+                column_to_var[claim.column] = claim.derivation.out
+                pending.pop(claim.derivation.out, None)
+                queue.append(claim.derivation.out)
             continue
 
         # Physical fixpoint.  Materialize every numerically agreeing output
@@ -2144,8 +1964,6 @@ def _close_graph(
         known=known,
         column_to_var=column_to_var,
         conflicts=conflicts,
-        derived_values=ctx.derived_misses - derived_start,
-        physical_matches=physical_matches,
     )
 
 
@@ -2191,7 +2009,6 @@ def _close_unique_states(
 
 
 @lru_cache(maxsize=512)
-@lru_cache(maxsize=512)
 def _minimum_seed_count(
     physical_variables: tuple[str, ...],
     active_derivations: tuple[Derivation, ...],
@@ -2212,12 +2029,7 @@ def _minimum_seed_count(
         )
         for derivation in active_derivations
     )
-    closure_cache: dict[int, int] = {}
-
     def closure(seed: int) -> int:
-        cached = closure_cache.get(seed)
-        if cached is not None:
-            return cached
         known = seed
         changed = True
         while changed:
@@ -2226,7 +2038,6 @@ def _minimum_seed_count(
                 if known & required == required and not known & output:
                     known |= output
                     changed = True
-        closure_cache[seed] = known
         return known
 
     for size in range(len(physical_variables) + 1):
@@ -2241,6 +2052,26 @@ def _minimum_seed_count(
     return len(physical_variables)
 
 
+def _identity_checks(
+    identity: Identity,
+    ready: list,
+    output: Callable[[object], str],
+) -> list:
+    """Select one proof per identity, or each required clipped output."""
+    if not ready:
+        return []
+    if not identity.verification_outputs:
+        return ready[:1]
+    first_by_output = {}
+    for item in ready:
+        first_by_output.setdefault(output(item), item)
+    return [
+        first_by_output[out]
+        for out in identity.verification_outputs
+        if out in first_by_output
+    ]
+
+
 def _analyse_finalist(
     ctx: RunContext,
     graph: ClosedGraph,
@@ -2251,8 +2082,6 @@ def _analyse_finalist(
     # search.  Complete only the bounded finalist set so public virtuals,
     # evidence, certification, and diagnosis all see the full semantic
     # graph without taxing every discarded state.
-    derived_start = ctx.derived_misses
-
     def merge_numeric(out, alternatives):
         merged = _merge_numeric_alternatives(ctx, alternatives)
         if merged is None:
@@ -2268,7 +2097,6 @@ def _analyse_finalist(
         lambda value: value.id,
         merge_numeric,
     )
-    graph.derived_values += ctx.derived_misses - derived_start
 
     physical = {
         variable: value
@@ -2332,26 +2160,11 @@ def _analyse_finalist(
         ]
         if not ready:
             continue
-        if identity.verification_outputs:
-            checks = [
-                next(
-                    (
-                        derivation
-                        for derivation in ready
-                        if derivation.out == output
-                    ),
-                    None,
-                )
-                for output in identity.verification_outputs
-                if output in graph.known
-            ]
-            checks = [
-                derivation
-                for derivation in checks
-                if derivation is not None
-            ]
-        else:
-            checks = ready[:1]
+        checks = _identity_checks(
+            identity,
+            ready,
+            lambda derivation: derivation.out,
+        )
         if not checks:
             continue
         verified = True
@@ -2625,39 +2438,20 @@ def _certify(
                 expected is not None
             ):
                 ready.append((derivation, expected))
-        if identity.verification_outputs:
-            for output in identity.verification_outputs:
-                candidates = [
-                    item
-                    for item in ready
-                    if item[0].out == output
-                ]
-                if candidates:
-                    checks.append(
-                        (
-                            identity,
-                            min(
-                                candidates,
-                                key=lambda item: (
-                                    item[1].support.bit_count(),
-                                    item[0].id,
-                                ),
-                            ),
-                        )
-                    )
-        elif ready:
-            checks.append(
-                (
-                    identity,
-                    min(
-                        ready,
-                        key=lambda item: (
-                            item[1].support.bit_count(),
-                            item[0].id,
-                        ),
-                    ),
-                )
+        ready.sort(
+            key=lambda item: (
+                item[1].support.bit_count(),
+                item[0].id,
             )
+        )
+        checks.extend(
+            (identity, item)
+            for item in _identity_checks(
+                identity,
+                ready,
+                lambda candidate: candidate[0].out,
+            )
+        )
 
     for identity, (derivation, expected) in checks:
         variable = derivation.out
@@ -3135,6 +2929,45 @@ def _minimal_row_repair(
     return "none", []
 
 
+def _unresolved_finding(
+    row: int,
+    label: str,
+    candidates: list[str],
+    failures: list[RowFailure],
+    *,
+    ambiguous: bool,
+) -> Finding:
+    return Finding(
+        row_index=row,
+        row_label=label,
+        culprit_column=None,
+        culprit_variable=None,
+        candidate_variables=candidates,
+        exonerated_variables=[],
+        observed=None,
+        proposed_correction=None,
+        correction_basis=[],
+        confidence="low",
+        classification=(
+            "ambiguous_multi_cell"
+            if ambiguous
+            else "unresolved_constraint_conflict"
+        ),
+        classification_detail=(
+            "Several minimal observation removals can make this row "
+            "internally coherent."
+            if ambiguous
+            else "No unique one- or two-observation repair makes the "
+            "complete row coherent."
+        ),
+        transplant_sources=[],
+        failing_relations=sorted(
+            {failure.relation for failure in failures}
+        ),
+        proof_kind="joint",
+    )
+
+
 def _diagnose(
     graph: ClosedGraph,
     physical: dict[str, NumericValue],
@@ -3244,64 +3077,24 @@ def _diagnose(
                         proof_kind=proof_kind,
                     )
                 )
-        elif status == "ambiguous":
-            findings.append(
-                Finding(
-                    row_index=row,
-                    row_label=labels[row],
-                    culprit_column=None,
-                    culprit_variable=None,
-                    candidate_variables=detail,
-                    exonerated_variables=[],
-                    observed=None,
-                    proposed_correction=None,
-                    correction_basis=[],
-                    confidence="low",
-                    classification="ambiguous_multi_cell",
-                    classification_detail=(
-                        "Several minimal observation removals can make this "
-                        "row internally coherent."
-                    ),
-                    transplant_sources=[],
-                    failing_relations=sorted(
-                        {
-                            failure.relation
-                            for failure in row_failures
-                        }
-                    ),
-                    proof_kind="joint",
-                )
-            )
         else:
-            candidates = sorted(
-                {failure.variable for failure in row_failures},
-                key=VAR_INDEX.__getitem__,
-            )
             findings.append(
-                Finding(
-                    row_index=row,
-                    row_label=labels[row],
-                    culprit_column=None,
-                    culprit_variable=None,
-                    candidate_variables=candidates,
-                    exonerated_variables=[],
-                    observed=None,
-                    proposed_correction=None,
-                    correction_basis=[],
-                    confidence="low",
-                    classification="unresolved_constraint_conflict",
-                    classification_detail=(
-                        "No unique one- or two-observation repair makes the "
-                        "complete row coherent."
+                _unresolved_finding(
+                    row,
+                    labels[row],
+                    (
+                        detail
+                        if status == "ambiguous"
+                        else sorted(
+                            {
+                                failure.variable
+                                for failure in row_failures
+                            },
+                            key=VAR_INDEX.__getitem__,
+                        )
                     ),
-                    transplant_sources=[],
-                    failing_relations=sorted(
-                        {
-                            failure.relation
-                            for failure in row_failures
-                        }
-                    ),
-                    proof_kind="joint",
+                    row_failures,
+                    ambiguous=status == "ambiguous",
                 )
             )
     return findings
@@ -3322,42 +3115,70 @@ def _config(config) -> Config:
     return result
 
 
+def _solve_frontier(
+    ctx: RunContext,
+    **discovery_options,
+) -> tuple[list[Fragment], dict, list[ClosedGraph], list[ClosedGraph]]:
+    fragments, discovery = _discover_states(ctx, **discovery_options)
+    closed = _close_unique_states(ctx, fragments) if fragments else []
+    finalists = (
+        _analyse_finalists(
+            ctx,
+            closed,
+            recovery=bool(discovery_options.get("exhaustive")),
+        )
+        if closed
+        else []
+    )
+    return fragments, discovery, closed, finalists
+
+
+def _insufficient(reason: str, diagnostics: dict) -> ValidationResult:
+    return ValidationResult(
+        status=INSUFFICIENT,
+        reason=reason,
+        diagnostics=diagnostics,
+    )
+
+
 def validate_wip(
     columns,
     job_labels=None,
     config=None,
 ) -> ValidationResult:
     cfg = _config(config)
-    matrix, labels = _ingest(columns, job_labels)
+    physical_columns, labels = _ingest(columns, job_labels)
+    matrix = (
+        np.column_stack(physical_columns)
+        if physical_columns
+        else np.empty((0, 0), dtype=float)
+    )
     diagnostics = {
         "engine": "wip2_search_compressed_constraint_graph",
         "notes": [],
         "prepared_once": True,
     }
     if matrix.shape[1] == 0:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason="empty input: no columns provided",
-            diagnostics=diagnostics,
+        return _insufficient(
+            "empty input: no columns provided",
+            diagnostics,
         )
     if matrix.shape[1] < 4:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 f"only {matrix.shape[1]} column(s); too few physical "
                 "observations to ground estimate, progress, and billing"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     complete = np.all(np.isfinite(matrix), axis=1)
     if int(complete.sum()) < cfg.min_rows:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 f"only {int(complete.sum())} usable row(s) of "
                 f"{matrix.shape[0]}; need at least {cfg.min_rows}"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     if np.any(~complete):
         diagnostics["notes"].append(
@@ -3367,73 +3188,29 @@ def validate_wip(
 
     table = PreparedTable.build(matrix, cfg)
     ctx = RunContext(table, cfg)
-    fragments, discovery = _discover_states(ctx)
-    initial_discovery = discovery
-    closed = _close_unique_states(ctx, fragments) if fragments else []
-    finalists = _analyse_finalists(ctx, closed) if closed else []
-
-    # Magnitude is an excellent ordering prior, never a correctness gate.
-    # Widen only after the compressed frontier fails its independent-region
-    # test, then run every plausible additive hub through the same batched
-    # motif kernel and deduplicate before closing any state.
-    widened = not finalists or not _coverage_ok(finalists[0], cfg)
-    if widened:
-        broad_fragments, broad_discovery = _discover_states(
-            ctx,
-            broaden=True,
-        )
-        broad_closed = (
-            _close_unique_states(ctx, broad_fragments)
-            if broad_fragments
-            else []
-        )
-        broad_finalists = (
-            _analyse_finalists(ctx, broad_closed)
-            if broad_closed
-            else []
-        )
-        discovery = {
-            **broad_discovery,
-            "initial_estimate_fragments": initial_discovery[
-                "estimate_fragments"
-            ],
-            "initial_assembled_states": initial_discovery[
-                "canonical_assembled_states"
-            ],
-        }
-        fragments = broad_fragments
-        closed = broad_closed
-        finalists = broad_finalists
-
-    exhaustive_widening = (
-        widened
-        and (
-            not finalists
-            or not _coverage_ok(finalists[0], cfg)
-        )
+    frontiers = (
+        {},
+        {"broaden": True},
+        {"broaden": True, "exhaustive": True},
     )
-    if exhaustive_widening:
-        exhaustive_fragments, exhaustive_discovery = _discover_states(
+    for frontier_index, options in enumerate(frontiers):
+        fragments, discovery, closed, finalists = _solve_frontier(
             ctx,
-            broaden=True,
-            exhaustive=True,
+            **options,
         )
-        exhaustive_closed = (
-            _close_unique_states(ctx, exhaustive_fragments)
-            if exhaustive_fragments
-            else []
-        )
-        exhaustive_finalists = (
-            _analyse_finalists(
-                ctx,
-                exhaustive_closed,
-                recovery=True,
-            )
-            if exhaustive_closed
-            else []
-        )
+        if frontier_index == 0:
+            initial_discovery = discovery
+        if finalists and _coverage_ok(finalists[0], cfg):
+            break
+
+    # Magnitude orders the first compressed frontier but never gates
+    # correctness.  Later frontiers progressively admit every plausible
+    # additive hub, then tolerate repeated corruptions during proposal only.
+    widened = frontier_index >= 1
+    exhaustive_widening = frontier_index >= 2
+    if widened:
         discovery = {
-            **exhaustive_discovery,
+            **discovery,
             "initial_estimate_fragments": initial_discovery[
                 "estimate_fragments"
             ],
@@ -3441,9 +3218,6 @@ def validate_wip(
                 "canonical_assembled_states"
             ],
         }
-        fragments = exhaustive_fragments
-        closed = exhaustive_closed
-        finalists = exhaustive_finalists
 
     diagnostics["discovery"] = {
         **discovery,
@@ -3460,27 +3234,24 @@ def validate_wip(
     }
     diagnostics["finalists_analysed"] = len(finalists)
     if not fragments:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 "could not assemble a coherent estimate/progress/billing "
                 "constraint graph from the observed columns"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     if not closed:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason="structural fragments did not close to a semantic graph",
-            diagnostics=diagnostics,
+        return _insufficient(
+            "structural fragments did not close to a semantic graph",
+            diagnostics,
         )
     if not finalists:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 "candidate graphs did not close to the required semantic core"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     best = finalists[0]
     if not _coverage_ok(best, cfg):
@@ -3497,13 +3268,12 @@ def validate_wip(
             if best.coverage.get(region, 0)
             < cfg.min_region_checkable
         ]
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 "identifiable but not independently validatable across "
                 f"the required business regions: {', '.join(missing)}"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
 
     witnesses, failures, incomplete, physical = _certify(
@@ -3603,7 +3373,7 @@ def validate_wip(
     }
     diagnostics["matcher"] = {
         "batched_calls": ctx.score_batches,
-        "predictions_scored": ctx.score_predictions,
+        "predictions_scored": ctx.score_misses,
     }
     diagnostics["winning_sources"] = sorted(best.fragment.sources)
     diagnostics["winning_structural_score"] = best.fragment.score
