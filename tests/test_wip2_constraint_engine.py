@@ -148,12 +148,22 @@ def test_wide_decoys_use_batched_additive_hub_frontier():
     assert discovery["additive_hub_fallback"] is True
 
 
-def test_wide_additive_hubs_enter_the_first_simultaneous_frontier():
+def test_wide_additive_hubs_enter_one_simultaneous_frontier(monkeypatch):
     matrix = make_rich_wip(n=160, decoys=88)
+    original = wip2._estimate_fragments
+    calls = 0
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(wip2, "_estimate_fragments", counted)
 
     result = wip2.validate_wip(matrix, labels(matrix))
 
     assert result.status == wip.SUCCESS
+    assert calls == 1
     assert result.mapping == {
         0: "V",
         1: "C",
@@ -238,10 +248,59 @@ def test_digit_shape_classification_survives_graph_repair():
     assert finding.classification == "dropped_character"
 
 
-def test_neighbor_transplant_classification_uses_original_table_context():
+@pytest.mark.parametrize(
+    ("observed", "residual_proposal", "classification"),
+    (
+        (39_003.98, 390_003.9793560256, "dropped_character"),
+        (123_465.78, 123_456.7793560256, "digit_transposition"),
+    ),
+)
+def test_money_corrections_are_quantized_before_classification(
+    observed,
+    residual_proposal,
+    classification,
+):
+    column = np.asarray([10.12, 20.34, 30.56])
+    grid = wip2._money_display_grid(column)
+    proposed = wip2._quantize_correction(residual_proposal, grid)
+
+    assert grid == 0.01
+    assert wip._classify_error(observed, proposed)[0] == classification
+
+
+@pytest.mark.parametrize(
+    ("observed", "classification"),
+    (
+        (24_706.0, "dropped_character"),
+        (244_760.0, "digit_transposition"),
+    ),
+)
+def test_public_repair_taxonomy_ignores_formula_residue(
+    observed,
+    classification,
+):
+    matrix = make_rich_wip(n=28, decoys=0)
+    matrix[5, 4] = observed
+
+    result = wip2.validate_wip(matrix, labels(matrix))
+    finding = next(
+        finding for finding in result.findings
+        if finding.row_index == 5
+    )
+
+    assert finding.proposed_correction == 244_706.0
+    assert finding.classification == classification
+
+
+@pytest.mark.parametrize("incomplete_before", (False, True))
+def test_neighbor_transplant_classification_uses_original_table_context(
+    incomplete_before,
+):
     matrix = make_rich_wip(n=28, decoys=0)
     row = 7
     matrix[row, 3] = matrix[row - 1, 3]
+    if incomplete_before:
+        matrix[2, 2] = np.nan
 
     result = wip2.validate_wip(matrix, labels(matrix))
 

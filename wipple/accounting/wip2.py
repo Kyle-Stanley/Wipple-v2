@@ -1058,6 +1058,22 @@ def _extend_fragment(
     return sorted(ranked, key=lambda fragment: fragment.rank)[:limit]
 
 
+def _primary_estimate_hubs(ctx: RunContext) -> list[int]:
+    table = ctx.table
+    positive = _robust_prior(
+        table.positive[:, table.sample_index],
+        ctx.cfg,
+    )
+    return sorted(
+        (
+            int(column)
+            for column in table.representatives
+            if positive[column]
+        ),
+        key=lambda column: (-table.median_abs[column], column),
+    )[: ctx.cfg.motif_hubs]
+
+
 def _estimate_fragments(
     ctx: RunContext,
     hub_candidates: Optional[Iterable[int]] = None,
@@ -1067,25 +1083,20 @@ def _estimate_fragments(
     reps = table.representatives
     sample = table.sample_index
     raw = table.raw[:, sample]
-    sufficiently_positive = _robust_prior(
+    positive = _robust_prior(
         table.positive[:, sample],
         cfg,
     )
-    if hub_candidates is None:
-        hubs = sorted(
-            (
-                int(column)
-                for column in reps
-                if sufficiently_positive[column]
-            ),
-            key=lambda column: (-table.median_abs[column], column),
-        )[: cfg.motif_hubs]
-    else:
-        hubs = [
-            int(column)
-            for column in hub_candidates
-            if sufficiently_positive[int(column)]
-        ]
+    hub_candidates = (
+        _primary_estimate_hubs(ctx)
+        if hub_candidates is None
+        else hub_candidates
+    )
+    hubs = [
+        int(column)
+        for column in hub_candidates
+        if positive[int(column)]
+    ]
     allowed = _allowed_bad(sample.size, cfg)
     candidates = []
     if not hubs or reps.size < 3:
@@ -1625,27 +1636,20 @@ def _discover_states(
                 ident_frac=ctx.cfg.shadow_audit_frac,
             ),
         )
-    estimates = _estimate_fragments(ctx)
-    fallback_used = False
     use_additive_hubs = (
         broaden
         or ctx.table.representatives.size
         > max(20, ctx.cfg.motif_hubs * 4)
     )
-    if use_additive_hubs:
-        fallback_estimates = _estimate_fragments(
-            ctx,
-            _additive_hub_fallback(ctx),
-        )
-        estimates_by_key = {
-            fragment.assignments: fragment
-            for fragment in (*estimates, *fallback_estimates)
-        }
-        estimates = sorted(
-            estimates_by_key.values(),
-            key=lambda fragment: fragment.rank,
-        )[: ctx.cfg.estimate_fragments]
-        fallback_used = bool(fallback_estimates)
+    primary_hubs = _primary_estimate_hubs(ctx)
+    fallback_hubs = (
+        _additive_hub_fallback(ctx)
+        if use_additive_hubs
+        else []
+    )
+    hubs = tuple(dict.fromkeys((*primary_hubs, *fallback_hubs)))
+    estimates = _estimate_fragments(ctx, hubs)
+    fallback_used = bool(fallback_hubs)
     estimate_proposals = len(estimates)
     estimate_frontier = estimates
     if estimates and not exhaustive:
@@ -2929,6 +2933,26 @@ def _minimal_row_repair(
     return "none", []
 
 
+def _money_display_grid(values: np.ndarray) -> float:
+    """Infer decimal display precision; fall back to ordinary cents."""
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    for grid in (1.0, 0.1, 0.01, 0.001, 0.0001):
+        rounded = np.round(finite / grid) * grid
+        if np.all(
+            np.abs(finite - rounded)
+            <= 1e-9 + 1e-9 * np.abs(finite)
+        ):
+            return grid
+    return 0.01
+
+
+def _quantize_correction(proposed: float, grid: Optional[float]) -> float:
+    if grid is None or grid <= 0:
+        return proposed
+    return float(round(proposed / grid) * grid)
+
+
 def _unresolved_finding(
     row: int,
     label: str,
@@ -2984,6 +3008,7 @@ def _diagnose(
         full_matrix[:, column]
         for column in range(full_matrix.shape[1])
     ]
+    money_grids: dict[int, float] = {}
     for row, row_failures in sorted(by_row.items()):
         status, detail = _minimal_row_repair(
             graph,
@@ -2999,9 +3024,21 @@ def _diagnose(
             }
             for correction in detail:
                 variable = correction["variable"]
+                column = int(correction["column"])
                 scale = physical[variable].scale
                 observed = correction["observed"] * scale
-                proposed = correction["proposed"] * scale
+                grid = (
+                    physical[variable].grid
+                    if variable in PCT_VARS
+                    else money_grids.setdefault(
+                        column,
+                        _money_display_grid(full_columns[column]),
+                    )
+                )
+                proposed = (
+                    _quantize_correction(correction["proposed"], grid)
+                    * scale
+                )
                 classification, classification_detail = _classify_error(
                     observed,
                     proposed,
@@ -3035,7 +3072,7 @@ def _diagnose(
                 transplant_sources = _transplant_sources(
                     full_columns,
                     row,
-                    int(correction["column"]),
+                    column,
                     observed,
                 )
                 if (
