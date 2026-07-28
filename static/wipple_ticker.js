@@ -2,6 +2,7 @@
   const PHRASES = ["Watch me wipple", "now watch me nay nayle"];
   const INTERVAL_MS = 2500;
   let phraseIndex = 0;
+  let ticker = null;
 
   const processingVisible = () => {
     const section = document.querySelector("#processing");
@@ -47,26 +48,36 @@
     }
   };
 
-  const originalAddLine = addLine;
-  addLine = () => showPhrase();
+  const stopTicker = () => {
+    if (ticker !== null) clearInterval(ticker);
+    ticker = null;
+    phraseIndex = 0;
+  };
+
+  const startTicker = () => {
+    if (!processingVisible()) return;
+    if (ticker === null) {
+      phraseIndex = 0;
+      showPhrase();
+      ticker = setInterval(() => {
+        if (!processingVisible()) {
+          stopTicker();
+          return;
+        }
+        phraseIndex = (phraseIndex + 1) % PHRASES.length;
+        showPhrase();
+      }, INTERVAL_MS);
+      return;
+    }
+    showPhrase();
+  };
+
+  addLine = () => startTicker();
 
   const originalUpdateBatchLane = updateBatchLane;
   updateBatchLane = i => {
     originalUpdateBatchLane(i);
     const item = BATCH_ITEMS[i];
-    if (item?.status === "processing") showPhrase();
+    if (item?.status === "processing") startTicker();
   };
-
-  setInterval(() => {
-    if (!processingVisible()) {
-      phraseIndex = 0;
-      return;
-    }
-    phraseIndex = (phraseIndex + 1) % PHRASES.length;
-    showPhrase();
-  }, INTERVAL_MS);
-
-  // The first server progress event arrives immediately; keep the initial
-  // phrase visible instead of waiting for the first 2.5-second interval.
-  void originalAddLine;
 })();
