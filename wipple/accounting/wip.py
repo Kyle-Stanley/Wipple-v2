@@ -218,6 +218,14 @@ class Config:
     # top-ranked placements are peeled initially.  The search widens only if
     # that batch fails to produce a validatable hypothesis.
     anchor_rank_global_keep: int = 8
+    # Common-case billing-position fast path. Split under/overbillings have
+    # mutually exclusive nonzero support (with any number of shared-zero,
+    # exactly-billed rows). This is a ranking prior only: every proposed anchor
+    # placement still goes through the ordinary peel and strict certification,
+    # and the existing global search remains the fallback.
+    billing_fast_path: bool = True
+    billing_motif_keep: int = 8
+    billing_fast_path_pairs: int = 4
 
 
 # ---------------------------------------------------------------------------
@@ -881,16 +889,87 @@ def _semantic_key(known):
 # ---------------------------------------------------------------------------
 
 def _v_candidates(cols, finite, cfg, shortlist):
+    """Rank the portfolio-scale normalization axis before broader search.
+
+    Contract value is normally the dominant positive money vector across an
+    entire WIP. Rowwise dominance is more robust than a raw maximum or total:
+    one malformed giant cell cannot outrank a column that is largest on nearly
+    every job. This remains a shortlist prior and expands on failure.
+    """
+    matrix = np.vstack([c[finite] for c in cols])
+    if matrix.shape[1] == 0:
+        return []
+    positive = np.maximum(matrix, 0.0)
+    row_max = positive.max(axis=0)
+    row_tol = cfg.money_obs_tol + cfg.cert_money_rel * np.abs(row_max)
     scored = []
-    for j, c in enumerate(cols):
-        x = c[finite]
+    for j, x in enumerate(matrix):
         pos = x[x > 0]
         if pos.size < max(cfg.min_rows, int(np.ceil(0.5 * max(1, x.size)))):
             continue
-        scored.append((j, float(np.median(pos))))
-    scored.sort(key=lambda t: -t[1])
+        dominance = float((x >= row_max - row_tol).mean())
+        score = (dominance, float(np.median(pos)), float(pos.sum()))
+        scored.append((j, score))
+    scored.sort(key=lambda t: t[1], reverse=True)
     ranked = [j for j, _ in scored]
     return ranked[:cfg.v_shortlist] if shortlist else ranked
+
+
+def _billing_motif_workspace(cols, finite, cfg):
+    """Find cheap split-U/O motifs from mutually exclusive nonzero support.
+
+    Shared-zero rows are valid exactly-billed jobs and carry N=0. A few rows
+    with both sides nonzero are tolerated under the same robust allowance used
+    by identification. Both U/O orientations are retained because presentation
+    signs and physical order are not semantic evidence.
+    """
+    if not cfg.billing_fast_path or len(cols) < 2:
+        return []
+    row_index = np.nonzero(finite)[0]
+    if row_index.size < cfg.min_rows:
+        return []
+    matrix = np.vstack([np.asarray(c, dtype=float)[row_index] for c in cols])
+    active = np.abs(matrix) > cfg.money_obs_tol
+    ab = _allowed_bad(matrix.shape[1], cfg)
+    motifs = []
+    for a in range(matrix.shape[0]):
+        a_info = int(active[a].sum())
+        if a_info < cfg.min_informative_rows:
+            continue
+        for b in range(a + 1, matrix.shape[0]):
+            b_info = int(active[b].sum())
+            if b_info < cfg.min_informative_rows:
+                continue
+            overlap = int((active[a] & active[b]).sum())
+            if overlap > ab:
+                continue
+            active_rows = int((active[a] | active[b]).sum())
+            quality = (-overlap, active_rows, min(a_info, b_info),
+                       -abs(a_info - b_info))
+            av = np.abs(np.asarray(cols[a], dtype=float))
+            bv = np.abs(np.asarray(cols[b], dtype=float))
+            motifs.append({
+                "columns": (a, b),
+                "nets": (av - bv, bv - av),
+                "overlap": overlap,
+                "active_rows": active_rows,
+                "quality": quality,
+            })
+    motifs.sort(key=lambda item: item["quality"], reverse=True)
+    return motifs[:cfg.billing_motif_keep]
+
+
+def _slice_billing_motifs(motifs, row_index):
+    return [
+        {
+            "columns": motif["columns"],
+            "nets": tuple(net[row_index] for net in motif["nets"]),
+            "overlap": motif["overlap"],
+            "active_rows": motif["active_rows"],
+            "quality": motif["quality"],
+        }
+        for motif in motifs
+    ]
 
 
 def _x_candidates(cols, vcol, finite, cfg, diag):
@@ -1239,8 +1318,69 @@ def _rank_pair_score(records, dcol, bcol, m, cfg):
     return rank, detail
 
 
+def _rank_billing_motif_pairs(cols_m, d_cache, pairs, motifs,
+                                vcol, xcol, cfg):
+    """Rank D/B placements by a precomputed split billing-position motif.
+
+    This does not create evidence. It only asks whether the E implied by a D
+    candidate and a physical B candidate reproduce N = |U| - |O| on all but
+    the robustly allowed rows. The selected placement is still rebuilt by the
+    ordinary peeler and certified from its independent accounting cycles.
+    """
+    if not motifs or not pairs:
+        return []
+    m = cols_m[0].size
+    ab = _allowed_bad(m, cfg)
+    ranked = []
+    for dcol, bcol in pairs:
+        known, _ = d_cache[dcol]
+        earned, earned_tol = known["E"]
+        predicted_net = earned - cols_m[bcol]
+        strict = (earned_tol + 3.0 * cfg.money_obs_tol + cfg.cert_slack
+                  + cfg.cert_money_rel * np.abs(predicted_net))
+        loose = strict + np.maximum(
+            cfg.ident_abs, cfg.ident_rel * np.abs(predicted_net))
+        best = None
+        used = {vcol, xcol, dcol, bcol}
+        for motif in motifs:
+            if used & set(motif["columns"]):
+                continue
+            for orientation, net in enumerate(motif["nets"]):
+                resid = np.abs(predicted_net - net)
+                bad = int((resid > loose).sum())
+                if bad > ab:
+                    continue
+                strict_bad = int((resid > strict).sum())
+                clipped = float(np.minimum(resid, loose).sum())
+                denom = max(1.0, float(np.abs(predicted_net).sum()))
+                norm = clipped / denom
+                rank = (m - bad, m - strict_bad,
+                        int(motif["active_rows"]),
+                        -int(motif["overlap"]), -norm)
+                if best is None or rank > best[0]:
+                    best = (rank, motif, orientation, bad, strict_bad, norm)
+        if best is None:
+            continue
+        rank, motif, orientation, bad, strict_bad, norm = best
+        ranked.append((rank, dcol, bcol, {
+            "stage": "billing_motif_fast_path",
+            "d": int(dcol), "b": int(bcol),
+            "u_o_columns": [int(x) for x in motif["columns"]],
+            "orientation": int(orientation),
+            "bad_rows": int(bad),
+            "strict_bad_rows": int(strict_bad),
+            "active_rows": int(motif["active_rows"]),
+            "overlap_rows": int(motif["overlap"]),
+            "normalized_residual": float(norm),
+            "rank": [float(x) for x in rank],
+        }))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return ranked
+
+
 def _rank_anchor_context(cols_m, Vm, Cm, vcol, xcol, orient,
-                         d_candidates, b_candidates, pairs, cfg):
+                         d_candidates, b_candidates, pairs, cfg,
+                         billing_motifs=None):
     """Prepare fast initial pairs and a correctness fallback for a wide WIP.
 
     When both anchors independently regenerate downstream columns, the initial
@@ -1271,13 +1411,18 @@ def _rank_anchor_context(cols_m, Vm, Cm, vcol, xcol, orient,
             key=lambda p: (d_score_map[p[0]], b_score_map[p[1]]),
             reverse=True)[:cfg.max_anchor_pairs]
 
+    motif_pairs = filtered if filtered else pairs
+    billing_ranked = _rank_billing_motif_pairs(
+        cols_m, d_cache, motif_pairs, billing_motifs or [],
+        vcol, xcol, cfg)
+
     return {
         "ws": ws, "shared": shared,
         "d_cache": d_cache, "b_cache": b_cache,
         "d_scores": d_scores, "b_scores": b_scores,
         "d_strong": d_strong, "b_strong": b_strong,
         "filtered": filtered, "all_pairs": pairs,
-        "initial": initial,
+        "initial": initial, "billing_ranked": billing_ranked,
     }
 
 
@@ -1347,6 +1492,8 @@ def _build_hypothesis(cols_m, row_index, vcol, xcol, orient, dcol, bcol, cfg):
 def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
     by_key = {}
     wide_contexts = []
+    billing_motifs = _billing_motif_workspace(cols, finite, cfg)
+    diag["billing_motif_candidates"] = len(billing_motifs)
 
     def evaluate(context, pairs):
         for dcol, bcol in pairs:
@@ -1387,6 +1534,8 @@ def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
                 "cols_m": cols_m, "row_index": row_index,
                 "vcol": vcol, "xcol": xcol, "orient": orient,
                 "Vm": Vm, "Cm": Cm,
+                "billing_motifs": _slice_billing_motifs(
+                    billing_motifs, row_index),
             }
             if len(pairs) <= cfg.max_anchor_pairs:
                 evaluate(context, pairs)
@@ -1394,7 +1543,7 @@ def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
 
             ranked_ctx = _rank_anchor_context(
                 cols_m, Vm, Cm, vcol, xcol, orient,
-                d_c, b_c, pairs, cfg)
+                d_c, b_c, pairs, cfg, context["billing_motifs"])
             context["ranked"] = ranked_ctx
             wide_contexts.append(context)
             diag["notes"].append(
@@ -1418,6 +1567,37 @@ def _enumerate_hypotheses(cols, finite, cfg, diag, shortlist):
 
     if not wide_contexts:
         return by_key
+
+    # Common split-U/O fast pass. The motif only ranks candidates; each chosen
+    # placement is still fully peeled. If none validates, the existing global
+    # pair ranking and progressive widening run unchanged.
+    billing_global = []
+    for context in wide_contexts:
+        for rank, dcol, bcol, detail in context["ranked"]["billing_ranked"]:
+            billing_global.append((rank, context, dcol, bcol, detail))
+    billing_global.sort(key=lambda item: item[0], reverse=True)
+    if billing_global:
+        top_rank = billing_global[0][0]
+        selected = [item for item in billing_global if item[0] == top_rank]
+        selected = selected[:cfg.billing_fast_path_pairs]
+        grouped = {}
+        for _, context, dcol, bcol, _ in selected:
+            grouped.setdefault(id(context), (context, []))[1].append(
+                (dcol, bcol))
+        for context, pairs in grouped.values():
+            evaluate(context, pairs)
+        diag["billing_fast_path"] = {
+            "ranked_pairs": int(len(billing_global)),
+            "peeled_pairs": int(len(selected)),
+            "top": [
+                dict(item[4], v_col=int(item[1]["vcol"]),
+                     x_col=int(item[1]["xcol"]),
+                     orientation=item[1]["orient"])
+                for item in selected[:5]
+            ],
+        }
+        if has_validatable():
+            return by_key
 
     # Pair-dependent N/U/O scoring is inexpensive compared with a full peel.
     # Pool every wide V/estimate context into ONE ranking so a wrong context
