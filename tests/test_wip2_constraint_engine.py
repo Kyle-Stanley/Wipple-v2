@@ -66,6 +66,20 @@ def test_rich_graph_matches_current_public_result_and_records_redundancy():
     assert cache["derived_hits"] > 0
 
 
+def test_complete_common_motif_skips_redundant_virtual_closure():
+    matrix = make_rich_wip(n=48, decoys=0)
+    cfg = wip2.Config()
+    table = wip2.PreparedTable.build(matrix, cfg)
+    ctx = wip2.RunContext(table, cfg)
+    fragments, _ = wip2._discover_states(ctx)
+
+    closed = wip2._close_unique_states(ctx, fragments)
+
+    assert len(closed) == 1
+    assert len(closed[0].column_to_var) == len(table.representatives)
+    assert closed[0].derived_values == 0
+
+
 def test_header_blind_mapping_survives_arbitrary_column_order():
     matrix = make_wip(n=24)
     order = np.asarray([9, 4, 12, 2, 7, 14, 0, 11, 5, 1, 13, 8, 6, 10, 3])

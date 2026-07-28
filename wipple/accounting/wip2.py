@@ -21,7 +21,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from itertools import combinations
 from operator import or_
-from functools import reduce
+from functools import lru_cache, reduce
 from typing import Callable, Iterable, Optional
 
 import numpy as np
@@ -140,6 +140,7 @@ class Identity:
     variables: tuple[str, ...]
     region: str
     derivations: tuple[Derivation, ...]
+    verification_outputs: tuple[str, ...] = ()
 
 
 def _derivation(
@@ -228,6 +229,7 @@ def _registry() -> tuple[Identity, ...]:
                 D("billing_split", "E", ("B", "U", "O"), lambda B, U, O: B + U - O, _tol_sum),
                 D("billing_split", "B", ("E", "U", "O"), lambda E, U, O: E - U + O, _tol_sum),
             ),
+            ("U", "O"),
         ),
         Identity(
             "backlog",
@@ -406,9 +408,17 @@ class PreparedTable:
             >= 0.90
         )
 
-        ratio_grids = tuple(detect_grid(raw[col]) for col in range(raw.shape[0]))
+        ratio_grids = tuple(
+            detect_grid(raw[col]) if ratio_valid[col] else None
+            for col in range(raw.shape[0])
+        )
         whole_grids = tuple(
-            detect_grid(whole_percent[col]) for col in range(raw.shape[0])
+            (
+                detect_grid(whole_percent[col])
+                if whole_valid[col]
+                else None
+            )
+            for col in range(raw.shape[0])
         )
         ratio_tol = _readonly(
             np.asarray(
@@ -1145,6 +1155,41 @@ def _estimate_fragments(
     if not hubs or reps.size < 3:
         return []
 
+    # Portfolio stability orients additive triangles.  Calculate every
+    # hub/column ratio profile together instead of invoking percentile
+    # machinery once per candidate orientation.
+    hub_position = {column: index for index, column in enumerate(hubs)}
+    rep_position = {
+        int(column): index
+        for index, column in enumerate(reps)
+    }
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        ratio_profiles = (
+            raw[reps][None, :, :]
+            / raw[np.asarray(hubs, dtype=int)][:, None, :]
+        )
+    ratio_profiles = np.where(
+        np.isfinite(ratio_profiles),
+        ratio_profiles,
+        np.inf,
+    )
+    ordered_ratios = np.sort(ratio_profiles, axis=2)
+    profile_rows = ordered_ratios.shape[2]
+    middle = profile_rows // 2
+    if profile_rows % 2:
+        ratio_median = ordered_ratios[:, :, middle]
+    else:
+        ratio_median = (
+            ordered_ratios[:, :, middle - 1]
+            + ordered_ratios[:, :, middle]
+        ) / 2.0
+    lower = int(round(0.25 * (profile_rows - 1)))
+    upper = int(round(0.75 * (profile_rows - 1)))
+    ratio_spread = (
+        ordered_ratios[:, :, upper]
+        - ordered_ratios[:, :, lower]
+    )
+
     # Score every requested hub against the same pair-sum matrix.  Blocks
     # bound the temporary hubs × pairs × rows cube while retaining the
     # simultaneous kernel that makes wide fallback practical.
@@ -1220,19 +1265,12 @@ def _estimate_fragments(
                 (a_column, b_column),
                 (b_column, a_column),
             ):
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    ratio = (
-                        table.raw[c_column]
-                        / table.raw[v_column]
-                    )
-                finite = ratio[np.isfinite(ratio)]
-                if finite.size == 0:
+                hub_index = hub_position[v_column]
+                column_index = rep_position[c_column]
+                median = float(ratio_median[hub_index, column_index])
+                spread = float(ratio_spread[hub_index, column_index])
+                if not np.isfinite(median) or not np.isfinite(spread):
                     continue
-                median = float(np.median(finite))
-                spread = float(
-                    np.percentile(finite, 75)
-                    - np.percentile(finite, 25)
-                )
                 if (
                     cfg.cost_ratio_band[0]
                     <= median
@@ -1251,19 +1289,19 @@ def _estimate_fragments(
                     (a_column, b_column),
                     (b_column, a_column),
                 ):
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        ratio = (
-                            table.raw[c_column]
-                            / table.raw[v_column]
-                        )
-                    finite = ratio[np.isfinite(ratio)]
-                    if finite.size == 0:
-                        continue
-                    median = float(np.median(finite))
-                    spread = float(
-                        np.percentile(finite, 75)
-                        - np.percentile(finite, 25)
+                    hub_index = hub_position[v_column]
+                    column_index = rep_position[c_column]
+                    median = float(
+                        ratio_median[hub_index, column_index]
                     )
+                    spread = float(
+                        ratio_spread[hub_index, column_index]
+                    )
+                    if (
+                        not np.isfinite(median)
+                        or not np.isfinite(spread)
+                    ):
+                        continue
                     if (
                         0.35 <= median <= 1.25
                         and spread <= cfg.estimate_iqr_max
@@ -1955,6 +1993,21 @@ def _close_graph(
         )
         column_to_var[assignment.column] = assignment.variable
 
+    # A dense structural motif can already explain every representative
+    # physical column.  Virtual closure cannot discover another physical
+    # assignment in that state, and finalist analysis will independently
+    # verify the active identities.  Avoid deriving the virtual graph twice
+    # on the overwhelmingly common 10–20 column path.
+    if len(column_to_var) == int(ctx.table.representatives.size):
+        return ClosedGraph(
+            fragment=fragment,
+            known=known,
+            column_to_var=column_to_var,
+            conflicts=[],
+            derived_values=0,
+            physical_matches=0,
+        )
+
     queue = deque(known)
     evaluated: set[tuple] = set()
     pending: dict[
@@ -2125,6 +2178,7 @@ def _close_unique_states(
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=512)
 def _minimum_seed_count(
     physical_variables: tuple[str, ...],
     active_derivations: tuple[Derivation, ...],
@@ -2189,28 +2243,64 @@ def _analyse_finalist(
         0,
     )
 
-    # Numeric agreement is evaluated once.  The subsequent independence
-    # closure is Boolean provenance only.
+    # Verify each identity once, not every algebraic rearrangement.  Once the
+    # identity holds, its ready derivations are computational directions over
+    # the same fact; the subsequent independence closure is Boolean
+    # provenance only.  Clipped U/O presentation has two forward claims and
+    # therefore explicitly verifies both outputs.
     active = []
-    for derivation in DERIVATIONS:
-        if (
-            derivation.out not in graph.known
-            or not all(
-                variable in graph.known
-                for variable in derivation.inputs
+    for identity in IDENTITIES:
+        ready = [
+            derivation
+            for derivation in identity.derivations
+            if (
+                derivation.out in graph.known
+                and all(
+                    variable in graph.known
+                    for variable in derivation.inputs
+                )
             )
-        ):
+        ]
+        if not ready:
             continue
-        predicted = ctx.derive(derivation, graph.known)
-        if predicted is None:
+        if identity.verification_outputs:
+            checks = [
+                next(
+                    (
+                        derivation
+                        for derivation in ready
+                        if derivation.out == output
+                    ),
+                    None,
+                )
+                for output in identity.verification_outputs
+                if output in graph.known
+            ]
+            checks = [
+                derivation
+                for derivation in checks
+                if derivation is not None
+            ]
+        else:
+            checks = ready[:1]
+        if not checks:
             continue
-        if _values_agree(
-            predicted,
-            graph.known[derivation.out],
-            ctx.cfg,
-            robust=True,
-        ):
-            active.append(derivation)
+        verified = True
+        for derivation in checks:
+            predicted = ctx.derive(derivation, graph.known)
+            if (
+                predicted is None
+                or not _values_agree(
+                    predicted,
+                    graph.known[derivation.out],
+                    ctx.cfg,
+                    robust=True,
+                )
+            ):
+                verified = False
+                break
+        if verified:
+            active.extend(ready)
 
     independent = {
         variable: (
@@ -2298,6 +2388,12 @@ def _full_physical_values(
     ctx: RunContext,
     graph: ClosedGraph,
 ) -> dict[str, NumericValue]:
+    if ctx.table.row_index.size == ctx.table.full.shape[0]:
+        return {
+            variable: value
+            for variable, value in graph.known.items()
+            if value.column is not None
+        }
     return {
         variable: ctx.observed(
             variable,
