@@ -84,8 +84,8 @@
 
   const elapsedSeconds = rep => {
     const values = [
-      rep?.metrics?.elapsed_seconds,
       typeof DOC !== "undefined" ? DOC?.metrics?.elapsed_seconds : null,
+      rep?.metrics?.elapsed_seconds,
     ];
     return values.map(Number).find(value => Number.isFinite(value) && value > 0) || 0;
   };
