@@ -1,3 +1,27 @@
+704-        </optgroup>
+705-        <optgroup label="OpenAI">
+706-          <option value="gpt-5.6-luna">GPT-5.6 Luna · efficient</option>
+707-          <option value="gpt-5.6-terra">GPT-5.6 Terra · balanced</option>
+708-          <option value="gpt-5.6-sol">GPT-5.6 Sol · strongest</option>
+709-        </optgroup>
+710-      </select>
+711-    </div>
+712-  </div>
+713-  <p class="quiet">The sample generates a fresh 60-job schedule with five planted transcription errors, different every run. <a href="/how" style="color:var(--sage-deep)">How the math works</a></p>
+714:  <input type="file" id="file" accept=".pdf,.xlsx,.xlsm,.csv,.tsv,.png,.jpg,.jpeg,.webp" class="hidden" multiple>
+715-</section>
+716-
+717-<section id="processing" class="hidden">
+718-  <!-- The blue/green/red cycle images never shipped, so every load 404'd four
+719-       times and fell through to the text mark. One real lockup, still pulsing. -->
+720-  <div class="loader-logo" aria-hidden="true">
+721-    <img src="/static/logo/wipple-text-logo.png" alt="" onerror="this.closest('.loader-logo').classList.add('noimg')">
+722-    <span class="loader-logo-fallback mark">w<span>i</span>pple</span>
+723-  </div>
+724-  <div class="batch-progress hidden" id="batchProgress">
+--
+1442-  BILLING_TRAJECTORY_SHOW_ALL=false;
+1443-}
 1444-function runDuration(seconds){
 1445-  if(!(seconds>0))return"";
 1446-  if(seconds<60)return`${seconds.toFixed(1)}s`;
@@ -25,7 +49,11 @@
 1468-  if(!doc)return"Processing did not return a report.";
 1469-  if(doc.overall_status==="pipeline_error")
 1470-    return doc.validator_reason||"The processing pipeline stopped unexpectedly.";
+1471-  if(doc.overall_status==="extraction_failed")
+1472-    return"Could not transcribe this document.";
 --
+2437-        mism.push({header,stated:c.stated,computed:c.computed,diff:c.difference,explained});
+2438-      }
 2439-      dtd={present:true,allMatch:tc.all_match,mismatches:mism,
 2440-        allExplained:mism.length>0&&mism.every(m=>m.explained),docLevel:true};
 2441-    }
@@ -43,7 +71,11 @@
 2453-      for(const mf of (t.misalignment_findings||[])){
 2454-        rep._extra.push({st:"warn",
 2455-          label:"Page "+(mf.pages||[]).join(", ")+" was read with a column offset \u2014 repaired and re-certified",
+2456-          note:"Every row on that page was transcribed out of alignment. The identities certified a deterministic repair: one structural finding, not one per cell. Any unrecoverable cells are shown as n/a."});
+2457-      }
 --
+2583-  const jobs=rows.map((vars,i)=>({label:labels[i],...vars}));
+2584-  return{
 2585-    source:(reps[0]?.source||"WIP schedule")+` · combined ${pageLabel}`,
 2586-    overall_status:degraded
 2587-      ?(reps.some(r=>r.overall_status==="user_mapped_unverified")
@@ -61,7 +93,11 @@
 2599-  };
 2600-}
 2601-function documentAnalysisReport(){
+2602-  return combinedWipReport(currentScheduleSectionIndexes());
+2603-}
 --
+3023-    ${corrsC.length?'<button class="btn" id="reviewSource">Review source</button>':""}
+3024-    <button class="btn" id="applySel">Update figures</button>
 3025-    <span id="applyStatus" style="font-size:12.5px;color:var(--muted)"></span>
 3026-  </div>`:""}`:"";
 3027-  function corrStatus(rep,f){
@@ -85,7 +121,33 @@
 3045-    <div style="margin-top:12px">${checks.map(c=>{
 3046-      const ic=c.st==="ok"||c.st==="fixed"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
 3047-      const col=c.st==="ok"||c.st==="fixed"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
+3048-      return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
+3049-    }).join("")}</div></details>
 --
+3136-      ?"Column assignments were reviewed before calculation but could not be mathematically certified."
+3137-      :"Column names were read from headers and could not be mathematically verified. Figures below are the document's claims."}</div>`:""}
+3138-    <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
+3139-    ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
+3140-    <div class="cols">
+3141-      <div class="card"><h3>Underwriting signals <small>What stands out for underwriting? Click any job to open its analysis</small></h3>
+3142-        ${signalBody}</div>
+3143-    </div>
+3144-    ${billingTrajectoryChart(rep)}
+3145-    ${bookShape(rep)}
+3146:    <p class="foot">${footMeta(rep)}wipple does not store documents</p>`;
+3147-  $("#dash").querySelectorAll(".sigtab tbody tr[data-row]").forEach(tr=>{
+3148-    tr.onclick=()=>openWipModal(rep,+tr.dataset.row)});
+3149-  $("#dash").querySelectorAll(".time-series-section tbody tr[data-group]").forEach(tr=>{
+3150-    tr.onclick=()=>openGroupInValidatedWip(rep,tr.dataset.group)});
+3151-  $("#dash").querySelectorAll(".eub-job[data-group]").forEach(b=>{
+3152-    b.onclick=()=>openGroupInValidatedWip(rep,b.dataset.group)});
+3153-  $("#dash").querySelectorAll("#bookshape circle[data-row]").forEach(circle=>{
+3154-    const open=()=>openWipModal(rep,+circle.dataset.row);circle.onclick=open;
+3155-    circle.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}};
+3156-  });
+--
+3547-}
+3548-function modelCostBreakdown(m){
 3549-  const calls=m.by_call||[];
 3550-  if(!calls.length)return"";
 3551-  const groups=new Map();
@@ -104,7 +166,7 @@
 3564-    return`${provider}${g.name}${count} $${g.cost.toFixed(4)}`;
 3565-  }).join(" + ");
 3566-}
-3567-function footMeta(rep){
+3567:function footMeta(rep){
 3568:  const m=rep.metrics||{};const bits=[];
 3569:  if(m.elapsed_seconds!=null)bits.push(`${m.elapsed_seconds}s`);
 3570:  if(m.api_calls){
@@ -126,6 +188,26 @@
 3586-const SIG_MARK={
 3587-  trapped_cash:{color:"brick",vars:["U"],name:"Trapped cash"},
 3588-  job_borrow:{color:"amber",vars:["Q","RB","B"],name:"Job borrow"},
+3589-  loss_jobs:{color:"brick",vars:["G","M"],name:"Loss job"},
+3590-  cost_overrun:{color:"amber",vars:["D"],name:"Cost overrun"},
+--
+4382-    vals[c.row][c.col]=c.implied;applied.push(c);
+4383-  });
+4384-  const lines=[["Job",...t.columns.map(c=>c.header||c.name||c.variable||"")].map(esc).join(","),
+4385-    ...vals.map((r,i)=>[labels[i]??"",...r.map(x=>x==null?"":x)].map(esc).join(","))];
+4386-  if(applied.length){
+4387-    lines.push("");
+4388-    lines.push(esc("Corrections included in reviewed report:"));
+4389-    for(const c of applied)lines.push([c.label,(t.columns[c.col]||{}).header||"",
+4390-      "printed "+c.printed,"corrected to "+c.implied].map(esc).join(","));
+4391-  }
+4392:  const blob=new Blob([lines.join("\n")],{type:"text/csv"});
+4393-  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+4394:  a.download=(rep.source||"wip")+".validated.csv";a.click();URL.revokeObjectURL(a.href);
+4395-}
+4396-</script>
+4397-</body>
+4398-</html>
 --- ingest narration ---
 43-        return f"1 {word}"
 44-    return f"{n} {word[:-1] + 'ies' if word.endswith('y') else word + 's'}"
