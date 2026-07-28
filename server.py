@@ -53,9 +53,7 @@ def _narrate(node: str, up: dict, state: dict) -> list[str]:
                     f"{len(f['headers'])} columns, no vision model needed"]
         n = len(up.get("chunks") or [])
         if n:
-            kind = state.get("media_type", "")
-            unit = "strip" if str(kind).startswith("image/") else "page"
-            return [f"Document split into {_plural(n, unit)}"]
+            return ["Reading schedule"]
         return []
     if node == "extract_chunks":
         frs = up.get("fragments") or []

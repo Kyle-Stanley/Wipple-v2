@@ -1176,8 +1176,10 @@ async function stream(url,opts){
   show("processing");$("#batchProgress").classList.add("hidden");hideBatchLanes();
   $("#log").innerHTML="";
   RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
+  const startedAt=performance.now();
   try{
     const doc=await readStream(url,opts);
+    attachClientElapsed(doc,(performance.now()-startedAt)/1000);
     RUNNING=false;finishProgressLine();
     setTimeout(()=>render(doc),650);
   }catch(e){
@@ -1447,6 +1449,21 @@ function runDuration(seconds){
   const m=Math.floor(seconds/60);
   return`${m}m ${Math.round(seconds-60*m)}s`;
 }
+/* CSV runs do not make a model call, so the backend has no model elapsed time
+   to report. Fill only that blank with the browser wall clock; model-backed
+   reports keep their existing backend duration. Apply it to every section so
+   the same footer works for single documents and batch review. */
+function attachClientElapsed(doc,seconds){
+  if(!doc||!(seconds>0))return doc;
+  const apply=rep=>{
+    if(!rep||typeof rep!=="object")return;
+    rep.metrics=rep.metrics||{};
+    if(!(+(rep.metrics.elapsed_seconds)>0))rep.metrics.elapsed_seconds=seconds;
+  };
+  apply(doc);
+  (doc.tables||[]).forEach(t=>(t.sections||[]).forEach(s=>apply(s.report)));
+  return doc;
+}
 /* One reference line under the batch: what the whole upload cost in time and
    money. The elapsed figure is the batch's wall clock -- summing the
    documents' own elapsed_seconds would double-count the overlap they were
@@ -1535,11 +1552,13 @@ async function scanBatch(files){
       const i=next++,item=BATCH_ITEMS[i];
       item.status="processing";item.line="Reading and validating schedule";
       running++;updateBatchLane(i);tick();
+      const itemStartedAt=performance.now();
       const fd=new FormData();fd.append("file",item.file);
       if(model)fd.append("model",model);
       try{
         item.doc=await readStream(API+"/api/scan",{method:"POST",body:fd},
           message=>{item.line=message;updateBatchLane(i);});
+        attachClientElapsed(item.doc,(performance.now()-itemStartedAt)/1000);
         item.error=batchDocError(item.doc);
         item.status=item.error?"failed":"ready";
         if(item.status==="ready")initBatchMetadata(item);
