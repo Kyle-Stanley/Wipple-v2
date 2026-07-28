@@ -18,7 +18,7 @@ A/B-tested without changing their callers.  The old validator is not invoked.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations
 from operator import or_
 from functools import lru_cache, reduce
@@ -39,6 +39,10 @@ from .wip import (
     RowFailure,
     ValidationResult,
     Witness,
+    _allowed_bad,
+    _classify_error,
+    _ingest,
+    _transplant_sources,
     detect_grid,
     render_report,
 )
@@ -47,13 +51,10 @@ PCT_VARS = frozenset({"M", "P", "PB"})
 VAR_ORDER = tuple(VAR_NAMES)
 VAR_INDEX = {var: i for i, var in enumerate(VAR_ORDER)}
 VAR_BIT = {var: 1 << i for i, var in enumerate(VAR_ORDER)}
-ESTIMATE_REGION = frozenset({"V", "C", "G", "M"})
-PROGRESS_REGION = frozenset({"D", "Q", "P", "E", "H", "R"})
-BILLING_REGION = frozenset({"B", "N", "U", "O", "RB", "PB"})
 REGIONS = {
-    "estimate": ESTIMATE_REGION,
-    "progress": PROGRESS_REGION,
-    "billing": BILLING_REGION,
+    "estimate": frozenset({"V", "C", "G", "M"}),
+    "progress": frozenset({"D", "Q", "P", "E", "H", "R"}),
+    "billing": frozenset({"B", "N", "U", "O", "RB", "PB"}),
 }
 
 
@@ -131,16 +132,16 @@ class Derivation:
     fn: ArrayFn
     tol_fn: TolFn
     kind: str = "money"
-    clipped: bool = False
 
 
 @dataclass(frozen=True)
 class Identity:
     id: str
     variables: tuple[str, ...]
-    region: str
     derivations: tuple[Derivation, ...]
     verification_outputs: tuple[str, ...] = ()
+    evidence: bool = True
+    statement: str = ""
 
 
 def _derivation(
@@ -150,8 +151,6 @@ def _derivation(
     fn: ArrayFn,
     tol_fn: TolFn,
     kind: str = "money",
-    *,
-    clipped: bool = False,
 ) -> Derivation:
     return Derivation(
         id=f"{out}_from_{'_'.join(inputs)}",
@@ -161,150 +160,165 @@ def _derivation(
         fn=fn,
         tol_fn=tol_fn,
         kind=kind,
-        clipped=clipped,
+    )
+
+
+def _additive_identity(
+    identity: str,
+    variables: tuple[str, str, str],
+    total: str,
+    left: str,
+    right: str,
+    statement: str,
+) -> Identity:
+    formulas = {
+        total: ((left, right), np.add),
+        left: ((total, right), np.subtract),
+        right: ((total, left), np.subtract),
+    }
+    return Identity(
+        identity,
+        variables,
+        tuple(
+            _derivation(
+                identity,
+                out,
+                formulas[out][0],
+                formulas[out][1],
+                _tol_sum,
+            )
+            for out in variables
+        ),
+        statement=statement,
+    )
+
+
+def _ratio_identity(
+    identity: str,
+    ratio: str,
+    numerator: str,
+    denominator: str,
+    statement: str,
+) -> Identity:
+    return Identity(
+        identity,
+        (ratio, numerator, denominator),
+        (
+            _derivation(
+                identity, ratio, (numerator, denominator),
+                np.divide, _tol_div, "pct",
+            ),
+            _derivation(
+                identity, numerator, (denominator, ratio),
+                np.multiply, _tol_mul,
+            ),
+            _derivation(
+                identity, denominator, (numerator, ratio),
+                np.divide, _tol_div,
+            ),
+        ),
+        statement=statement,
+    )
+
+
+def _product_identity(
+    identity: str,
+    variables: tuple[str, ...],
+    left: tuple[str, str],
+    right: tuple[str, str],
+    outputs: tuple[str, ...],
+    statement: str,
+    *,
+    evidence: bool = True,
+) -> Identity:
+    a, b = left
+    c, d = right
+    formulas = {
+        a: (c, d, b),
+        b: (c, d, a),
+        c: (a, b, d),
+        d: (a, b, c),
+    }
+    return Identity(
+        identity,
+        variables,
+        tuple(
+            _derivation(
+                identity,
+                out,
+                formulas[out],
+                lambda x, y, z: x * y / z,
+                _tol_mul_div,
+            )
+            for out in outputs
+        ),
+        evidence=evidence,
+        statement=statement,
     )
 
 
 def _registry() -> tuple[Identity, ...]:
-    D = _derivation
+    additive = _additive_identity
+    ratio = _ratio_identity
+    product = _product_identity
     return (
-        Identity(
-            "estimate_complement",
-            ("V", "C", "G"),
-            "estimate",
-            (
-                D("estimate_complement", "V", ("C", "G"), lambda C, G: C + G, _tol_sum),
-                D("estimate_complement", "C", ("V", "G"), lambda V, G: V - G, _tol_sum),
-                D("estimate_complement", "G", ("V", "C"), lambda V, C: V - C, _tol_sum),
-            ),
+        additive("estimate_complement", ("V", "C", "G"), "V", "C", "G", "V = C + G"),
+        additive("cost_completion", ("C", "D", "Q"), "C", "D", "Q", "C = D + Q"),
+        product(
+            "earned_revenue", ("E", "V", "D", "C"), ("E", "C"),
+            ("V", "D"), ("E", "D", "C", "V"), "E x C = V x D",
         ),
-        Identity(
-            "cost_completion",
-            ("C", "D", "Q"),
-            "progress",
-            (
-                D("cost_completion", "C", ("D", "Q"), lambda D, Q: D + Q, _tol_sum),
-                D("cost_completion", "D", ("C", "Q"), lambda C, Q: C - Q, _tol_sum),
-                D("cost_completion", "Q", ("C", "D"), lambda C, D: C - D, _tol_sum),
-            ),
+        additive("earned_profit", ("H", "E", "D"), "E", "H", "D", "H = E - D"),
+        product(
+            "earned_profit_margin", ("H", "G", "D", "C"), ("H", "C"),
+            ("G", "D"), ("H", "D", "G", "C"), "H x C = G x D",
+            evidence=False,
         ),
-        Identity(
-            "earned_revenue",
-            ("E", "V", "D", "C"),
-            "progress",
-            (
-                D("earned_revenue", "E", ("V", "D", "C"), lambda V, D, C: V * D / C, _tol_mul_div),
-                D("earned_revenue", "D", ("E", "C", "V"), lambda E, C, V: E * C / V, _tol_mul_div),
-                D("earned_revenue", "C", ("V", "D", "E"), lambda V, D, E: V * D / E, _tol_mul_div),
-                D("earned_revenue", "V", ("E", "C", "D"), lambda E, C, D: E * C / D, _tol_mul_div),
-            ),
-        ),
-        Identity(
-            "earned_profit",
-            ("H", "E", "D"),
-            "progress",
-            (
-                D("earned_profit", "H", ("E", "D"), lambda E, D: E - D, _tol_sum),
-                D("earned_profit", "E", ("H", "D"), lambda H, D: H + D, _tol_sum),
-                D("earned_profit", "D", ("E", "H"), lambda E, H: E - H, _tol_sum),
-            ),
-        ),
-        Identity(
-            "net_billing",
-            ("N", "E", "B"),
-            "billing",
-            (
-                D("net_billing", "N", ("E", "B"), lambda E, B: E - B, _tol_sum),
-                D("net_billing", "E", ("N", "B"), lambda N, B: N + B, _tol_sum),
-                D("net_billing", "B", ("E", "N"), lambda E, N: E - N, _tol_sum),
-            ),
-        ),
+        additive("net_billing", ("N", "E", "B"), "E", "N", "B", "N = E - B"),
         Identity(
             "billing_split",
             ("E", "B", "U", "O"),
-            "billing",
             (
-                D("billing_split", "U", ("E", "B"), lambda E, B: np.maximum(E - B, 0.0), _tol_sum, clipped=True),
-                D("billing_split", "O", ("E", "B"), lambda E, B: np.maximum(B - E, 0.0), _tol_sum, clipped=True),
-                D("billing_split", "E", ("B", "U", "O"), lambda B, U, O: B + U - O, _tol_sum),
-                D("billing_split", "B", ("E", "U", "O"), lambda E, U, O: E - U + O, _tol_sum),
+                _derivation(
+                    "billing_split", "U", ("E", "B"),
+                    lambda E, B: np.maximum(E - B, 0.0), _tol_sum,
+                ),
+                _derivation(
+                    "billing_split", "O", ("E", "B"),
+                    lambda E, B: np.maximum(B - E, 0.0), _tol_sum,
+                ),
+                _derivation(
+                    "billing_split", "E", ("B", "U", "O"),
+                    lambda B, U, O: B + U - O, _tol_sum,
+                ),
+                _derivation(
+                    "billing_split", "B", ("E", "U", "O"),
+                    lambda E, U, O: E - U + O, _tol_sum,
+                ),
             ),
             ("U", "O"),
+            statement="U/O = split(E - B)",
         ),
-        Identity(
-            "backlog",
-            ("R", "V", "E"),
-            "progress",
-            (
-                D("backlog", "R", ("V", "E"), lambda V, E: V - E, _tol_sum),
-                D("backlog", "V", ("R", "E"), lambda R, E: R + E, _tol_sum),
-                D("backlog", "E", ("V", "R"), lambda V, R: V - R, _tol_sum),
-            ),
-        ),
-        Identity(
-            "remaining_billings",
-            ("RB", "V", "B"),
-            "billing",
-            (
-                D("remaining_billings", "RB", ("V", "B"), lambda V, B: V - B, _tol_sum),
-                D("remaining_billings", "V", ("RB", "B"), lambda RB, B: RB + B, _tol_sum),
-                D("remaining_billings", "B", ("V", "RB"), lambda V, RB: V - RB, _tol_sum),
-            ),
-        ),
-        Identity(
-            "margin",
-            ("M", "G", "V"),
-            "estimate",
-            (
-                D("margin", "M", ("G", "V"), lambda G, V: G / V, _tol_div, "pct"),
-                D("margin", "G", ("V", "M"), lambda V, M: V * M, _tol_mul),
-                D("margin", "V", ("G", "M"), lambda G, M: G / M, _tol_div),
-            ),
-        ),
-        Identity(
-            "percent_complete_cost",
-            ("P", "D", "C"),
-            "progress",
-            (
-                D("percent_complete_cost", "P", ("D", "C"), lambda D, C: D / C, _tol_div, "pct"),
-                D("percent_complete_cost", "D", ("C", "P"), lambda C, P: C * P, _tol_mul),
-                D("percent_complete_cost", "C", ("D", "P"), lambda D, P: D / P, _tol_div),
-            ),
-        ),
-        Identity(
-            "percent_complete_revenue",
-            ("P", "E", "V"),
-            "progress",
-            (
-                D("percent_complete_revenue", "P", ("E", "V"), lambda E, V: E / V, _tol_div, "pct"),
-                D("percent_complete_revenue", "E", ("V", "P"), lambda V, P: V * P, _tol_mul),
-                D("percent_complete_revenue", "V", ("E", "P"), lambda E, P: E / P, _tol_div),
-            ),
-        ),
-        Identity(
-            "percent_billed",
-            ("PB", "B", "V"),
-            "billing",
-            (
-                D("percent_billed", "PB", ("B", "V"), lambda B, V: B / V, _tol_div, "pct"),
-                D("percent_billed", "B", ("V", "PB"), lambda V, PB: V * PB, _tol_mul),
-                D("percent_billed", "V", ("B", "PB"), lambda B, PB: B / PB, _tol_div),
-            ),
-        ),
+        additive("backlog", ("R", "V", "E"), "V", "R", "E", "R = V - E"),
+        additive("remaining_billings", ("RB", "V", "B"), "V", "RB", "B", "RB = V - B"),
+        ratio("margin", "M", "G", "V", "M = G / V"),
+        ratio("percent_complete_cost", "P", "D", "C", "P = D / C"),
+        ratio("percent_complete_revenue", "P", "E", "V", "P = E / V"),
+        ratio("percent_billed", "PB", "B", "V", "PB = B / V"),
     )
 
 
 IDENTITIES = _registry()
-DERIVATIONS = tuple(
-    derivation
+DERIVATION_BY_ID = {
+    derivation.id: derivation
     for identity in IDENTITIES
     for derivation in identity.derivations
-)
-DERIVATION_BY_ID = {derivation.id: derivation for derivation in DERIVATIONS}
+}
+IDENTITY_BY_ID = {identity.id: identity for identity in IDENTITIES}
 WAITING_ON = {
     var: tuple(
         derivation
-        for derivation in DERIVATIONS
+        for derivation in DERIVATION_BY_ID.values()
         if var in derivation.inputs
     )
     for var in VAR_ORDER
@@ -322,44 +336,6 @@ def _readonly(values: np.ndarray) -> np.ndarray:
     return array
 
 
-def _ingest(columns, job_labels):
-    if columns is None:
-        raise InputShapeError("columns is None")
-    if isinstance(columns, np.ndarray):
-        if columns.ndim != 2:
-            raise InputShapeError(
-                "expected a 2-D array of shape (rows, cols); "
-                f"got ndim={columns.ndim}"
-            )
-        matrix = np.asarray(columns, dtype=float)
-    else:
-        arrays = []
-        for index, column in enumerate(columns):
-            array = np.asarray(column, dtype=float)
-            if array.ndim != 1:
-                raise InputShapeError(
-                    f"column {index} is not 1-D (ndim={array.ndim})"
-                )
-            arrays.append(array)
-        if not arrays:
-            matrix = np.empty((0, 0), dtype=float)
-        else:
-            rows = arrays[0].size
-            if any(array.size != rows for array in arrays):
-                raise InputShapeError("all columns must have the same row count")
-            matrix = np.column_stack(arrays)
-    if job_labels is None:
-        labels = [f"Job {index + 1}" for index in range(matrix.shape[0])]
-    else:
-        labels = [str(label) for label in list(job_labels)]
-        if len(labels) != matrix.shape[0]:
-            raise InputShapeError(
-                f"job_labels has {len(labels)} entries for "
-                f"{matrix.shape[0]} rows"
-            )
-    return matrix, labels
-
-
 @dataclass(frozen=True)
 class PreparedTable:
     full: np.ndarray
@@ -367,10 +343,7 @@ class PreparedTable:
     raw: np.ndarray
     magnitude: np.ndarray
     whole_percent: np.ndarray
-    finite: np.ndarray
-    active: np.ndarray
     positive: np.ndarray
-    negative: np.ndarray
     percent_ratio_valid: np.ndarray
     percent_whole_valid: np.ndarray
     percent_ratio_tol: np.ndarray
@@ -378,7 +351,6 @@ class PreparedTable:
     percent_ratio_grid: tuple[Optional[float], ...]
     percent_whole_grid: tuple[Optional[float], ...]
     median_abs: np.ndarray
-    duplicate_representative: np.ndarray
     representatives: np.ndarray
     active_overlap: np.ndarray
     sample_index: np.ndarray
@@ -391,12 +363,10 @@ class PreparedTable:
         raw = _readonly(full[complete].T)
         magnitude = _readonly(np.abs(raw))
         whole_percent = _readonly(raw / 100.0)
-        finite = _readonly(np.isfinite(raw))
         active = _readonly(
             magnitude > cfg.money_obs_tol + cfg.cert_slack
         )
         positive = _readonly(raw > cfg.money_obs_tol)
-        negative = _readonly(raw < -cfg.money_obs_tol)
         ratio_valid = _readonly(
             np.mean((raw >= -0.25) & (raw <= 2.0), axis=1) >= 0.90
         )
@@ -475,10 +445,7 @@ class PreparedTable:
             raw=raw,
             magnitude=magnitude,
             whole_percent=whole_percent,
-            finite=finite,
-            active=active,
             positive=positive,
-            negative=negative,
             percent_ratio_valid=ratio_valid,
             percent_whole_valid=whole_valid,
             percent_ratio_tol=ratio_tol,
@@ -486,7 +453,6 @@ class PreparedTable:
             percent_ratio_grid=ratio_grids,
             percent_whole_grid=whole_grids,
             median_abs=median_abs,
-            duplicate_representative=_readonly(duplicate_representative),
             representatives=representatives,
             active_overlap=active_overlap,
             sample_index=_readonly(sample_index),
@@ -509,7 +475,6 @@ class NumericValue:
     scale: float = 1.0
     grid: Optional[float] = None
     derivation: Optional[str] = None
-    input_ids: tuple[int, ...] = ()
     full: bool = False
 
 
@@ -536,7 +501,6 @@ class RunContext:
         self.score_hits = 0
         self.score_misses = 0
         self.score_batches = 0
-        self.score_predictions = 0
 
     def _id(self) -> int:
         value_id = self._next_id
@@ -627,18 +591,102 @@ class RunContext:
             tolerance=_readonly(np.maximum(tolerance, 1e-12)),
             support=support,
             derivation=derivation.id,
-            input_ids=tuple(value.id for value in inputs),
             full=full,
         )
         self.derived_cache[key] = result
         return result
 
-    def score(
+    def score_arrays(
         self,
-        value: NumericValue,
-        derivation: Derivation,
+        predictions: np.ndarray,
+        predicted_tolerances: np.ndarray,
+        kind: str,
+        columns: np.ndarray,
+        rows: np.ndarray,
+        *,
+        magnitude: bool = False,
     ) -> ScoreVectors:
-        return self.score_many(((value, derivation),))[0]
+        """Canonical strict/loose tensor kernel for discovery and closure."""
+        prediction = predictions[:, None, :]
+        tolerance = predicted_tolerances[:, None, :]
+        if kind == "money":
+            source = self.table.magnitude if magnitude else self.table.raw
+            observed = source[columns][:, rows]
+            residual = np.abs(prediction - observed[None, :, :])
+            strict = (
+                tolerance
+                + self.cfg.money_obs_tol
+                + self.cfg.cert_slack
+                + self.cfg.cert_money_rel * np.abs(prediction)
+            )
+            loose = strict + np.maximum(
+                self.cfg.ident_abs,
+                self.cfg.ident_rel * np.abs(prediction),
+            )
+            return ScoreVectors(
+                strict_bad=np.sum(residual > strict, axis=2),
+                loose_bad=np.sum(residual > loose, axis=2),
+                residual=np.sum(np.minimum(residual, loose), axis=2),
+                scale=np.ones((predictions.shape[0], columns.size)),
+            )
+
+        shape = (predictions.shape[0], columns.size)
+        best = ScoreVectors(
+            strict_bad=np.full(shape, 10**9, dtype=np.int32),
+            loose_bad=np.full(shape, 10**9, dtype=np.int32),
+            residual=np.full(shape, np.inf),
+            scale=np.ones(shape),
+        )
+        for scale, source, valid, column_tolerance in (
+            (
+                1.0,
+                self.table.raw,
+                self.table.percent_ratio_valid,
+                self.table.percent_ratio_tol,
+            ),
+            (
+                100.0,
+                self.table.whole_percent,
+                self.table.percent_whole_valid,
+                self.table.percent_whole_tol,
+            ),
+        ):
+            observed = source[columns][:, rows]
+            residual = np.abs(prediction - observed[None, :, :])
+            strict = (
+                tolerance
+                + column_tolerance[columns][None, :, None]
+                + 1e-9
+            )
+            loose = strict + self.cfg.pct_ident_slack
+            strict_bad = np.sum(residual > strict, axis=2)
+            loose_bad = np.sum(residual > loose, axis=2)
+            clipped = np.sum(np.minimum(residual, loose), axis=2)
+            valid_columns = valid[columns][None, :]
+            strict_bad = np.where(valid_columns, strict_bad, 10**9)
+            loose_bad = np.where(valid_columns, loose_bad, 10**9)
+            clipped = np.where(valid_columns, clipped, np.inf)
+            better = (
+                (strict_bad < best.strict_bad)
+                | (
+                    (strict_bad == best.strict_bad)
+                    & (loose_bad < best.loose_bad)
+                )
+                | (
+                    (strict_bad == best.strict_bad)
+                    & (loose_bad == best.loose_bad)
+                    & (clipped < best.residual)
+                )
+            )
+            best = ScoreVectors(
+                strict_bad=np.where(
+                    better, strict_bad, best.strict_bad
+                ),
+                loose_bad=np.where(better, loose_bad, best.loose_bad),
+                residual=np.where(better, clipped, best.residual),
+                scale=np.where(better, scale, best.scale),
+            )
+        return best
 
     def score_many(
         self,
@@ -674,134 +722,54 @@ class RunContext:
             group = list(unique.items())
             self.score_misses += len(group)
             self.score_batches += 1
-            self.score_predictions += len(group)
             predictions = np.stack(
                 [value.values for _, value in group]
             )
             predicted_tolerances = np.stack(
                 [value.tolerance for _, value in group]
             )
-
-            if kind == "money":
-                observed = (
-                    self.table.magnitude
-                    if magnitude
-                    else self.table.raw
-                )
-                residual = np.abs(
-                    predictions[:, None, :]
-                    - observed[None, :, :]
-                )
-                strict = (
-                    predicted_tolerances[:, None, :]
-                    + self.cfg.money_obs_tol
-                    + self.cfg.cert_slack
-                    + self.cfg.cert_money_rel
-                    * np.abs(predictions[:, None, :])
-                )
-                loose = strict + np.maximum(
-                    self.cfg.ident_abs,
-                    self.cfg.ident_rel
-                    * np.abs(predictions[:, None, :]),
-                )
-                strict_bad = np.sum(residual > strict, axis=2)
-                loose_bad = np.sum(residual > loose, axis=2)
-                clipped = np.sum(
-                    np.minimum(residual, loose),
-                    axis=2,
-                )
-                scales = np.ones_like(clipped)
-            else:
-                alternatives = []
-                for (
-                    scale_value,
-                    observed,
-                    valid,
-                    observed_tolerance,
-                ) in (
-                    (
-                        1.0,
-                        self.table.raw,
-                        self.table.percent_ratio_valid,
-                        self.table.percent_ratio_tol,
-                    ),
-                    (
-                        100.0,
-                        self.table.whole_percent,
-                        self.table.percent_whole_valid,
-                        self.table.percent_whole_tol,
-                    ),
-                ):
-                    residual_i = np.abs(
-                        predictions[:, None, :]
-                        - observed[None, :, :]
-                    )
-                    strict_i = (
-                        predicted_tolerances[:, None, :]
-                        + observed_tolerance[None, :, None]
-                        + 1e-9
-                    )
-                    loose_i = strict_i + self.cfg.pct_ident_slack
-                    strict_bad_i = np.sum(
-                        residual_i > strict_i,
-                        axis=2,
-                    )
-                    loose_bad_i = np.sum(
-                        residual_i > loose_i,
-                        axis=2,
-                    )
-                    clipped_i = np.sum(
-                        np.minimum(residual_i, loose_i),
-                        axis=2,
-                    )
-                    strict_bad_i[:, ~valid] = 10**9
-                    loose_bad_i[:, ~valid] = 10**9
-                    clipped_i[:, ~valid] = np.inf
-                    alternatives.append(
-                        (
-                            scale_value,
-                            strict_bad_i,
-                            loose_bad_i,
-                            clipped_i,
-                        )
-                    )
-                _, strict_bad, loose_bad, clipped = alternatives[0]
-                _, sb2, lb2, clipped2 = alternatives[1]
-                better = (
-                    (sb2 < strict_bad)
-                    | ((sb2 == strict_bad) & (lb2 < loose_bad))
-                    | (
-                        (sb2 == strict_bad)
-                        & (lb2 == loose_bad)
-                        & (clipped2 < clipped)
-                    )
-                )
-                strict_bad = np.where(better, sb2, strict_bad)
-                loose_bad = np.where(better, lb2, loose_bad)
-                clipped = np.where(better, clipped2, clipped)
-                scales = np.where(better, 100.0, 1.0)
+            scores = self.score_arrays(
+                predictions,
+                predicted_tolerances,
+                kind,
+                np.arange(self.table.raw.shape[0]),
+                np.arange(self.table.raw.shape[1]),
+                magnitude=magnitude,
+            )
 
             for index, (key, _) in enumerate(group):
                 self.score_cache[key] = ScoreVectors(
                     strict_bad=_readonly(
-                        np.asarray(strict_bad[index], dtype=np.int32)
+                        np.asarray(
+                            scores.strict_bad[index],
+                            dtype=np.int32,
+                        )
                     ),
                     loose_bad=_readonly(
-                        np.asarray(loose_bad[index], dtype=np.int32)
+                        np.asarray(
+                            scores.loose_bad[index],
+                            dtype=np.int32,
+                        )
                     ),
                     residual=_readonly(
-                        np.asarray(clipped[index], dtype=float)
+                        np.asarray(scores.residual[index], dtype=float)
                     ),
                     scale=_readonly(
-                        np.asarray(scales[index], dtype=float)
+                        np.asarray(scores.scale[index], dtype=float)
                     ),
                 )
 
         return [self.score_cache[key] for key in keys]
 
 
-def _allowed_bad(rows: int, cfg: Config) -> int:
-    return max(1, int(np.floor((1.0 - cfg.ident_frac) * rows)))
+def _robust_prior(condition: np.ndarray, cfg: Config) -> np.ndarray:
+    """Apply economic priors as bounded bad-row filters, never exact gates."""
+    rows = condition.shape[-1]
+    allowed = max(
+        _allowed_bad(rows, cfg),
+        int(np.floor((1.0 - cfg.prior_robust_frac) * rows)),
+    )
+    return np.sum(~condition, axis=-1) <= allowed
 
 
 def _values_agree(
@@ -883,6 +851,24 @@ class Fragment:
             for assignment in self.assignments
         }
 
+    @property
+    def rank(self):
+        return (-self.score, self.residual, self.assignments)
+
+
+def _best_fragments(
+    fragments: Iterable[Fragment],
+    limit: Optional[int] = None,
+) -> list[Fragment]:
+    """Deduplicate equivalent graph states and retain their strongest route."""
+    best: dict[tuple[Assignment, ...], Fragment] = {}
+    for fragment in fragments:
+        prior = best.get(fragment.assignments)
+        if prior is None or fragment.rank < prior.rank:
+            best[fragment.assignments] = fragment
+    ranked = sorted(best.values(), key=lambda fragment: fragment.rank)
+    return ranked if limit is None else ranked[:limit]
+
 
 def _canonical_assignments(
     assignments: Iterable[Assignment],
@@ -909,43 +895,35 @@ def _canonical_assignments(
     )
 
 
-def _sampled(
-    values: np.ndarray,
-    table: PreparedTable,
-) -> np.ndarray:
-    return values[..., table.sample_index]
-
-
-def _batch_money_matches(
+def _batch_matches(
     ctx: RunContext,
     predictions: np.ndarray,
     predicted_tolerance: np.ndarray,
     available: np.ndarray,
     *,
+    kind: str,
     magnitude: bool = False,
     excluded: Optional[np.ndarray] = None,
 ) -> list[StructuralMatch]:
-    """Best all-column match for every prediction in one tensor kernel."""
-    table = ctx.table
-    sample = table.sample_index
-    observed_source = table.magnitude if magnitude else table.raw
-    observed = observed_source[available][:, sample]
-    prediction = predictions[:, None, :]
-    tolerance = predicted_tolerance[:, None, :]
-    residual = np.abs(prediction - observed[None, :, :])
-    strict = (
-        tolerance
-        + ctx.cfg.money_obs_tol
-        + ctx.cfg.cert_slack
-        + ctx.cfg.cert_money_rel * np.abs(prediction)
+    if kind == "pct":
+        valid = (
+            ctx.table.percent_ratio_valid
+            | ctx.table.percent_whole_valid
+        )
+        available = available[valid[available]]
+        if available.size == 0:
+            return [
+                StructuralMatch(-1, 1.0, 10**9, 10**9, np.inf)
+                for _ in predictions
+            ]
+    scores = ctx.score_arrays(
+        predictions,
+        predicted_tolerance,
+        kind,
+        available,
+        ctx.table.sample_index,
+        magnitude=magnitude,
     )
-    loose = strict + np.maximum(
-        ctx.cfg.ident_abs,
-        ctx.cfg.ident_rel * np.abs(prediction),
-    )
-    strict_bad = np.sum(residual > strict, axis=2).astype(np.int32)
-    loose_bad = np.sum(residual > loose, axis=2).astype(np.int32)
-    clipped = np.sum(np.minimum(residual, loose), axis=2)
     if excluded is not None:
         positions = {
             int(column): index
@@ -954,15 +932,15 @@ def _batch_money_matches(
         for row, column in enumerate(excluded):
             position = positions.get(int(column))
             if position is not None:
-                strict_bad[row, position] = 10**8
-                loose_bad[row, position] = 10**8
-                clipped[row, position] = np.inf
+                scores.strict_bad[row, position] = 10**9
+                scores.loose_bad[row, position] = 10**9
+                scores.residual[row, position] = np.inf
     order = np.lexsort(
         (
-            np.broadcast_to(available, clipped.shape),
-            clipped,
-            loose_bad,
-            strict_bad,
+            np.broadcast_to(available, scores.residual.shape),
+            scores.residual,
+            scores.loose_bad,
+            scores.strict_bad,
         ),
         axis=1,
     )
@@ -970,127 +948,10 @@ def _batch_money_matches(
     return [
         StructuralMatch(
             column=int(available[column_index]),
-            scale=1.0,
-            strict_bad=int(strict_bad[row, column_index]),
-            loose_bad=int(loose_bad[row, column_index]),
-            residual=float(clipped[row, column_index]),
-        )
-        for row, column_index in enumerate(best)
-    ]
-
-
-def _batch_percent_matches(
-    ctx: RunContext,
-    predictions: np.ndarray,
-    predicted_tolerance: np.ndarray,
-    available: np.ndarray,
-    *,
-    excluded: Optional[np.ndarray] = None,
-) -> list[StructuralMatch]:
-    table = ctx.table
-    sample = table.sample_index
-    # Prepared typing removes obviously non-percent columns before the
-    # predictions x columns x rows workspace exists.
-    possible = (
-        table.percent_ratio_valid[available]
-        | table.percent_whole_valid[available]
-    )
-    available = available[possible]
-    if available.size == 0:
-        return [
-            StructuralMatch(
-                column=-1,
-                scale=1.0,
-                strict_bad=10**8,
-                loose_bad=10**8,
-                residual=np.inf,
-            )
-            for _ in range(predictions.shape[0])
-        ]
-    shapes = (predictions.shape[0], available.size)
-    best_strict = np.full(shapes, 10**8, dtype=np.int32)
-    best_loose = np.full(shapes, 10**8, dtype=np.int32)
-    best_residual = np.full(shapes, np.inf, dtype=float)
-    best_scale = np.ones(shapes, dtype=float)
-
-    for scale, source, valid, column_tolerance in (
-        (
-            1.0,
-            table.raw,
-            table.percent_ratio_valid,
-            table.percent_ratio_tol,
-        ),
-        (
-            100.0,
-            table.whole_percent,
-            table.percent_whole_valid,
-            table.percent_whole_tol,
-        ),
-    ):
-        observed = source[available][:, sample]
-        residual = np.abs(
-            predictions[:, None, :]
-            - observed[None, :, :]
-        )
-        strict = (
-            predicted_tolerance[:, None, :]
-            + column_tolerance[available][None, :, None]
-            + 1e-9
-        )
-        loose = strict + ctx.cfg.pct_ident_slack
-        strict_bad = np.sum(residual > strict, axis=2).astype(np.int32)
-        loose_bad = np.sum(residual > loose, axis=2).astype(np.int32)
-        clipped = np.sum(np.minimum(residual, loose), axis=2)
-        valid_columns = valid[available][None, :]
-        strict_bad = np.where(valid_columns, strict_bad, 10**8)
-        loose_bad = np.where(valid_columns, loose_bad, 10**8)
-        clipped = np.where(valid_columns, clipped, np.inf)
-        better = (
-            (strict_bad < best_strict)
-            | (
-                (strict_bad == best_strict)
-                & (loose_bad < best_loose)
-            )
-            | (
-                (strict_bad == best_strict)
-                & (loose_bad == best_loose)
-                & (clipped < best_residual)
-            )
-        )
-        best_strict = np.where(better, strict_bad, best_strict)
-        best_loose = np.where(better, loose_bad, best_loose)
-        best_residual = np.where(better, clipped, best_residual)
-        best_scale = np.where(better, scale, best_scale)
-
-    if excluded is not None:
-        positions = {
-            int(column): index
-            for index, column in enumerate(available)
-        }
-        for row, column in enumerate(excluded):
-            position = positions.get(int(column))
-            if position is not None:
-                best_strict[row, position] = 10**8
-                best_loose[row, position] = 10**8
-                best_residual[row, position] = np.inf
-
-    order = np.lexsort(
-        (
-            np.broadcast_to(available, best_residual.shape),
-            best_residual,
-            best_loose,
-            best_strict,
-        ),
-        axis=1,
-    )
-    best = order[:, 0]
-    return [
-        StructuralMatch(
-            column=int(available[column_index]),
-            scale=float(best_scale[row, column_index]),
-            strict_bad=int(best_strict[row, column_index]),
-            loose_bad=int(best_loose[row, column_index]),
-            residual=float(best_residual[row, column_index]),
+            scale=float(scores.scale[row, column_index]),
+            strict_bad=int(scores.strict_bad[row, column_index]),
+            loose_bad=int(scores.loose_bad[row, column_index]),
+            residual=float(scores.residual[row, column_index]),
         )
         for row, column_index in enumerate(best)
     ]
@@ -1125,6 +986,78 @@ def _unique_output_matches(
     return selected
 
 
+def _unassigned_columns(
+    table: PreparedTable,
+    fragment: Fragment,
+) -> np.ndarray:
+    used = np.fromiter(
+        (assignment.column for assignment in fragment.assignments),
+        dtype=int,
+    )
+    return table.representatives[
+        ~np.isin(table.representatives, used)
+    ]
+
+
+def _extend_fragment(
+    base: Fragment,
+    anchor: str,
+    anchor_columns: np.ndarray,
+    matches_by_variable: dict[str, list[StructuralMatch]],
+    identifying: frozenset[str],
+    weights: dict[str, int],
+    source: str,
+    rows: int,
+    cfg: Config,
+    limit: int,
+    bonus: Optional[Callable[[dict[str, StructuralMatch]], int]] = None,
+) -> list[Fragment]:
+    """Orient a batched anchor search and retain its best graph fragments."""
+    ranked = []
+    for index, column in enumerate(anchor_columns):
+        selected = _unique_output_matches(
+            {
+                variable: matches[index]
+                for variable, matches in matches_by_variable.items()
+            },
+            rows,
+            cfg,
+        )
+        if not identifying.intersection(selected):
+            continue
+        assignments = [
+            *base.assignments,
+            Assignment(anchor, int(column)),
+            *(
+                Assignment(variable, match.column, match.scale)
+                for variable, match in selected.items()
+            ),
+        ]
+        canonical = _canonical_assignments(assignments)
+        if canonical is None:
+            continue
+        ranked.append(
+            Fragment(
+                assignments=canonical,
+                score=(
+                    base.score
+                    + 5
+                    + sum(
+                        weights[variable]
+                        + int(match.strict_bad == 0)
+                        for variable, match in selected.items()
+                    )
+                    + (bonus(selected) if bonus else 0)
+                ),
+                residual=base.residual + sum(
+                    match.residual for match in selected.values()
+                ),
+                sources=base.sources | frozenset({source}),
+            )
+        )
+    return sorted(ranked, key=lambda fragment: fragment.rank)[:limit]
+
+
 def _estimate_fragments(
     ctx: RunContext,
     hub_candidates: Optional[Iterable[int]] = None,
@@ -1134,13 +1067,16 @@ def _estimate_fragments(
     reps = table.representatives
     sample = table.sample_index
     raw = table.raw[:, sample]
-    positive_rate = np.mean(table.positive[:, sample], axis=1)
+    sufficiently_positive = _robust_prior(
+        table.positive[:, sample],
+        cfg,
+    )
     if hub_candidates is None:
         hubs = sorted(
             (
                 int(column)
                 for column in reps
-                if positive_rate[column] >= cfg.prior_robust_frac
+                if sufficiently_positive[column]
             ),
             key=lambda column: (-table.median_abs[column], column),
         )[: cfg.motif_hubs]
@@ -1148,10 +1084,10 @@ def _estimate_fragments(
         hubs = [
             int(column)
             for column in hub_candidates
-            if positive_rate[int(column)] >= cfg.prior_robust_frac
+            if sufficiently_positive[int(column)]
         ]
     allowed = _allowed_bad(sample.size, cfg)
-    candidates: dict[tuple[Assignment, ...], Fragment] = {}
+    candidates = []
     if not hubs or reps.size < 3:
         return []
 
@@ -1343,11 +1279,12 @@ def _estimate_fragments(
                     ),
                 )[None, :]
                 if available.size:
-                    margin_match = _batch_percent_matches(
+                    margin_match = _batch_matches(
                         ctx,
                         margin[None, :],
                         margin_tol,
                         available,
+                        kind="pct",
                     )[0]
                     if _accepted(margin_match, sample.size, cfg):
                         base.append(
@@ -1391,21 +1328,9 @@ def _estimate_fragments(
                     ),
                     sources=frozenset({"estimate_complement"}),
                 )
-                prior = candidates.get(canonical)
-                if prior is None or (
-                    fragment.score,
-                    -fragment.residual,
-                ) > (prior.score, -prior.residual):
-                    candidates[canonical] = fragment
+                candidates.append(fragment)
 
-    return sorted(
-        candidates.values(),
-        key=lambda fragment: (
-            -fragment.score,
-            fragment.residual,
-            fragment.assignments,
-        ),
-    )[: cfg.estimate_fragments]
+    return _best_fragments(candidates, cfg.estimate_fragments)
 
 
 def _additive_hub_fallback(ctx: RunContext) -> list[int]:
@@ -1466,19 +1391,14 @@ def _progress_fragments(
     cfg = ctx.cfg
     sample = table.sample_index
     rows = sample.size
-    results: dict[tuple[Assignment, ...], Fragment] = {}
+    results = []
 
     for estimate in estimates:
         mapping = estimate.mapping
         v_column = mapping["V"].column
         c_column = mapping["C"].column
-        used = np.asarray(
-            [assignment.column for assignment in estimate.assignments],
-            dtype=int,
-        )
-        candidates = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
+        available = _unassigned_columns(table, estimate)
+        candidates = available
         if candidates.size == 0:
             continue
         V = table.raw[v_column, sample]
@@ -1486,21 +1406,18 @@ def _progress_fragments(
         D_all = table.raw[candidates][:, sample]
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             progress = D_all / C[None, :]
-        plausible = (
-            np.mean(
-                (progress >= -0.02)
-                & (progress <= cfg.d_over_c_slack),
-                axis=1,
-            )
-            >= cfg.prior_robust_frac
+        plausible = _robust_prior(
+            (progress >= -0.02)
+            & (progress <= cfg.d_over_c_slack),
+            cfg,
         )
         live = (
             np.median(np.abs(progress), axis=1)
             >= cfg.anchor_live_med
         )
-        positive = (
-            np.mean(table.positive[candidates][:, sample], axis=1)
-            >= cfg.prior_robust_frac
+        positive = _robust_prior(
+            table.positive[candidates][:, sample],
+            cfg,
         )
         candidates = candidates[plausible & live & positive]
         progress = progress[plausible & live & positive]
@@ -1523,87 +1440,41 @@ def _progress_fragments(
         )
         H_tol = E_tol + money_tol
         P_tol = _tol_div((D, C_batch), (money_tol, base_tol))
-        available = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
         matches_by_variable = {
-            "Q": _batch_money_matches(
-                ctx, Q, Q_tol, available, excluded=candidates
+            "Q": _batch_matches(
+                ctx, Q, Q_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "E": _batch_money_matches(
-                ctx, E, E_tol, available, excluded=candidates
+            "E": _batch_matches(
+                ctx, E, E_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "H": _batch_money_matches(
-                ctx, H, H_tol, available, excluded=candidates
+            "H": _batch_matches(
+                ctx, H, H_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "P": _batch_percent_matches(
-                ctx, P, P_tol, available, excluded=candidates
+            "P": _batch_matches(
+                ctx, P, P_tol, available,
+                kind="pct", excluded=candidates,
             ),
         }
-        ranked = []
-        for index, d_column in enumerate(candidates):
-            raw_matches = {
-                variable: matches[index]
-                for variable, matches in matches_by_variable.items()
-            }
-            selected = _unique_output_matches(raw_matches, rows, cfg)
-            # D must be oriented by earned/progress structure.  Q alone is
-            # only an additive complement and cannot name the axis.
-            identifying = {
-                variable
-                for variable in selected
-                if variable in {"E", "P", "H"}
-            }
-            if not identifying:
-                continue
-            assignments = list(estimate.assignments)
-            assignments.append(Assignment("D", int(d_column)))
-            score = estimate.score + 5
-            residual = estimate.residual
-            weights = {"E": 6, "P": 5, "H": 3, "Q": 2}
-            for variable, match in selected.items():
-                assignments.append(
-                    Assignment(variable, match.column, match.scale)
-                )
-                score += weights[variable]
-                if match.strict_bad == 0:
-                    score += 1
-                residual += match.residual
-            canonical = _canonical_assignments(assignments)
-            if canonical is None:
-                continue
-            ranked.append(
-                Fragment(
-                    assignments=canonical,
-                    score=score,
-                    residual=residual,
-                    sources=estimate.sources
-                    | frozenset({"progress_projection"}),
-                )
-            )
-        ranked.sort(
-            key=lambda fragment: (
-                -fragment.score,
-                fragment.residual,
-                fragment.assignments,
+        # Q alone is only an additive complement and cannot orient D.
+        results.extend(
+            _extend_fragment(
+                estimate,
+                "D",
+                candidates,
+                matches_by_variable,
+                frozenset({"E", "P", "H"}),
+                {"E": 6, "P": 5, "H": 3, "Q": 2},
+                "progress_projection",
+                rows,
+                cfg,
+                cfg.progress_per_estimate,
             )
         )
-        for fragment in ranked[: cfg.progress_per_estimate]:
-            prior = results.get(fragment.assignments)
-            if prior is None or (
-                fragment.score,
-                -fragment.residual,
-            ) > (prior.score, -prior.residual):
-                results[fragment.assignments] = fragment
 
-    return sorted(
-        results.values(),
-        key=lambda fragment: (
-            -fragment.score,
-            fragment.residual,
-            fragment.assignments,
-        ),
-    )
+    return _best_fragments(results)
 
 
 def _billing_fragments(
@@ -1614,23 +1485,15 @@ def _billing_fragments(
     cfg = ctx.cfg
     sample = table.sample_index
     rows = sample.size
-    results: dict[tuple[Assignment, ...], Fragment] = {}
+    results = []
 
     for progress_fragment in progress_fragments:
         mapping = progress_fragment.mapping
         v_column = mapping["V"].column
         c_column = mapping["C"].column
         d_column = mapping["D"].column
-        used = np.asarray(
-            [
-                assignment.column
-                for assignment in progress_fragment.assignments
-            ],
-            dtype=int,
-        )
-        candidates = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
+        available = _unassigned_columns(table, progress_fragment)
+        candidates = available
         if candidates.size == 0:
             continue
         V = table.raw[v_column, sample]
@@ -1640,13 +1503,10 @@ def _billing_fragments(
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             E = V * D / C
             billed = B_all / V[None, :]
-        plausible = (
-            np.mean(
-                (billed >= -0.05)
-                & (billed <= cfg.b_over_v_slack),
-                axis=1,
-            )
-            >= cfg.prior_robust_frac
+        plausible = _robust_prior(
+            (billed >= -0.05)
+            & (billed <= cfg.b_over_v_slack),
+            cfg,
         )
         live = (
             np.median(np.abs(billed), axis=1)
@@ -1677,103 +1537,66 @@ def _billing_fragments(
         net_tol = E_tol + base_tol
         rb_tol = base_tol + base_tol
         pb_tol = _tol_div((B, V_batch), (base_tol, base_tol))
-        available = table.representatives[
-            ~np.isin(table.representatives, used)
-        ]
         matches_by_variable = {
-            "N": _batch_money_matches(
-                ctx, N, net_tol, available, excluded=candidates
+            "N": _batch_matches(
+                ctx, N, net_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "U": _batch_money_matches(
+            "U": _batch_matches(
                 ctx,
                 U,
                 net_tol,
                 available,
+                kind="money",
                 magnitude=True,
                 excluded=candidates,
             ),
-            "O": _batch_money_matches(
+            "O": _batch_matches(
                 ctx,
                 O,
                 net_tol,
                 available,
+                kind="money",
                 magnitude=True,
                 excluded=candidates,
             ),
-            "RB": _batch_money_matches(
-                ctx, RB, rb_tol, available, excluded=candidates
+            "RB": _batch_matches(
+                ctx, RB, rb_tol, available,
+                kind="money", excluded=candidates,
             ),
-            "PB": _batch_percent_matches(
-                ctx, PB, pb_tol, available, excluded=candidates
+            "PB": _batch_matches(
+                ctx, PB, pb_tol, available,
+                kind="pct", excluded=candidates,
             ),
         }
-        ranked = []
-        for index, b_column in enumerate(candidates):
-            raw_matches = {
-                variable: matches[index]
-                for variable, matches in matches_by_variable.items()
-            }
-            selected = _unique_output_matches(raw_matches, rows, cfg)
-            identifying = {
-                variable
-                for variable in selected
-                if variable in {"N", "U", "O", "PB"}
-            }
-            if not identifying:
-                continue
-            assignments = list(progress_fragment.assignments)
-            assignments.append(Assignment("B", int(b_column)))
-            score = progress_fragment.score + 5
-            residual = progress_fragment.residual
-            weights = {"N": 5, "U": 4, "O": 4, "PB": 5, "RB": 2}
-            for variable, match in selected.items():
-                assignments.append(
-                    Assignment(variable, match.column, match.scale)
-                )
-                score += weights[variable]
-                if match.strict_bad == 0:
-                    score += 1
-                residual += match.residual
-            if "U" in selected and "O" in selected:
-                u_column = selected["U"].column
-                o_column = selected["O"].column
-                if table.active_overlap[u_column, o_column] == 0:
-                    score += 4
-            canonical = _canonical_assignments(assignments)
-            if canonical is None:
-                continue
-            ranked.append(
-                Fragment(
-                    assignments=canonical,
-                    score=score,
-                    residual=residual,
-                    sources=progress_fragment.sources
-                    | frozenset({"billing_bridge"}),
-                )
-            )
-        ranked.sort(
-            key=lambda fragment: (
-                -fragment.score,
-                fragment.residual,
-                fragment.assignments,
+        results.extend(
+            _extend_fragment(
+                progress_fragment,
+                "B",
+                candidates,
+                matches_by_variable,
+                frozenset({"N", "U", "O", "PB"}),
+                {"N": 5, "U": 4, "O": 4, "PB": 5, "RB": 2},
+                "billing_bridge",
+                rows,
+                cfg,
+                cfg.billing_per_progress,
+                lambda selected: (
+                    4
+                    if (
+                        "U" in selected
+                        and "O" in selected
+                        and table.active_overlap[
+                            selected["U"].column,
+                            selected["O"].column,
+                        ] == 0
+                    )
+                    else 0
+                ),
             )
         )
-        for fragment in ranked[: cfg.billing_per_progress]:
-            prior = results.get(fragment.assignments)
-            if prior is None or (
-                fragment.score,
-                -fragment.residual,
-            ) > (prior.score, -prior.residual):
-                results[fragment.assignments] = fragment
 
-    return sorted(
-        results.values(),
-        key=lambda fragment: (
-            -fragment.score,
-            fragment.residual,
-            fragment.assignments,
-        ),
-    )[: cfg.assembled_states]
+    return _best_fragments(results, cfg.assembled_states)
 
 
 def _discover_states(
@@ -1782,9 +1605,34 @@ def _discover_states(
     broaden: bool = False,
     exhaustive: bool = False,
 ) -> tuple[list[Fragment], dict]:
+    if exhaustive and ctx.cfg.ident_frac > ctx.cfg.shadow_audit_frac:
+        # Recovery proposals are deliberately downstream of both ordinary
+        # motif frontiers.  They can nominate a mapping when several bad rows
+        # corrupt an anchor, but never bypass strict final certification.
+        # The final recovery frontier uses every identification row so a
+        # small motif sample cannot concentrate several unrelated errors and
+        # reject a relationship that meets the document-wide recovery bar.
+        recovery_table = replace(
+            ctx.table,
+            sample_index=_readonly(
+                np.arange(ctx.table.raw.shape[1], dtype=int)
+            ),
+        )
+        ctx = RunContext(
+            recovery_table,
+            replace(
+                ctx.cfg,
+                ident_frac=ctx.cfg.shadow_audit_frac,
+            ),
+        )
     estimates = _estimate_fragments(ctx)
     fallback_used = False
-    if broaden:
+    use_additive_hubs = (
+        broaden
+        or ctx.table.representatives.size
+        > max(20, ctx.cfg.motif_hubs * 4)
+    )
+    if use_additive_hubs:
         fallback_estimates = _estimate_fragments(
             ctx,
             _additive_hub_fallback(ctx),
@@ -1795,11 +1643,7 @@ def _discover_states(
         }
         estimates = sorted(
             estimates_by_key.values(),
-            key=lambda fragment: (
-                -fragment.score,
-                fragment.residual,
-                fragment.assignments,
-            ),
+            key=lambda fragment: fragment.rank,
         )[: ctx.cfg.estimate_fragments]
         fallback_used = bool(fallback_estimates)
     estimate_proposals = len(estimates)
@@ -1847,9 +1691,7 @@ class ClosedGraph:
     known: dict[str, NumericValue]
     column_to_var: dict[int, str]
     conflicts: list[str]
-    derived_values: int
-    physical_matches: int
-    active_derivations: frozenset[str] = frozenset()
+    certification_derivations: frozenset[str] = frozenset()
     checkable: frozenset[str] = frozenset()
     coverage: dict[str, int] = field(default_factory=dict)
     minimum_seeds: int = 0
@@ -1871,11 +1713,9 @@ class ClosedGraph:
 
 @dataclass(frozen=True)
 class PhysicalClaim:
-    out: str
     column: int
     scale: float
     derivation: Derivation
-    value: NumericValue
     strict_bad: int
     loose_bad: int
     residual: float
@@ -1942,11 +1782,9 @@ def _physical_claims(
         column = int(qualified[order[0]])
         claims.append(
             PhysicalClaim(
-                out=out,
                 column=column,
                 scale=float(scores.scale[column]),
                 derivation=derivation,
-                value=value,
                 strict_bad=int(scores.strict_bad[column]),
                 loose_bad=int(scores.loose_bad[column]),
                 residual=float(scores.residual[column]),
@@ -1961,9 +1799,9 @@ def _select_claims(claims: list[PhysicalClaim]) -> list[PhysicalClaim]:
     best_by_out: dict[str, PhysicalClaim] = {}
     best_by_column: dict[int, PhysicalClaim] = {}
     for claim in claims:
-        prior = best_by_out.get(claim.out)
+        prior = best_by_out.get(claim.derivation.out)
         if prior is None or claim.rank < prior.rank:
-            best_by_out[claim.out] = claim
+            best_by_out[claim.derivation.out] = claim
         prior = best_by_column.get(claim.column)
         if prior is None or claim.rank < prior.rank:
             best_by_column[claim.column] = claim
@@ -2004,8 +1842,6 @@ def _close_graph(
             known=known,
             column_to_var=column_to_var,
             conflicts=[],
-            derived_values=0,
-            physical_matches=0,
         )
 
     queue = deque(known)
@@ -2015,9 +1851,6 @@ def _close_graph(
         dict[int, tuple[Derivation, NumericValue]],
     ] = {}
     conflicts: list[str] = []
-    derived_start = ctx.derived_misses
-    physical_matches = 0
-
     while True:
         # Only derivations touched by newly grounded variables are inspected.
         while queue:
@@ -2075,20 +1908,19 @@ def _close_graph(
         if claims:
             for claim in claims:
                 if (
-                    claim.out in known
+                    claim.derivation.out in known
                     or claim.column in column_to_var
                 ):
                     continue
                 observed = ctx.observed(
-                    claim.out,
+                    claim.derivation.out,
                     claim.column,
                     scale=claim.scale,
                 )
-                known[claim.out] = observed
-                column_to_var[claim.column] = claim.out
-                pending.pop(claim.out, None)
-                queue.append(claim.out)
-                physical_matches += 1
+                known[claim.derivation.out] = observed
+                column_to_var[claim.column] = claim.derivation.out
+                pending.pop(claim.derivation.out, None)
+                queue.append(claim.derivation.out)
             continue
 
         # Physical fixpoint.  Materialize every numerically agreeing output
@@ -2132,8 +1964,6 @@ def _close_graph(
         known=known,
         column_to_var=column_to_var,
         conflicts=conflicts,
-        derived_values=ctx.derived_misses - derived_start,
-        physical_matches=physical_matches,
     )
 
 
@@ -2199,12 +2029,7 @@ def _minimum_seed_count(
         )
         for derivation in active_derivations
     )
-    closure_cache: dict[int, int] = {}
-
     def closure(seed: int) -> int:
-        cached = closure_cache.get(seed)
-        if cached is not None:
-            return cached
         known = seed
         changed = True
         while changed:
@@ -2213,7 +2038,6 @@ def _minimum_seed_count(
                 if known & required == required and not known & output:
                     known |= output
                     changed = True
-        closure_cache[seed] = known
         return known
 
     for size in range(len(physical_variables) + 1):
@@ -2228,10 +2052,52 @@ def _minimum_seed_count(
     return len(physical_variables)
 
 
+def _identity_checks(
+    identity: Identity,
+    ready: list,
+    output: Callable[[object], str],
+) -> list:
+    """Select one proof per identity, or each required clipped output."""
+    if not ready:
+        return []
+    if not identity.verification_outputs:
+        return ready[:1]
+    first_by_output = {}
+    for item in ready:
+        first_by_output.setdefault(output(item), item)
+    return [
+        first_by_output[out]
+        for out in identity.verification_outputs
+        if out in first_by_output
+    ]
+
+
 def _analyse_finalist(
     ctx: RunContext,
     graph: ClosedGraph,
+    *,
+    recovery: bool = False,
 ) -> ClosedGraph:
+    # Dense motifs intentionally skip virtual closure during candidate
+    # search.  Complete only the bounded finalist set so public virtuals,
+    # evidence, certification, and diagnosis all see the full semantic
+    # graph without taxing every discarded state.
+    def merge_numeric(out, alternatives):
+        merged = _merge_numeric_alternatives(ctx, alternatives)
+        if merged is None:
+            graph.conflicts.append(
+                f"conflicting finalist derivations for {out}"
+            )
+        return merged
+
+    graph.known, _ = _propagate_virtuals(
+        dict(graph.known),
+        frozenset(DERIVATION_BY_ID),
+        ctx.derive,
+        lambda value: value.id,
+        merge_numeric,
+    )
+
     physical = {
         variable: value
         for variable, value in graph.known.items()
@@ -2242,6 +2108,26 @@ def _analyse_finalist(
         (1 << int(value.column) for value in physical.values()),
         0,
     )
+    physical_variables = frozenset(physical)
+
+    # Evidence must pass numerically.  Certification constraints are broader:
+    # once a semantic mapping is selected, every predefined identity touching
+    # a printed variable must be checked even when several rows violate it.
+    # Otherwise repeated errors can make their own identity disappear before
+    # strict certification sees them.
+    certification_derivations = frozenset(
+        derivation.id
+        for identity in IDENTITIES
+        if physical_variables.intersection(identity.variables)
+        for derivation in identity.derivations
+        if (
+            derivation.out in graph.known
+            and all(
+                variable in graph.known
+                for variable in derivation.inputs
+            )
+        )
+    )
 
     # Verify each identity once, not every algebraic rearrangement.  Once the
     # identity holds, its ready derivations are computational directions over
@@ -2249,7 +2135,18 @@ def _analyse_finalist(
     # provenance only.  Clipped U/O presentation has two forward claims and
     # therefore explicitly verifies both outputs.
     active = []
+    evidence_cfg = (
+        replace(
+            ctx.cfg,
+            ident_frac=ctx.cfg.shadow_audit_frac,
+        )
+        if recovery
+        and ctx.cfg.ident_frac > ctx.cfg.shadow_audit_frac
+        else ctx.cfg
+    )
     for identity in IDENTITIES:
+        if not identity.evidence:
+            continue
         ready = [
             derivation
             for derivation in identity.derivations
@@ -2263,26 +2160,11 @@ def _analyse_finalist(
         ]
         if not ready:
             continue
-        if identity.verification_outputs:
-            checks = [
-                next(
-                    (
-                        derivation
-                        for derivation in ready
-                        if derivation.out == output
-                    ),
-                    None,
-                )
-                for output in identity.verification_outputs
-                if output in graph.known
-            ]
-            checks = [
-                derivation
-                for derivation in checks
-                if derivation is not None
-            ]
-        else:
-            checks = ready[:1]
+        checks = _identity_checks(
+            identity,
+            ready,
+            lambda derivation: derivation.out,
+        )
         if not checks:
             continue
         verified = True
@@ -2293,7 +2175,7 @@ def _analyse_finalist(
                 or not _values_agree(
                     predicted,
                     graph.known[derivation.out],
-                    ctx.cfg,
+                    evidence_cfg,
                     robust=True,
                 )
             ):
@@ -2339,9 +2221,7 @@ def _analyse_finalist(
         physical_variables,
         tuple(active),
     )
-    graph.active_derivations = frozenset(
-        derivation.id for derivation in active
-    )
+    graph.certification_derivations = certification_derivations
     graph.checkable = checkable
     graph.coverage = coverage
     graph.minimum_seeds = minimum_seeds
@@ -2359,9 +2239,11 @@ def _coverage_ok(graph: ClosedGraph, cfg: Config) -> bool:
 def _analyse_finalists(
     ctx: RunContext,
     closed: list[ClosedGraph],
+    *,
+    recovery: bool = False,
 ) -> list[ClosedGraph]:
     analysed = [
-        _analyse_finalist(ctx, graph)
+        _analyse_finalist(ctx, graph, recovery=recovery)
         for graph in closed[: ctx.cfg.finalist_limit]
         if all(variable in graph.known for variable in CORE_VARS)
     ]
@@ -2469,56 +2351,30 @@ def _propagate_virtuals(
     return known, proofs
 
 
-def _reconstruct_target(
+def _merge_numeric_alternatives(
     ctx: RunContext,
-    graph: ClosedGraph,
-    physical: dict[str, NumericValue],
-    target: str,
-) -> tuple[Optional[NumericValue], Optional[str]]:
-    known = {
-        variable: value
-        for variable, value in physical.items()
-        if variable != target
-    }
-
-    def merge_numeric(out, alternatives):
-        del out
-        derivation, value = min(
-            alternatives,
-            key=lambda item: (
-                item[1].support.bit_count(),
-                item[0].id,
-            ),
-        )
-        if not all(
-            _values_agree(
-                value,
-                other,
-                ctx.cfg,
-                robust=True,
-            )
-            for _, other in alternatives
-        ):
-            return None
-        return value, sorted(
-            {candidate.id for candidate, _ in alternatives}
-        )
-
-    known, proofs = _propagate_virtuals(
-        known,
-        graph.active_derivations,
-        ctx.derive,
-        lambda value: value.id,
-        merge_numeric,
+    alternatives: list[tuple[Derivation, NumericValue]],
+) -> Optional[tuple[NumericValue, list[str]]]:
+    derivation, value = min(
+        alternatives,
+        key=lambda item: (
+            item[1].support.bit_count(),
+            item[0].id,
+        ),
     )
-    value = known.get(target)
-    if value is None:
-        return None, None
-    basis = proofs.get(target, [])
-    return value, (
-        basis[0]
-        if len(basis) == 1
-        else value.derivation
+    if not all(
+        _values_agree(
+            value,
+            other,
+            ctx.cfg,
+            robust=True,
+        )
+        for _, other in alternatives
+    ):
+        return None
+    return value, sorted(
+        candidate.id
+        for candidate, _ in alternatives
     )
 
 
@@ -2537,44 +2393,69 @@ def _certify(
     witnesses = []
     failures = []
     incomplete = []
-    direct: dict[str, list[tuple[Derivation, NumericValue]]] = {}
-    for derivation_id in graph.active_derivations:
-        derivation = DERIVATION_BY_ID[derivation_id]
-        if (
-            derivation.out not in physical
-            or not all(
-                variable in physical
-                for variable in derivation.inputs
-            )
-        ):
-            continue
-        predicted = ctx.derive(derivation, physical)
-        if predicted is not None:
-            direct.setdefault(derivation.out, []).append(
-                (derivation, predicted)
-            )
 
-    for variable in sorted(graph.checkable, key=VAR_INDEX.__getitem__):
-        observed = physical[variable]
-        direct_options = direct.get(variable, [])
-        if direct_options:
-            derivation, expected = min(
-                direct_options,
-                key=lambda item: (
-                    item[1].support.bit_count(),
-                    item[0].id,
+    def merge_numeric(out, alternatives):
+        del out
+        return _merge_numeric_alternatives(ctx, alternatives)
+
+    if ctx.table.row_index.size == ctx.table.full.shape[0]:
+        full_known = graph.known
+    else:
+        full_known, _ = _propagate_virtuals(
+            dict(physical),
+            graph.certification_derivations,
+            ctx.derive,
+            lambda value: value.id,
+            merge_numeric,
+        )
+
+    checks = []
+    for identity in IDENTITIES:
+        ready = []
+        for derivation in identity.derivations:
+            if (
+                derivation.id not in graph.certification_derivations
+                or derivation.out not in physical
+                or not all(
+                    variable in full_known
+                    for variable in derivation.inputs
+                )
+            ):
+                continue
+            output_column = int(physical[derivation.out].column)
+            input_support = reduce(
+                or_,
+                (
+                    full_known[variable].support
+                    for variable in derivation.inputs
                 ),
+                0,
             )
-            proof = derivation.id
-        else:
-            expected, proof = _reconstruct_target(
-                ctx,
-                graph,
-                physical,
-                variable,
+            if input_support & (1 << output_column):
+                continue
+            expected = ctx.derive(derivation, full_known)
+            if (
+                expected is not None
+            ):
+                ready.append((derivation, expected))
+        ready.sort(
+            key=lambda item: (
+                item[1].support.bit_count(),
+                item[0].id,
             )
-        if expected is None:
-            continue
+        )
+        checks.extend(
+            (identity, item)
+            for item in _identity_checks(
+                identity,
+                ready,
+                lambda candidate: candidate[0].out,
+            )
+        )
+
+    for identity, (derivation, expected) in checks:
+        variable = derivation.out
+        observed = physical[variable]
         valid = (
             np.isfinite(observed.values)
             & np.isfinite(expected.values)
@@ -2591,14 +2472,9 @@ def _certify(
                 + expected.tolerance
                 + cfg.cert_slack
                 + cfg.cert_money_rel * np.abs(expected.values)
-            )
-        residual = np.abs(observed.values - expected.values)
-        relation = proof or f"{variable}_from_grounded_graph"
-        identity_id = (
-            DERIVATION_BY_ID[proof].identity_id
-            if proof in DERIVATION_BY_ID
-            else "grounded_graph"
         )
+        residual = np.abs(observed.values - expected.values)
+        relation = identity.statement
         witnesses.append(
             Witness(
                 relation=relation,
@@ -2620,7 +2496,7 @@ def _certify(
                     residual[valid].max(initial=0.0)
                 ),
                 weight=1.0,
-                family=identity_id,
+                family=identity.id,
             )
         )
         for row in np.flatnonzero(valid & (residual > tolerance)):
@@ -2652,6 +2528,127 @@ def _certify(
                 }
             )
     return witnesses, failures, incomplete, physical
+
+
+def _audit_shadowed_virtuals(
+    ctx: RunContext,
+    graph: ClosedGraph,
+    labels: list[str],
+) -> tuple[list[RowFailure], dict[int, str]]:
+    """Recover omitted printed money columns after winner selection only.
+
+    A majority-fitting column may certify a virtual value, but it cannot
+    contribute evidence, alter the selected graph, or reroute an anchor.
+    """
+    cfg = ctx.cfg
+    table = ctx.table
+    assigned = set(graph.column_to_var)
+    unassigned = [
+        column
+        for column in range(table.raw.shape[0])
+        if column not in assigned
+    ]
+    if not unassigned:
+        return [], {}
+
+    failures = []
+    recovered = {}
+    for column in unassigned:
+        observed = table.raw[column]
+        candidates = []
+        for variable, value in graph.known.items():
+            if value.column is not None or variable in PCT_VARS:
+                continue
+            strict = (
+                value.tolerance
+                + cfg.money_obs_tol
+                + cfg.cert_slack
+                + cfg.cert_money_rel * np.abs(value.values)
+            )
+            compared = (
+                np.abs(observed)
+                if variable in MAGNITUDE_PRESENTATION_VARS
+                else observed
+            )
+            informative = (
+                (np.abs(value.values) > strict + 1e-9)
+                | (np.abs(compared) > strict + 1e-9)
+            )
+            n_informative = int(informative.sum())
+            if n_informative < cfg.min_informative_rows:
+                continue
+            residual = np.abs(compared - value.values)
+            fit = int(((residual <= strict) & informative).sum())
+            required = max(
+                cfg.min_informative_rows,
+                int(np.ceil(cfg.shadow_audit_frac * n_informative)),
+            )
+            if required <= fit < n_informative:
+                candidates.append(
+                    (
+                        fit / n_informative,
+                        fit,
+                        n_informative,
+                        variable,
+                        value,
+                        strict,
+                        residual,
+                        compared,
+                        informative,
+                    )
+                )
+        if not candidates:
+            continue
+        candidates.sort(
+            key=lambda item: (item[0], item[1]),
+            reverse=True,
+        )
+        best = candidates[0]
+        if (
+            len(candidates) > 1
+            and candidates[1][0:2] == best[0:2]
+            and candidates[1][3] != best[3]
+        ):
+            continue
+        (
+            _,
+            fit,
+            n_informative,
+            variable,
+            value,
+            strict,
+            residual,
+            compared,
+            informative,
+        ) = best
+        recovered[column] = variable
+        bad = np.flatnonzero((residual > strict) & informative)
+        for row in bad:
+            original_row = int(table.row_index[row])
+            failures.append(
+                RowFailure(
+                    relation=(
+                        f"column {column} realizes {variable} "
+                        f"({value.derivation}) but disagrees"
+                    ),
+                    business_form=(
+                        f"unmapped column {column} matches "
+                        f"{VAR_NAMES[variable]} on "
+                        f"{fit}/{n_informative} informative rows"
+                    ),
+                    variable=variable,
+                    column=column,
+                    row_index=original_row,
+                    row_label=labels[original_row],
+                    observed=float(observed[row]),
+                    expected=float(value.values[row]),
+                    difference=float(
+                        compared[row] - value.values[row]
+                    ),
+                    tolerance=float(strict[row]),
+                )
+            )
+    return failures, recovered
 
 
 def _scalar_prediction(
@@ -2802,7 +2799,7 @@ def _row_repair(
 
     known, proofs = _propagate_virtuals(
         known,
-        graph.active_derivations,
+        graph.certification_derivations,
         derive_scalar,
         lambda value: value.key,
         merge_scalars,
@@ -2837,7 +2834,7 @@ def _row_repair(
 
     # A repair must make the entire printed row coherent, not just the
     # identity that proposed it.
-    for derivation_id in graph.active_derivations:
+    for derivation_id in graph.certification_derivations:
         derivation = DERIVATION_BY_ID[derivation_id]
         if (
             derivation.out not in physical
@@ -2932,17 +2929,61 @@ def _minimal_row_repair(
     return "none", []
 
 
+def _unresolved_finding(
+    row: int,
+    label: str,
+    candidates: list[str],
+    failures: list[RowFailure],
+    *,
+    ambiguous: bool,
+) -> Finding:
+    return Finding(
+        row_index=row,
+        row_label=label,
+        culprit_column=None,
+        culprit_variable=None,
+        candidate_variables=candidates,
+        exonerated_variables=[],
+        observed=None,
+        proposed_correction=None,
+        correction_basis=[],
+        confidence="low",
+        classification=(
+            "ambiguous_multi_cell"
+            if ambiguous
+            else "unresolved_constraint_conflict"
+        ),
+        classification_detail=(
+            "Several minimal observation removals can make this row "
+            "internally coherent."
+            if ambiguous
+            else "No unique one- or two-observation repair makes the "
+            "complete row coherent."
+        ),
+        transplant_sources=[],
+        failing_relations=sorted(
+            {failure.relation for failure in failures}
+        ),
+        proof_kind="joint",
+    )
+
+
 def _diagnose(
     graph: ClosedGraph,
     physical: dict[str, NumericValue],
     failures: list[RowFailure],
     labels: list[str],
+    full_matrix: np.ndarray,
     cfg: Config,
 ) -> list[Finding]:
     by_row: dict[int, list[RowFailure]] = {}
     for failure in failures:
         by_row.setdefault(failure.row_index, []).append(failure)
     findings = []
+    full_columns = [
+        full_matrix[:, column]
+        for column in range(full_matrix.shape[1])
+    ]
     for row, row_failures in sorted(by_row.items()):
         status, detail = _minimal_row_repair(
             graph,
@@ -2952,8 +2993,61 @@ def _diagnose(
         )
         if status == "resolved":
             joint = len(detail) > 1
+            suspect_variables = {
+                correction["variable"]
+                for correction in detail
+            }
             for correction in detail:
                 variable = correction["variable"]
+                scale = physical[variable].scale
+                observed = correction["observed"] * scale
+                proposed = correction["proposed"] * scale
+                classification, classification_detail = _classify_error(
+                    observed,
+                    proposed,
+                )
+                basis_families = {
+                    DERIVATION_BY_ID[derivation_id].identity_id
+                    for derivation_id in correction["basis"]
+                    if derivation_id in DERIVATION_BY_ID
+                }
+                proof_kind = (
+                    "joint"
+                    if joint
+                    else (
+                        "direct"
+                        if len(basis_families)
+                        >= cfg.correction_min_families
+                        else "inherited"
+                    )
+                )
+                if proof_kind == "inherited":
+                    classification_detail += (
+                        "; replacement is uniquely determined after every "
+                        "alternative one-cell repair is rejected by the "
+                        "row's other validated identities"
+                    )
+                elif proof_kind == "joint":
+                    classification_detail += (
+                        "; replacement is part of the unique smallest "
+                        f"{len(detail)}-cell graph repair"
+                    )
+                transplant_sources = _transplant_sources(
+                    full_columns,
+                    row,
+                    int(correction["column"]),
+                    observed,
+                )
+                if (
+                    transplant_sources
+                    and classification
+                    in ("unexplained_substitution", "digit_transposition")
+                ):
+                    classification = "neighbor_transplant"
+                    classification_detail = (
+                        "observed value equals a neighboring cell; the "
+                        "unique minimal repair implies the replacement"
+                    )
                 findings.append(
                     Finding(
                         row_index=row,
@@ -2961,85 +3055,46 @@ def _diagnose(
                         culprit_column=correction["column"],
                         culprit_variable=variable,
                         candidate_variables=[variable],
-                        exonerated_variables=[],
-                        observed=correction["observed"],
-                        proposed_correction=correction["proposed"],
-                        correction_basis=correction["basis"],
-                        confidence="high",
-                        classification="internally inconsistent value",
-                        classification_detail=(
-                            "Removing this observation lets the remaining "
-                            "constraint graph reconstruct a unique coherent "
-                            "replacement."
+                        exonerated_variables=sorted(
+                            set(physical) - suspect_variables
                         ),
-                        transplant_sources=[],
+                        observed=observed,
+                        proposed_correction=proposed,
+                        correction_basis=[
+                            IDENTITY_BY_ID[identity_id].statement
+                            for identity_id in sorted(basis_families)
+                        ],
+                        confidence="high",
+                        classification=classification,
+                        classification_detail=classification_detail,
+                        transplant_sources=transplant_sources,
                         failing_relations=sorted(
                             {
                                 failure.relation
                                 for failure in row_failures
                             }
                         ),
-                        proof_kind="joint" if joint else "inherited",
+                        proof_kind=proof_kind,
                     )
                 )
-        elif status == "ambiguous":
-            findings.append(
-                Finding(
-                    row_index=row,
-                    row_label=labels[row],
-                    culprit_column=None,
-                    culprit_variable=None,
-                    candidate_variables=detail,
-                    exonerated_variables=[],
-                    observed=None,
-                    proposed_correction=None,
-                    correction_basis=[],
-                    confidence="low",
-                    classification="ambiguous_multi_cell",
-                    classification_detail=(
-                        "Several minimal observation removals can make this "
-                        "row internally coherent."
-                    ),
-                    transplant_sources=[],
-                    failing_relations=sorted(
-                        {
-                            failure.relation
-                            for failure in row_failures
-                        }
-                    ),
-                    proof_kind="joint",
-                )
-            )
         else:
-            candidates = sorted(
-                {failure.variable for failure in row_failures},
-                key=VAR_INDEX.__getitem__,
-            )
             findings.append(
-                Finding(
-                    row_index=row,
-                    row_label=labels[row],
-                    culprit_column=None,
-                    culprit_variable=None,
-                    candidate_variables=candidates,
-                    exonerated_variables=[],
-                    observed=None,
-                    proposed_correction=None,
-                    correction_basis=[],
-                    confidence="low",
-                    classification="unresolved_constraint_conflict",
-                    classification_detail=(
-                        "No unique one- or two-observation repair makes the "
-                        "complete row coherent."
+                _unresolved_finding(
+                    row,
+                    labels[row],
+                    (
+                        detail
+                        if status == "ambiguous"
+                        else sorted(
+                            {
+                                failure.variable
+                                for failure in row_failures
+                            },
+                            key=VAR_INDEX.__getitem__,
+                        )
                     ),
-                    transplant_sources=[],
-                    failing_relations=sorted(
-                        {
-                            failure.relation
-                            for failure in row_failures
-                        }
-                    ),
-                    proof_kind="joint",
+                    row_failures,
+                    ambiguous=status == "ambiguous",
                 )
             )
     return findings
@@ -3060,42 +3115,70 @@ def _config(config) -> Config:
     return result
 
 
+def _solve_frontier(
+    ctx: RunContext,
+    **discovery_options,
+) -> tuple[list[Fragment], dict, list[ClosedGraph], list[ClosedGraph]]:
+    fragments, discovery = _discover_states(ctx, **discovery_options)
+    closed = _close_unique_states(ctx, fragments) if fragments else []
+    finalists = (
+        _analyse_finalists(
+            ctx,
+            closed,
+            recovery=bool(discovery_options.get("exhaustive")),
+        )
+        if closed
+        else []
+    )
+    return fragments, discovery, closed, finalists
+
+
+def _insufficient(reason: str, diagnostics: dict) -> ValidationResult:
+    return ValidationResult(
+        status=INSUFFICIENT,
+        reason=reason,
+        diagnostics=diagnostics,
+    )
+
+
 def validate_wip(
     columns,
     job_labels=None,
     config=None,
 ) -> ValidationResult:
     cfg = _config(config)
-    matrix, labels = _ingest(columns, job_labels)
+    physical_columns, labels = _ingest(columns, job_labels)
+    matrix = (
+        np.column_stack(physical_columns)
+        if physical_columns
+        else np.empty((0, 0), dtype=float)
+    )
     diagnostics = {
         "engine": "wip2_search_compressed_constraint_graph",
         "notes": [],
         "prepared_once": True,
     }
     if matrix.shape[1] == 0:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason="empty input: no columns provided",
-            diagnostics=diagnostics,
+        return _insufficient(
+            "empty input: no columns provided",
+            diagnostics,
         )
     if matrix.shape[1] < 4:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 f"only {matrix.shape[1]} column(s); too few physical "
                 "observations to ground estimate, progress, and billing"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     complete = np.all(np.isfinite(matrix), axis=1)
     if int(complete.sum()) < cfg.min_rows:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 f"only {int(complete.sum())} usable row(s) of "
                 f"{matrix.shape[0]}; need at least {cfg.min_rows}"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     if np.any(~complete):
         diagnostics["notes"].append(
@@ -3105,69 +3188,29 @@ def validate_wip(
 
     table = PreparedTable.build(matrix, cfg)
     ctx = RunContext(table, cfg)
-    fragments, discovery = _discover_states(ctx)
-    initial_discovery = discovery
-    closed = _close_unique_states(ctx, fragments) if fragments else []
-    finalists = _analyse_finalists(ctx, closed) if closed else []
-
-    # Magnitude is an excellent ordering prior, never a correctness gate.
-    # Widen only after the compressed frontier fails its independent-region
-    # test, then run every plausible additive hub through the same batched
-    # motif kernel and deduplicate before closing any state.
-    widened = not finalists or not _coverage_ok(finalists[0], cfg)
-    if widened:
-        broad_fragments, broad_discovery = _discover_states(
-            ctx,
-            broaden=True,
-        )
-        broad_closed = (
-            _close_unique_states(ctx, broad_fragments)
-            if broad_fragments
-            else []
-        )
-        broad_finalists = (
-            _analyse_finalists(ctx, broad_closed)
-            if broad_closed
-            else []
-        )
-        discovery = {
-            **broad_discovery,
-            "initial_estimate_fragments": initial_discovery[
-                "estimate_fragments"
-            ],
-            "initial_assembled_states": initial_discovery[
-                "canonical_assembled_states"
-            ],
-        }
-        fragments = broad_fragments
-        closed = broad_closed
-        finalists = broad_finalists
-
-    exhaustive_widening = (
-        widened
-        and (
-            not finalists
-            or not _coverage_ok(finalists[0], cfg)
-        )
+    frontiers = (
+        {},
+        {"broaden": True},
+        {"broaden": True, "exhaustive": True},
     )
-    if exhaustive_widening:
-        exhaustive_fragments, exhaustive_discovery = _discover_states(
+    for frontier_index, options in enumerate(frontiers):
+        fragments, discovery, closed, finalists = _solve_frontier(
             ctx,
-            broaden=True,
-            exhaustive=True,
+            **options,
         )
-        exhaustive_closed = (
-            _close_unique_states(ctx, exhaustive_fragments)
-            if exhaustive_fragments
-            else []
-        )
-        exhaustive_finalists = (
-            _analyse_finalists(ctx, exhaustive_closed)
-            if exhaustive_closed
-            else []
-        )
+        if frontier_index == 0:
+            initial_discovery = discovery
+        if finalists and _coverage_ok(finalists[0], cfg):
+            break
+
+    # Magnitude orders the first compressed frontier but never gates
+    # correctness.  Later frontiers progressively admit every plausible
+    # additive hub, then tolerate repeated corruptions during proposal only.
+    widened = frontier_index >= 1
+    exhaustive_widening = frontier_index >= 2
+    if widened:
         discovery = {
-            **exhaustive_discovery,
+            **discovery,
             "initial_estimate_fragments": initial_discovery[
                 "estimate_fragments"
             ],
@@ -3175,9 +3218,6 @@ def validate_wip(
                 "canonical_assembled_states"
             ],
         }
-        fragments = exhaustive_fragments
-        closed = exhaustive_closed
-        finalists = exhaustive_finalists
 
     diagnostics["discovery"] = {
         **discovery,
@@ -3194,27 +3234,24 @@ def validate_wip(
     }
     diagnostics["finalists_analysed"] = len(finalists)
     if not fragments:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 "could not assemble a coherent estimate/progress/billing "
                 "constraint graph from the observed columns"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     if not closed:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason="structural fragments did not close to a semantic graph",
-            diagnostics=diagnostics,
+        return _insufficient(
+            "structural fragments did not close to a semantic graph",
+            diagnostics,
         )
     if not finalists:
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 "candidate graphs did not close to the required semantic core"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
     best = finalists[0]
     if not _coverage_ok(best, cfg):
@@ -3231,13 +3268,12 @@ def validate_wip(
             if best.coverage.get(region, 0)
             < cfg.min_region_checkable
         ]
-        return ValidationResult(
-            status=INSUFFICIENT,
-            reason=(
+        return _insufficient(
+            (
                 "identifiable but not independently validatable across "
                 f"the required business regions: {', '.join(missing)}"
             ),
-            diagnostics=diagnostics,
+            diagnostics,
         )
 
     witnesses, failures, incomplete, physical = _certify(
@@ -3245,12 +3281,27 @@ def validate_wip(
         best,
         labels,
     )
+    shadow_failures, shadow_mapping = _audit_shadowed_virtuals(
+        ctx,
+        best,
+        labels,
+    )
+    failures.extend(shadow_failures)
+    full_values = bool(physical) and next(iter(physical.values())).full
+    for column, variable in shadow_mapping.items():
+        if variable not in physical:
+            physical[variable] = ctx.observed(
+                variable,
+                column,
+                full=full_values,
+            )
     findings = (
         _diagnose(
             best,
             physical,
             failures,
             labels,
+            table.full,
             cfg,
         )
         if failures
@@ -3291,6 +3342,17 @@ def validate_wip(
         column: variable
         for column, variable in sorted(best.column_to_var.items())
     }
+    occupied_variables = set(mapping.values())
+    for column, variable in sorted(shadow_mapping.items()):
+        if column not in mapping and variable not in occupied_variables:
+            mapping[column] = variable
+            occupied_variables.add(variable)
+    if shadow_mapping:
+        diagnostics["shadow_columns_promoted"] = {
+            column: variable
+            for column, variable in sorted(shadow_mapping.items())
+            if mapping.get(column) == variable
+        }
     diagnostics["evidence"] = {
         "physical_observations": len(mapping),
         "minimum_generating_seeds": best.minimum_seeds,
@@ -3311,7 +3373,7 @@ def validate_wip(
     }
     diagnostics["matcher"] = {
         "batched_calls": ctx.score_batches,
-        "predictions_scored": ctx.score_predictions,
+        "predictions_scored": ctx.score_misses,
     }
     diagnostics["winning_sources"] = sorted(best.fragment.sources)
     diagnostics["winning_structural_score"] = best.fragment.score
@@ -3355,7 +3417,7 @@ def validate_wip(
     virtuals = {
         variable: value.derivation or "constraint-graph closure"
         for variable, value in best.known.items()
-        if value.column is None
+        if value.column is None and variable not in occupied_variables
     }
     estimate_orientation = ""
     if "C" in best.known and best.known["C"].column is not None:
