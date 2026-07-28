@@ -46,14 +46,8 @@ def _plural(n, word):
 
 def _narrate(node: str, up: dict, state: dict) -> list[str]:
     if node == "ingest":
-        if up.get("fragments") and not up.get("chunks"):
-            f = up["fragments"][0]
-            return [f"Spreadsheet cells read natively: "
-                    f"{_plural(len(f['rows']), 'row')} x "
-                    f"{len(f['headers'])} columns, no vision model needed"]
-        n = len(up.get("chunks") or [])
-        if n:
-            return ["Reading schedule"]
+        if up.get("fragments") or up.get("chunks"):
+            return ["now watch me nay nayle..."]
         return []
     if node == "extract_chunks":
         frs = up.get("fragments") or []
@@ -185,7 +179,7 @@ def _stream(initial: dict):
     def gen():
         yield ("event: progress\ndata: "
                + json.dumps({"node": "upload",
-                             "message": "Upload received. Reading document"})
+                             "message": "Watch me wipple..."})
                + "\n\n")
         while True:
             try:
