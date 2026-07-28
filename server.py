@@ -232,11 +232,10 @@ def _initial(**kw) -> dict:
 @app.get("/")
 def index():
     html = Path("static/index.html").read_text(encoding="utf-8")
-    html = html.replace(
-        "</body>",
-        '<script src="/static/wipple_ticker.js"></script>\n</body>',
-        1,
-    )
+    head, marker, tail = html.rpartition("</body>")
+    if marker:
+        html = (head + '<script src="/static/wipple_ticker.js"></script>\n'
+                + marker + tail)
     return HTMLResponse(html)
 
 
