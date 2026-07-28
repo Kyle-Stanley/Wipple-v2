@@ -499,6 +499,82 @@ def test_incomplete_rows_are_retained_for_full_document_certification():
     )
 
 
+@pytest.mark.parametrize("n", (8, 12, 20))
+@pytest.mark.parametrize("row_position", ("first", "middle", "last"))
+def test_blank_rows_are_excluded_from_candidate_specific_identification(
+    n,
+    row_position,
+):
+    matrix = make_rich_wip(n=n, decoys=0)
+    row = {
+        "first": 0,
+        "middle": n // 2,
+        "last": n - 1,
+    }[row_position]
+    matrix[row] = 0.0
+
+    current = wip.validate_wip(matrix, labels(matrix))
+    rebuilt = wip2.validate_wip(matrix, labels(matrix))
+
+    assert rebuilt.status == current.status == wip.SUCCESS
+    assert rebuilt.mapping == current.mapping
+    assert len(rebuilt.mapping) == 10
+    assert rebuilt.failures == []
+    assert np.array_equal(rebuilt.row_index, current.row_index)
+    assert row not in rebuilt.row_index
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    ((0, 0.0), (1, 0.0), (0, -1.0)),
+)
+def test_nonpositive_contract_or_cost_row_is_not_divided_through(
+    column,
+    value,
+):
+    matrix = make_rich_wip(n=12, decoys=0)
+    row = 3
+    matrix[row, column] = value
+
+    current = wip.validate_wip(matrix, labels(matrix))
+    rebuilt = wip2.validate_wip(matrix, labels(matrix))
+
+    assert rebuilt.status == current.status == wip.SUCCESS
+    assert rebuilt.mapping == current.mapping
+    assert rebuilt.failures == []
+    assert np.array_equal(rebuilt.row_index, current.row_index)
+    assert row not in rebuilt.row_index
+
+
+def test_diagnosis_keeps_original_row_indices_after_degenerate_row():
+    matrix = make_rich_wip(n=28, decoys=0)
+    matrix[2] = 0.0
+    matrix[7, 4] = matrix[7, 4] / 10.0
+
+    current = wip.validate_wip(matrix, labels(matrix))
+    rebuilt = wip2.validate_wip(matrix, labels(matrix))
+
+    assert rebuilt.status == current.status == wip.FAILED
+    assert rebuilt.mapping == current.mapping
+    assert [
+        (
+            finding.row_index,
+            finding.culprit_column,
+            finding.proposed_correction,
+            finding.classification,
+        )
+        for finding in rebuilt.findings
+    ] == [
+        (
+            finding.row_index,
+            finding.culprit_column,
+            finding.proposed_correction,
+            finding.classification,
+        )
+        for finding in current.findings
+    ]
+
+
 def test_public_api_accepts_column_sequences_like_current_validator():
     matrix = make_wip(n=24)
     columns = [matrix[:, column] for column in range(matrix.shape[1])]

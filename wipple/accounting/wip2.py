@@ -471,6 +471,7 @@ class NumericValue:
     values: np.ndarray
     tolerance: np.ndarray
     support: int
+    view_id: int
     column: Optional[int] = None
     scale: float = 1.0
     grid: Optional[float] = None
@@ -493,6 +494,13 @@ class RunContext:
         self.table = table
         self.cfg = cfg
         self._next_id = 1
+        self._next_view_id = 0
+        self._view_cache: dict[tuple[bool, bytes], int] = {}
+        self._views: dict[int, tuple[bool, np.ndarray]] = {}
+        self._identification_row_cache: dict[
+            tuple[int, int, Optional[int]],
+            np.ndarray,
+        ] = {}
         self.observed_cache: dict[tuple, NumericValue] = {}
         self.derived_cache: dict[tuple, NumericValue] = {}
         self.score_cache: dict[tuple, ScoreVectors] = {}
@@ -507,6 +515,63 @@ class RunContext:
         self._next_id += 1
         return value_id
 
+    def _view(
+        self,
+        rows: Optional[np.ndarray],
+        *,
+        full: bool,
+    ) -> tuple[int, np.ndarray]:
+        size = (
+            self.table.full.shape[0]
+            if full
+            else self.table.raw.shape[1]
+        )
+        if rows is None:
+            row_array = np.arange(size, dtype=np.int64)
+        else:
+            row_array = np.ascontiguousarray(rows, dtype=np.int64)
+        key = (bool(full), row_array.tobytes())
+        view_id = self._view_cache.get(key)
+        if view_id is None:
+            view_id = self._next_view_id
+            self._next_view_id += 1
+            row_array = _readonly(row_array)
+            self._view_cache[key] = view_id
+            self._views[view_id] = (bool(full), row_array)
+        else:
+            row_array = self._views[view_id][1]
+        return view_id, row_array
+
+    def identification_rows(
+        self,
+        v_column: int,
+        c_column: int,
+        *,
+        limit: Optional[int] = None,
+    ) -> np.ndarray:
+        """Immutable row view for one proposed V/C normalization.
+
+        V and C are the graph's normalizing denominators.  Blank, subtotal,
+        and other nonpositive rows are not evidence and are never divided
+        through.
+        """
+        key = (int(v_column), int(c_column), limit)
+        cached = self._identification_row_cache.get(key)
+        if cached is not None:
+            return cached
+        rows = np.flatnonzero(
+            (self.table.raw[v_column] > 0.0)
+            & (self.table.raw[c_column] > 0.0)
+        )
+        if limit is not None and rows.size > limit:
+            positions = np.unique(
+                np.linspace(0, rows.size - 1, limit).astype(int)
+            )
+            rows = rows[positions]
+        rows = _readonly(rows)
+        self._identification_row_cache[key] = rows
+        return rows
+
     def observed(
         self,
         variable: str,
@@ -514,16 +579,19 @@ class RunContext:
         *,
         scale: float = 1.0,
         full: bool = False,
+        rows: Optional[np.ndarray] = None,
     ) -> NumericValue:
-        key = (variable, int(column), float(scale), bool(full))
+        view_id, view_rows = self._view(rows, full=full)
+        key = (variable, int(column), float(scale), view_id)
         cached = self.observed_cache.get(key)
         if cached is not None:
             return cached
-        values = (
+        source = (
             self.table.full[:, column]
             if full
             else self.table.raw[column]
         )
+        values = source[view_rows]
         if scale != 1.0:
             values = values / scale
         if variable in MAGNITUDE_PRESENTATION_VARS:
@@ -546,6 +614,7 @@ class RunContext:
                 np.full(np.asarray(values).shape, tolerance, dtype=float)
             ),
             support=1 << int(column),
+            view_id=view_id,
             column=int(column),
             scale=float(scale),
             grid=grid,
@@ -561,10 +630,11 @@ class RunContext:
     ) -> Optional[NumericValue]:
         inputs = tuple(known[var] for var in derivation.inputs)
         full = inputs[0].full
-        if any(value.full != full for value in inputs):
-            raise ValueError("cannot combine identification and full-row values")
+        view_id = inputs[0].view_id
+        if any(value.view_id != view_id for value in inputs):
+            raise ValueError("cannot combine values from different row views")
         key = (
-            bool(full),
+            view_id,
             derivation.id,
             tuple(value.id for value in inputs),
         )
@@ -590,6 +660,7 @@ class RunContext:
             values=_readonly(output),
             tolerance=_readonly(np.maximum(tolerance, 1e-12)),
             support=support,
+            view_id=view_id,
             derivation=derivation.id,
             full=full,
         )
@@ -696,7 +767,7 @@ class RunContext:
         requested = list(requests)
         keys = []
         misses: dict[
-            tuple[str, bool],
+            tuple[str, bool, int],
             list[tuple[tuple, NumericValue]],
         ] = {}
         for value, derivation in requested:
@@ -711,11 +782,11 @@ class RunContext:
                 self.score_hits += 1
                 continue
             misses.setdefault(
-                (derivation.kind, magnitude),
+                (derivation.kind, magnitude, value.view_id),
                 [],
             ).append((key, value))
 
-        for (kind, magnitude), group in misses.items():
+        for (kind, magnitude, view_id), group in misses.items():
             # A value can appear through more than one pending derivation.
             # Structural cache identity makes that one numeric request.
             unique = dict(group)
@@ -728,12 +799,17 @@ class RunContext:
             predicted_tolerances = np.stack(
                 [value.tolerance for _, value in group]
             )
+            full, rows = self._views[view_id]
+            if full:
+                raise ValueError(
+                    "full-row values are not physical-search predictions"
+                )
             scores = self.score_arrays(
                 predictions,
                 predicted_tolerances,
                 kind,
                 np.arange(self.table.raw.shape[0]),
-                np.arange(self.table.raw.shape[1]),
+                rows,
                 magnitude=magnitude,
             )
 
@@ -778,8 +854,11 @@ def _values_agree(
     cfg: Config,
     *,
     robust: bool,
+    rows: Optional[np.ndarray] = None,
 ) -> bool:
     valid = np.isfinite(left.values) & np.isfinite(right.values)
+    if rows is not None:
+        valid &= rows
     if int(valid.sum()) < cfg.min_informative_rows:
         return False
     tolerance = left.tolerance + right.tolerance + 1e-9
@@ -904,7 +983,10 @@ def _batch_matches(
     kind: str,
     magnitude: bool = False,
     excluded: Optional[np.ndarray] = None,
+    rows: Optional[np.ndarray] = None,
 ) -> list[StructuralMatch]:
+    if rows is None:
+        rows = ctx.table.sample_index
     if kind == "pct":
         valid = (
             ctx.table.percent_ratio_valid
@@ -921,7 +1003,7 @@ def _batch_matches(
         predicted_tolerance,
         kind,
         available,
-        ctx.table.sample_index,
+        rows,
         magnitude=magnitude,
     )
     if excluded is not None:
@@ -1265,6 +1347,13 @@ def _estimate_fragments(
                 continue
 
             for c_column, g_column, estimate_spread in orientations:
+                estimate_sample = ctx.identification_rows(
+                    v_column,
+                    c_column,
+                    limit=table.sample_index.size,
+                )
+                if estimate_sample.size < cfg.min_rows:
+                    continue
                 base = [
                     Assignment("V", v_column),
                     Assignment("C", c_column),
@@ -1276,17 +1365,23 @@ def _estimate_fragments(
                 ]
                 with np.errstate(divide="ignore", invalid="ignore"):
                     margin = (
-                        table.raw[g_column, sample]
-                        / table.raw[v_column, sample]
+                        table.raw[g_column, estimate_sample]
+                        / table.raw[v_column, estimate_sample]
                     )
                 margin_tol = _tol_div(
                     (
-                        table.raw[g_column, sample],
-                        table.raw[v_column, sample],
+                        table.raw[g_column, estimate_sample],
+                        table.raw[v_column, estimate_sample],
                     ),
                     (
-                        np.full(sample.size, cfg.money_obs_tol),
-                        np.full(sample.size, cfg.money_obs_tol),
+                        np.full(
+                            estimate_sample.size,
+                            cfg.money_obs_tol,
+                        ),
+                        np.full(
+                            estimate_sample.size,
+                            cfg.money_obs_tol,
+                        ),
                     ),
                 )[None, :]
                 if available.size:
@@ -1296,8 +1391,13 @@ def _estimate_fragments(
                         margin_tol,
                         available,
                         kind="pct",
+                        rows=estimate_sample,
                     )[0]
-                    if _accepted(margin_match, sample.size, cfg):
+                    if _accepted(
+                        margin_match,
+                        estimate_sample.size,
+                        cfg,
+                    ):
                         base.append(
                             Assignment(
                                 "M",
@@ -1400,14 +1500,20 @@ def _progress_fragments(
 ) -> list[Fragment]:
     table = ctx.table
     cfg = ctx.cfg
-    sample = table.sample_index
-    rows = sample.size
     results = []
 
     for estimate in estimates:
         mapping = estimate.mapping
         v_column = mapping["V"].column
         c_column = mapping["C"].column
+        sample = ctx.identification_rows(
+            v_column,
+            c_column,
+            limit=table.sample_index.size,
+        )
+        rows = sample.size
+        if rows < cfg.min_rows:
+            continue
         available = _unassigned_columns(table, estimate)
         candidates = available
         if candidates.size == 0:
@@ -1454,19 +1560,19 @@ def _progress_fragments(
         matches_by_variable = {
             "Q": _batch_matches(
                 ctx, Q, Q_tol, available,
-                kind="money", excluded=candidates,
+                kind="money", excluded=candidates, rows=sample,
             ),
             "E": _batch_matches(
                 ctx, E, E_tol, available,
-                kind="money", excluded=candidates,
+                kind="money", excluded=candidates, rows=sample,
             ),
             "H": _batch_matches(
                 ctx, H, H_tol, available,
-                kind="money", excluded=candidates,
+                kind="money", excluded=candidates, rows=sample,
             ),
             "P": _batch_matches(
                 ctx, P, P_tol, available,
-                kind="pct", excluded=candidates,
+                kind="pct", excluded=candidates, rows=sample,
             ),
         }
         # Q alone is only an additive complement and cannot orient D.
@@ -1494,8 +1600,6 @@ def _billing_fragments(
 ) -> list[Fragment]:
     table = ctx.table
     cfg = ctx.cfg
-    sample = table.sample_index
-    rows = sample.size
     results = []
 
     for progress_fragment in progress_fragments:
@@ -1503,6 +1607,14 @@ def _billing_fragments(
         v_column = mapping["V"].column
         c_column = mapping["C"].column
         d_column = mapping["D"].column
+        sample = ctx.identification_rows(
+            v_column,
+            c_column,
+            limit=table.sample_index.size,
+        )
+        rows = sample.size
+        if rows < cfg.min_rows:
+            continue
         available = _unassigned_columns(table, progress_fragment)
         candidates = available
         if candidates.size == 0:
@@ -1551,7 +1663,7 @@ def _billing_fragments(
         matches_by_variable = {
             "N": _batch_matches(
                 ctx, N, net_tol, available,
-                kind="money", excluded=candidates,
+                kind="money", excluded=candidates, rows=sample,
             ),
             "U": _batch_matches(
                 ctx,
@@ -1561,6 +1673,7 @@ def _billing_fragments(
                 kind="money",
                 magnitude=True,
                 excluded=candidates,
+                rows=sample,
             ),
             "O": _batch_matches(
                 ctx,
@@ -1570,14 +1683,15 @@ def _billing_fragments(
                 kind="money",
                 magnitude=True,
                 excluded=candidates,
+                rows=sample,
             ),
             "RB": _batch_matches(
                 ctx, RB, rb_tol, available,
-                kind="money", excluded=candidates,
+                kind="money", excluded=candidates, rows=sample,
             ),
             "PB": _batch_matches(
                 ctx, PB, pb_tol, available,
-                kind="pct", excluded=candidates,
+                kind="pct", excluded=candidates, rows=sample,
             ),
         }
         results.extend(
@@ -1695,6 +1809,8 @@ class ClosedGraph:
     known: dict[str, NumericValue]
     column_to_var: dict[int, str]
     conflicts: list[str]
+    rows: np.ndarray
+    row_index: np.ndarray
     certification_derivations: frozenset[str] = frozenset()
     checkable: frozenset[str] = frozenset()
     coverage: dict[str, int] = field(default_factory=dict)
@@ -1825,6 +1941,12 @@ def _close_graph(
     ctx: RunContext,
     fragment: Fragment,
 ) -> ClosedGraph:
+    mapping = fragment.mapping
+    rows = ctx.identification_rows(
+        mapping["V"].column,
+        mapping["C"].column,
+    )
+    row_index = _readonly(ctx.table.row_index[rows])
     known: dict[str, NumericValue] = {}
     column_to_var: dict[int, str] = {}
     for assignment in fragment.assignments:
@@ -1832,6 +1954,7 @@ def _close_graph(
             assignment.variable,
             assignment.column,
             scale=assignment.scale,
+            rows=rows,
         )
         column_to_var[assignment.column] = assignment.variable
 
@@ -1846,6 +1969,8 @@ def _close_graph(
             known=known,
             column_to_var=column_to_var,
             conflicts=[],
+            rows=_readonly(rows),
+            row_index=row_index,
         )
 
     queue = deque(known)
@@ -1968,6 +2093,8 @@ def _close_graph(
         known=known,
         column_to_var=column_to_var,
         conflicts=conflicts,
+        rows=_readonly(rows),
+        row_index=row_index,
     )
 
 
@@ -2274,7 +2401,10 @@ def _full_physical_values(
     ctx: RunContext,
     graph: ClosedGraph,
 ) -> dict[str, NumericValue]:
-    if ctx.table.row_index.size == ctx.table.full.shape[0]:
+    if (
+        graph.rows.size == ctx.table.raw.shape[1]
+        and ctx.table.row_index.size == ctx.table.full.shape[0]
+    ):
         return {
             variable: value
             for variable, value in graph.known.items()
@@ -2358,6 +2488,7 @@ def _propagate_virtuals(
 def _merge_numeric_alternatives(
     ctx: RunContext,
     alternatives: list[tuple[Derivation, NumericValue]],
+    rows: Optional[np.ndarray] = None,
 ) -> Optional[tuple[NumericValue, list[str]]]:
     derivation, value = min(
         alternatives,
@@ -2372,6 +2503,7 @@ def _merge_numeric_alternatives(
             other,
             ctx.cfg,
             robust=True,
+            rows=rows,
         )
         for _, other in alternatives
     ):
@@ -2397,12 +2529,20 @@ def _certify(
     witnesses = []
     failures = []
     incomplete = []
+    complete = np.all(np.isfinite(ctx.table.full), axis=1)
+    certified_rows = ~complete
+    certified_rows = certified_rows.copy()
+    certified_rows[graph.row_index] = True
 
     def merge_numeric(out, alternatives):
         del out
-        return _merge_numeric_alternatives(ctx, alternatives)
+        return _merge_numeric_alternatives(
+            ctx,
+            alternatives,
+            rows=certified_rows,
+        )
 
-    if ctx.table.row_index.size == ctx.table.full.shape[0]:
+    if physical and not next(iter(physical.values())).full:
         full_known = graph.known
     else:
         full_known, _ = _propagate_virtuals(
@@ -2463,6 +2603,7 @@ def _certify(
         valid = (
             np.isfinite(observed.values)
             & np.isfinite(expected.values)
+            & certified_rows
         )
         if variable in PCT_VARS:
             tolerance = (
@@ -2522,7 +2663,7 @@ def _certify(
                     tolerance=float(tolerance[row]),
                 )
             )
-        missing = np.flatnonzero(~valid)
+        missing = np.flatnonzero(certified_rows & ~valid)
         if missing.size:
             incomplete.append(
                 {
@@ -2558,7 +2699,7 @@ def _audit_shadowed_virtuals(
     failures = []
     recovered = {}
     for column in unassigned:
-        observed = table.raw[column]
+        observed = table.raw[column, graph.rows]
         candidates = []
         for variable, value in graph.known.items():
             if value.column is not None or variable in PCT_VARS:
@@ -2628,7 +2769,7 @@ def _audit_shadowed_virtuals(
         recovered[column] = variable
         bad = np.flatnonzero((residual > strict) & informative)
         for row in bad:
-            original_row = int(table.row_index[row])
+            original_row = int(graph.row_index[row])
             failures.append(
                 RowFailure(
                     relation=(
@@ -3414,6 +3555,12 @@ def validate_wip(
     }
     diagnostics["winning_sources"] = sorted(best.fragment.sources)
     diagnostics["winning_structural_score"] = best.fragment.score
+    degenerate_rows = int(table.row_index.size - best.rows.size)
+    if degenerate_rows:
+        diagnostics["notes"].append(
+            f"{degenerate_rows} complete but nonpositive V/C row(s) excluded "
+            "from identification and division-based certification"
+        )
     if incomplete:
         diagnostics["incomplete_full_document_checks"] = incomplete
 
@@ -3478,7 +3625,7 @@ def validate_wip(
             for variable in CORE_VARS
             if variable in best.known
         },
-        row_index=table.row_index.copy(),
+        row_index=best.row_index.copy(),
         witnesses=witnesses,
         failures=failures,
         findings=findings,
