@@ -1,0 +1,153 @@
+1444-function runDuration(seconds){
+1445-  if(!(seconds>0))return"";
+1446-  if(seconds<60)return`${seconds.toFixed(1)}s`;
+1447-  const m=Math.floor(seconds/60);
+1448-  return`${m}m ${Math.round(seconds-60*m)}s`;
+1449-}
+1450-/* One reference line under the batch: what the whole upload cost in time and
+1451-   money. The elapsed figure is the batch's wall clock -- summing the
+1452:   documents' own elapsed_seconds would double-count the overlap they were
+1453-   run with, and report a number nobody waited. */
+1454-function batchRunFoot(){
+1455-  const bits=[];
+1456-  if(BATCH_ITEMS.length)
+1457-    bits.push(`${BATCH_ITEMS.length} document${BATCH_ITEMS.length===1?"":"s"}`);
+1458-  const elapsed=runDuration(BATCH_RUN?.seconds);
+1459-  if(elapsed)bits.push(elapsed);
+1460:  const metrics=BATCH_ITEMS.map(x=>x.doc?.metrics).filter(Boolean);
+1461:  const calls=metrics.reduce((n,m)=>n+(+m.api_calls||0),0);
+1462:  const cost=metrics.reduce((n,m)=>n+(+m.cost_usd||0),0);
+1463-  if(calls)bits.push(`${calls} model call${calls===1?"":"s"}`);
+1464-  if(cost)bits.push(`total $${cost.toFixed(4)}`);
+1465-  return bits.join(" · ");
+1466-}
+1467-function batchDocError(doc){
+1468-  if(!doc)return"Processing did not return a report.";
+1469-  if(doc.overall_status==="pipeline_error")
+1470-    return doc.validator_reason||"The processing pipeline stopped unexpectedly.";
+--
+2439-      dtd={present:true,allMatch:tc.all_match,mismatches:mism,
+2440-        allExplained:mism.length>0&&mism.every(m=>m.explained),docLevel:true};
+2441-    }
+2442-    for(const [sectionIndex,sec] of (t.sections||[]).entries()){
+2443-      const rep=sec.report||{};
+2444-      const rawValidation=sec.validation||sec.validator||rep.validation||null;
+2445-      if(!rep.totals&&Array.isArray(rawValidation?.totals))rep.totals=rawValidation.totals;
+2446-      if(!rep.totals_scope&&rawValidation?.totals_scope)rep.totals_scope=rawValidation.totals_scope;
+2447:      rep.metrics=doc.metrics||rep.metrics;
+2448-      rep._table_totals_check=tc||null;
+2449-      rep._table_numeric_col_map=t.numeric_col_map||[];
+2450-      rep._table_headers=t.headers||[];
+2451-      rep._doc_totals_detail=dtd;
+2452-      rep._extra=[];
+2453-      for(const mf of (t.misalignment_findings||[])){
+2454-        rep._extra.push({st:"warn",
+2455-          label:"Page "+(mf.pages||[]).join(", ")+" was read with a column offset \u2014 repaired and re-certified",
+--
+2585-    source:(reps[0]?.source||"WIP schedule")+` · combined ${pageLabel}`,
+2586-    overall_status:degraded
+2587-      ?(reps.some(r=>r.overall_status==="user_mapped_unverified")
+2588-        ?"user_mapped_unverified"
+2589-        :reps.some(r=>["header_mapped_unverified","llm_mapped_unverified"].includes(r.overall_status))
+2590-          ?"header_mapped_unverified":"unmapped")
+2591-      :"verified",
+2592-    validator_status:reps.some(r=>r.validator_status==="validation_failed")?"validation_failed":"success",
+2593:    findings:[],witnesses:[],metrics:DOC?.metrics||reps[0]?.metrics||{},
+2594-    _combinedSectionCount:ordered.length,_combinedPages:uniquePages,_combinedPageLabel:pageLabel,
+2595-    table:{columns,values:rows.map(r=>columns.map(c=>r[c.variable]??null)),
+2596-      job_ids:ids,job_names:names,job_labels:labels},
+2597-    analysis:{schema:"wip",jobs,corrections:[],tuning,coverage:{
+2598-      numeric_cols:columns.length,mapped_cols:columns.length}}
+2599-  };
+2600-}
+2601-function documentAnalysisReport(){
+--
+3025-    <span id="applyStatus" style="font-size:12.5px;color:var(--muted)"></span>
+3026-  </div>`:""}`:"";
+3027-  function corrStatus(rep,f){
+3028-    const c=((rep.analysis||{}).corrections||[]).find(x=>x.label===f.row_label&&x.implied===f.proposed_correction);
+3029-    if(!c)return f.proposed_correction!=null?". Needs manual review":"";
+3030-    return c.corroborated?". Confirmed "+(c.checks+1)+" ways including the totals row; applied by default and reversible below"
+3031-                         :". Applied by default; keep it or restore the printed value below";
+3032-  }
+3033:  const m=rep.metrics||{};
+3034-  const detail=witnesses.length?`
+3035-    <details class="more"><summary>Identities verified</summary><ul>
+3036-      ${witnesses.map(w=>`<li><span class="num">${w.business_form}</span> (${w.n_rows} rows, max residual ${(+w.max_abs_residual).toFixed(2)})</li>`).join("")}
+3037:      ${m.api_calls?`<li>${m.api_calls} model call(s)${
+3038-        modelCostBreakdown(m)?`: ${modelCostBreakdown(m)}`:""
+3039:      }; total $${(+m.cost_usd).toFixed(4)}</li>`:""}
+3040-    </ul></details>`:"";
+3041-  $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
+3042-    <div class="kicker">validation results${SECTIONS.length>1?" \u00b7 "+secLabel(SECTIONS[ACTIVE]).name.toLowerCase()+" \u00b7 "+secLabel(SECTIONS[ACTIVE]).pg:""}</div>
+3043-    <h2 style="font-size:22px">${head}</h2>
+3044-    <details class="more checks-fold"><summary>${nBad?"Review":"Show"} the ${checks.length} checks</summary>
+3045-    <div style="margin-top:12px">${checks.map(c=>{
+3046-      const ic=c.st==="ok"||c.st==="fixed"?"\u2713":c.st==="warn"?"\u25B3":"\u2715";
+3047-      const col=c.st==="ok"||c.st==="fixed"?"var(--sage-deep)":c.st==="warn"?"var(--amber)":"var(--brick)";
+--
+3549-  const calls=m.by_call||[];
+3550-  if(!calls.length)return"";
+3551-  const groups=new Map();
+3552-  for(const c of calls){
+3553-    const name=metricModelName(c);
+3554-    const key=`${c.provider||""}|${name}`;
+3555-    const g=groups.get(key)||{name,provider:c.provider||"",calls:0,cost:0,seconds:0};
+3556-    g.calls+=1;
+3557:    g.cost+=Number(c.cost_usd)||0;
+3558-    g.seconds+=Number(c.seconds)||0;
+3559-    groups.set(key,g);
+3560-  }
+3561-  return[...groups.values()].map(g=>{
+3562-    const count=g.calls>1?` ×${g.calls}`:"";
+3563-    const provider=g.provider?`${g.provider}: `:"";
+3564-    return`${provider}${g.name}${count} $${g.cost.toFixed(4)}`;
+3565-  }).join(" + ");
+3566-}
+3567-function footMeta(rep){
+3568:  const m=rep.metrics||{};const bits=[];
+3569:  if(m.elapsed_seconds!=null)bits.push(`${m.elapsed_seconds}s`);
+3570:  if(m.api_calls){
+3571-    const breakdown=modelCostBreakdown(m);
+3572:    bits.push(`${m.api_calls} model call${m.api_calls>1?"s":""}${breakdown?` · ${breakdown}`:""}`);
+3573-    const calls=m.by_call||[];
+3574-    const mismatch=calls.some(c=>c.requested_model&&
+3575-      c.requested_model!==(c.configured_model||c.model));
+3576-    if(mismatch){
+3577-      const requested=[...new Set(calls.map(c=>c.requested_model).filter(Boolean))].join(", ");
+3578-      bits.push(`requested ${requested}`);
+3579-    }
+3580:    bits.push(`total $${(+m.cost_usd).toFixed(4)}`);
+3581-  }
+3582-  return bits.length?bits.join(" · ")+" · ":"";
+3583-}
+3584-/* which schedule columns each signal points at, and its ink color.
+3585-   brick = money at risk, amber = leverage / estimate quality */
+3586-const SIG_MARK={
+3587-  trapped_cash:{color:"brick",vars:["U"],name:"Trapped cash"},
+3588-  job_borrow:{color:"amber",vars:["Q","RB","B"],name:"Job borrow"},
+--- ingest narration ---
+43-        return f"1 {word}"
+44-    return f"{n} {word[:-1] + 'ies' if word.endswith('y') else word + 's'}"
+45-
+46-
+47-def _narrate(node: str, up: dict, state: dict) -> list[str]:
+48-    if node == "ingest":
+49-        if up.get("fragments") and not up.get("chunks"):
+50-            f = up["fragments"][0]
+51:            return [f"Spreadsheet cells read natively: "
+52-                    f"{_plural(len(f['rows']), 'row')} x "
+53-                    f"{len(f['headers'])} columns, no vision model needed"]
+54-        n = len(up.get("chunks") or [])
+55-        if n:
+56-            kind = state.get("media_type", "")
+57-            unit = "strip" if str(kind).startswith("image/") else "page"
+58:            return [f"Document split into {_plural(n, unit)}"]
+59-        return []
+60-    if node == "extract_chunks":
+61-        frs = up.get("fragments") or []
+62-        failed = up.get("failed_chunks") or []
+63-        msg = (f"Extraction complete: {_plural(len(frs), 'table fragment')} "
+64-               f"transcribed")
+65-        if failed:
+66-            msg += f" ({_plural(len(failed), 'page')} unreadable)"
