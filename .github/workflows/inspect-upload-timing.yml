@@ -13,7 +13,7 @@ jobs:
       - name: Capture timing-related frontend code
         run: |
           {
-            grep -n -E -C 8 'elapsed_seconds|api_calls|cost_usd|[Uu]pload time|metrics' static/index.html || true
+            grep -n -E -C 10 'elapsed_seconds|api_calls|cost_usd|[Uu]pload time|footMeta\(|\.csv|text/csv|metrics' static/index.html || true
             echo '--- ingest narration ---'
             grep -n -E -C 8 'Document split into|Spreadsheet cells read natively' server.py || true
           } > .ui-inspect.txt
