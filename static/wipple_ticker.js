@@ -6,7 +6,8 @@
 
   const processingVisible = () => {
     const section = document.querySelector("#processing");
-    return Boolean(section && !section.classList.contains("hidden"));
+    const running = typeof RUNNING === "undefined" || RUNNING;
+    return Boolean(running && section && !section.classList.contains("hidden"));
   };
 
   const phrase = () => PHRASES[phraseIndex];
