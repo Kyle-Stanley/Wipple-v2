@@ -1153,6 +1153,7 @@ function scanFile(f){setSourceFile(f);const fd=new FormData();fd.append("file",f
   stream(API+"/api/scan",{method:"POST",body:fd})}
 
 async function readStream(url,opts,onProgress=addLine){
+  const startedAt=performance.now();
   const r=await fetch(url,opts);
   if(!r.ok)throw new Error(`Upload failed (${r.status})`);
   if(!r.body)throw new Error("The server returned no processing stream.");
@@ -1170,6 +1171,12 @@ async function readStream(url,opts,onProgress=addLine){
     }
   }
   if(!report)throw new Error("Processing ended without a report.");
+  // The server supplies authoritative processing time for normal model-backed
+  // runs. Direct CSV/spreadsheet uploads can finish without model metrics, so
+  // use the browser wall clock only when the backend did not provide one.
+  report.metrics=report.metrics||{};
+  if(report.metrics.elapsed_seconds==null)
+    report.metrics.elapsed_seconds=Math.round((performance.now()-startedAt)/100)/10;
   return report;
 }
 async function stream(url,opts){
