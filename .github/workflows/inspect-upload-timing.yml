@@ -1,0 +1,14 @@
+name: Inspect upload timing
+on:
+  push:
+    branches: [wip-motif-planner]
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show timing-related frontend code
+        run: |
+          grep -n -E -C 8 'elapsed_seconds|api_calls|cost_usd|[Uu]pload time|metrics' static/index.html || true
+          echo '--- ingest narration ---'
+          grep -n -E -C 8 'Document split into|Spreadsheet cells read natively' server.py || true
