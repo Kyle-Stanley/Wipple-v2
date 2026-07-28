@@ -1180,6 +1180,15 @@ def _motif_billing_bridges(E, Etol, V, ws, billing_motifs, cfg,
                     "rank": (3,) + match["rank"] + motif["quality"],
                 })
 
+    if bridges:
+        best = {}
+        for bridge in bridges:
+            col = bridge["b_col"]
+            if col not in best or bridge["rank"] > best[col]["rank"]:
+                best[col] = bridge
+        return sorted(best.values(), key=lambda item: item["rank"],
+                      reverse=True)
+
     # One signed net-position column. It has no standalone visual signature, but
     # E - N must still reproduce a separate physical B vector across the table.
     for ncol in range(ws["matrix"].shape[0]):
@@ -1200,6 +1209,15 @@ def _motif_billing_bridges(E, Etol, V, ws, billing_motifs, cfg,
                 "source_columns": (int(ncol),), "orientation": 0,
                 "rank": (2,) + match["rank"],
             })
+
+    if bridges:
+        best = {}
+        for bridge in bridges:
+            col = bridge["b_col"]
+            if col not in best or bridge["rank"] > best[col]["rank"]:
+                best[col] = bridge
+        return sorted(best.values(), key=lambda item: item["rank"],
+                      reverse=True)
 
     # Optional percent-billed bridge. Quantization uncertainty is propagated
     # into the predicted money vector; full-row peel/certification remains final.
