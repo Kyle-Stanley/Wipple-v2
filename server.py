@@ -18,13 +18,14 @@ per section; the frontend's only new job is the loop.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import queue
 import threading
 import time
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from wipple.support.demo import demo_raw_table
@@ -46,8 +47,8 @@ def _plural(n, word):
 
 def _narrate(node: str, up: dict, state: dict) -> list[str]:
     if node == "ingest":
-        if up.get("fragments") or up.get("chunks"):
-            return ["now watch me nay nayle..."]
+        # The browser owns the alternating demo stinger. Ingest details such
+        # as page chunking remain internal instead of replacing it instantly.
         return []
     if node == "extract_chunks":
         frs = up.get("fragments") or []
@@ -230,7 +231,13 @@ def _initial(**kw) -> dict:
 
 @app.get("/")
 def index():
-    return FileResponse("static/index.html")
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    html = html.replace(
+        "</body>",
+        '<script src="/static/wipple_ticker.js"></script>\n</body>',
+        1,
+    )
+    return HTMLResponse(html)
 
 
 @app.get("/how")
