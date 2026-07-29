@@ -89,15 +89,14 @@ def test_detect_grid_cache_is_exact_and_reuses_content():
     assert info.hits == 9
 
 
-def test_real_validation_reuses_prepared_wip2_values():
+def test_real_validation_reuses_percent_grid_inputs():
     raw = clean_raw_table()
     parsed = parse_node({"raw_table": raw})
-    serialized = validate_node({**parsed, "raw_table": raw})["validation"]
-    diagnostics = serialized["diagnostics"]
-
-    assert diagnostics["pipeline_validator"] == "wip2"
-    assert diagnostics["validator_result_source"] == "wip2"
-    assert diagnostics["cache"]["derived_hits"] > 0
+    _detect_grid_cached.cache_clear()
+    validate_node({**parsed, "raw_table": raw})
+    info = _detect_grid_cached.cache_info()
+    assert info.misses > 0
+    assert info.hits > info.misses
 
 
 def test_seeded_section_graph_is_report_identical():
