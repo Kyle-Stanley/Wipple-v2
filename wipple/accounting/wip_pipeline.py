@@ -15,7 +15,14 @@ from typing import Optional
 
 import numpy as np
 
-from .wip import Config, ValidationResult, _ingest
+from .wip import (
+    FAILED,
+    SUCCESS,
+    Config,
+    ValidationResult,
+    _ingest,
+    validate_wip as _validate_wip1,
+)
 from .wip2 import validate_wip as _validate_wip2
 
 
@@ -119,6 +126,43 @@ def _restore_original_columns(
     return result
 
 
+def _run_validator(physical_columns, labels, config):
+    """Run WIP2 first and retain legacy only as an insufficient-case safety net."""
+    rebuilt = _validate_wip2(
+        physical_columns, job_labels=labels, config=config)
+    if rebuilt.status in {SUCCESS, FAILED}:
+        rebuilt.diagnostics = {
+            **rebuilt.diagnostics,
+            "pipeline_validator": "wip2",
+            "validator_result_source": "wip2",
+        }
+        return rebuilt
+
+    legacy = _validate_wip1(
+        physical_columns, job_labels=labels, config=config)
+    if legacy.status in {SUCCESS, FAILED}:
+        legacy.diagnostics = {
+            **legacy.diagnostics,
+            "pipeline_validator": "wip2",
+            "validator_result_source": "legacy_insufficient_fallback",
+            "wip2_primary_status": rebuilt.status,
+            "wip2_primary_reason": rebuilt.reason,
+            "wip2_primary_mapping": {
+                int(column): variable
+                for column, variable in rebuilt.mapping.items()
+            },
+        }
+        return legacy
+
+    rebuilt.diagnostics = {
+        **rebuilt.diagnostics,
+        "pipeline_validator": "wip2",
+        "validator_result_source": "wip2",
+        "legacy_insufficient_fallback_status": legacy.status,
+    }
+    return rebuilt
+
+
 def validate_wip(columns, job_labels=None,
                  config: Optional[Config] = None) -> ValidationResult:
     """Run WIP2 for the production pipeline with inert-column protection.
@@ -134,11 +178,9 @@ def validate_wip(columns, job_labels=None,
     )
 
     if not ignored:
-        result = _validate_wip2(
-            physical_columns, job_labels=labels, config=config)
+        result = _run_validator(physical_columns, labels, config)
         result.diagnostics = {
             **result.diagnostics,
-            "pipeline_validator": "wip2",
             "ignored_all_zero_columns": [],
         }
         return result
@@ -149,5 +191,5 @@ def validate_wip(columns, job_labels=None,
         if index not in ignored_set
     )
     filtered = [physical_columns[index] for index in kept]
-    result = _validate_wip2(filtered, job_labels=labels, config=config)
+    result = _run_validator(filtered, labels, config)
     return _restore_original_columns(result, kept, ignored)
