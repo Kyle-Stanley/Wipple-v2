@@ -18,20 +18,14 @@ object, invokes the graph, and returns (report, metrics_summary).
 from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
+
 from ..documents.extraction import extract_node, re_extract_node
 from .fallback import disambiguate_node, fallback_node
 from ..core.model_client import Metrics
 from ..accounting.analysis import analyze_node
 from .routing import emit_node, route_after_extract, route_after_validate
 from ..core.state import WippleState
-from ..accounting import validation as accounting_validation
-from ..accounting.wip_pipeline import validate_wip as validate_wip2_pipeline
-
-# Production selects WIP2 at the graph boundary. The legacy validator remains
-# directly importable for parity tests and rollback comparisons.
-accounting_validation.validate_wip = validate_wip2_pipeline
-parse_node = accounting_validation.parse_node
-validate_node = accounting_validation.validate_node
+from ..accounting.validation import parse_node, validate_node
 
 
 def build_graph():
