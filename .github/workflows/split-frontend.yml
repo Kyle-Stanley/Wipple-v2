@@ -6,6 +6,8 @@ on:
       - frontend-cleanup
     paths:
       - static/index.html
+      - static/styles/**
+      - static/app/**
       - scripts/split_frontend.py
       - .github/workflows/split-frontend.yml
 
@@ -21,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: frontend-cleanup
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -35,6 +38,43 @@ jobs:
           for file in static/app/*.js; do
             node --check "$file"
           done
+          cat static/app/*.js > /tmp/wipple-app.js
+          node --check /tmp/wipple-app.js
+
+      - name: Verify exact source preservation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+
+          style_pattern = re.compile(r'<style>\s*(.*?)\s*</style>', re.DOTALL)
+          original = subprocess.check_output(
+              ['git', 'show', 'origin/main:static/index.html'], text=True
+          )
+          anchor = original.index('<script src="/static/job_matching.js"></script>')
+          original_markup = original[:anchor]
+          original_tail = original[anchor:]
+
+          styles = style_pattern.findall(original_markup)
+          assert len(styles) == 2
+          expected_css = styles[0] + '\n\n' + styles[1] + '\n'
+          actual_css = Path('static/styles/wipple.css').read_text(encoding='utf-8')
+          assert actual_css == expected_css
+
+          wip_math = original_tail.index('<script src="/static/wip_math.js"></script>')
+          inline_start = original_tail.index('<script>', wip_math) + len('<script>')
+          inline_end = original_tail.rindex('</script>')
+          expected_js = original_tail[inline_start:inline_end]
+          if expected_js.startswith('\n'):
+              expected_js = expected_js[1:]
+          if expected_js.endswith('\n'):
+              expected_js = expected_js[:-1]
+
+          app_files = sorted(Path('static/app').glob('*.js'))
+          actual_js = ''.join(path.read_text(encoding='utf-8') for path in app_files)
+          assert actual_js == expected_js
+          PY
 
       - name: Verify slim entry point
         run: |
