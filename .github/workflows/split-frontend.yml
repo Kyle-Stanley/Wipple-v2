@@ -234,8 +234,9 @@ jobs:
               third:{confirmed:true,variable:'D'},
             },
           });
-          assert(JSON.stringify(report._manualConfirmedVariables)==='["V","D"]',
-            'review hook must capture unique confirmed variables in order');
+          if(JSON.stringify(report._manualConfirmedVariables)!=='["V","D"]')
+            throw new Error('review hook must capture unique confirmed variables in order');
           reviewContext.window.WippleReviewRefinement.refineCertificate(report);
-          assert(refineFrames===1,'review hook must queue exactly one refinement frame');
+          if(refineFrames!==1)
+            throw new Error('review hook must queue exactly one refinement frame');
           NODE
