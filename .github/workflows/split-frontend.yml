@@ -26,50 +26,55 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import base64
+          import os
 
-          def replace_once(path, old, new, label):
-              text = path.read_text(encoding='utf-8')
+          def replace_once(text, old, new, label):
               count = text.count(old)
               if count != 1:
                   raise SystemExit(f'{label}: expected one match, found {count}')
-              path.write_text(text.replace(old, new), encoding='utf-8')
+              return text.replace(old, new)
 
-          state = Path('static/app/01-app-state.js')
-          replace_once(
+          state_path = Path('static/app/01-app-state.js')
+          state = state_path.read_text(encoding='utf-8')
+          state = replace_once(
               state,
               '    get report(){return this.sections[this.activeSection]?.rep||null;},\n    get accepted(){',
               '    get report(){return this.sections[this.activeSection]?.rep||null;},\n    // Each section owns one persistent correction Set. Reading this getter\n    // lazily creates a missing slot so callers always receive that section\'s Set.\n    get accepted(){',
               'accepted getter comment',
           )
-          replace_once(
+          state = replace_once(
               state,
               'function activateDocumentSection(index,{saveCurrent=true,view="certificate"}={}){\n  const session=APP_STATE.document;\n  if(!session.sections[index])return false;\n  if(saveCurrent&&session.correctionsBySection[session.activeSection])\n    session.correctionsBySection[session.activeSection]=new Set(session.accepted);\n  session.activeSection=index;\n  session.view=view;\n  void session.accepted;\n  return true;\n}',
               'function activateDocumentSection(index,{view="certificate"}={}){\n  const session=APP_STATE.document;\n  if(!session.sections[index])return false;\n  session.activeSection=index;\n  session.view=view;\n  void session.accepted;\n  return true;\n}',
               'section activation semantics',
           )
-          replace_once(
+          state = replace_once(
               state,
               '\nfunction activeCorrectionStateIsAliased(){\n  const session=APP_STATE.document;\n  return session.accepted===session.correctionsBySection[session.activeSection];\n}\n',
               '\n',
               'tautological alias helper',
           )
+          state_path.write_text(state.rstrip() + '\n', encoding='utf-8')
 
-          document = Path('static/app/30-document.js')
-          replace_once(
+          document_path = Path('static/app/30-document.js')
+          document = document_path.read_text(encoding='utf-8')
+          document = replace_once(
               document,
               'activateDocumentSection(sectionIndex,{saveCurrent:false,view:APP_STATE.document.view})',
               'activateDocumentSection(sectionIndex,{view:APP_STATE.document.view})',
               'mapping activation call',
           )
-          replace_once(
+          document = replace_once(
               document,
               'activateDocumentSection(APP_STATE.document.activeSection,{saveCurrent:false})',
               'activateDocumentSection(APP_STATE.document.activeSection)',
               'validation activation call',
           )
+          document_path.write_text(document, encoding='utf-8')
 
           Path('.github/workflows/split-frontend.yml').write_bytes(
-              __import__('base64').b64decode(__import__('os').environ['FINAL_WORKFLOW_B64'])
+              base64.b64decode(os.environ['FINAL_WORKFLOW_B64'])
           )
           PY
 
