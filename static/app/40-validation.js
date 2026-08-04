@@ -158,8 +158,8 @@ function renderCertificate(rep){
       return `<div class="chk"><span class="ic" style="color:${col}">${ic}</span><div><p class="cl">${c.label}</p>${c.note?`<p class="cn">${c.note}</p>`:""}</div></div>`;
     }).join("")}</div></details>
     <div class="go" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px">
-      ${BATCH_MODE?'<button class="btn" onclick="renderBatch()">← All validations</button>':""}
-      <button class="btn primary" onclick="${BATCH_MODE?`renderBatchItemAnalysis(${BATCH_ACTIVE})`:"VIEW='dash';renderDash(REPORT);show('dash');window.scrollTo(0,0)"}">View underwriting analysis</button>
+      ${BATCH_MODE?'<button class="btn" id="certBackToBatch">← All validations</button>':""}
+      <button class="btn primary" id="certViewAnalysis">View underwriting analysis</button>
     </div>
     <section class="validation-corrections"><h3>Errors and corrections</h3>
       ${excHTML||'<p class="empty" style="text-align:left">No errors or corrections for this schedule.</p>'}
@@ -167,6 +167,12 @@ function renderCertificate(rep){
     ${headerComparisonHTML(rep)}
     ${detail}
   </div></div>`;
+  const backToBatch=$("#certBackToBatch"),viewAnalysis=$("#certViewAnalysis");
+  if(backToBatch)backToBatch.onclick=()=>renderBatch();
+  if(viewAnalysis)viewAnalysis.onclick=()=>{
+    if(BATCH_MODE)renderBatchItemAnalysis(BATCH_ACTIVE);
+    else{VIEW="dash";renderDash(REPORT);show("dash");window.scrollTo(0,0);}
+  };
   const ua=$("#useAll"),st=$("#applyStatus"),ap=$("#applySel"),src=$("#reviewSource");
   /* Boxes now mean "revert to printed": checked = keep the document's value.
      ACCEPTED remains the set of applied corrections, so it is the complement
@@ -203,4 +209,3 @@ function renderCertificate(rep){
     const r=document.querySelector(`.evrow[data-ev="${t.dataset.ev}"]`);
     if(r){r.classList.toggle("hidden");t.textContent=r.classList.contains("hidden")?"\u25B8":"\u25BE";}});
 }
-
