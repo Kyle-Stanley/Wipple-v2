@@ -360,6 +360,7 @@ function applyColumnMapping(rep,state){
   rep.overall_status="user_mapped_unverified";
   rep.fallback_notes="Column mapping was reviewed before analysis.";
   rep._headerComparison=buildHeaderComparison(null,rep,[]);
+  window.WippleReviewRefinement?.recordConfirmedVariables(rep,state);
 }
 
 function renderColumnMapping(sectionIndex){

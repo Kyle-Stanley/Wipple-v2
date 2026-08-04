@@ -208,4 +208,5 @@ function renderCertificate(rep){
   document.querySelectorAll(".evtoggle").forEach(t=>t.onclick=()=>{
     const r=document.querySelector(`.evrow[data-ev="${t.dataset.ev}"]`);
     if(r){r.classList.toggle("hidden");t.textContent=r.classList.contains("hidden")?"\u25B8":"\u25BE";}});
+  window.WippleReviewRefinement?.refineCertificate(rep);
 }

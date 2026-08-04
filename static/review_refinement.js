@@ -93,32 +93,19 @@
     return names[variable] || variable;
   }
 
-  function rememberConfirmedVariables() {
-    if (window.__wippleReviewConfirmedPatched || typeof window.applyColumnMapping !== "function") return;
-    const previous = window.applyColumnMapping;
-    window.applyColumnMapping = function refinedApplyColumnMapping(rep, state) {
-      const result = previous.apply(this, arguments);
+  window.WippleReviewRefinement = Object.freeze({
+    recordConfirmedVariables(rep, state) {
       currentReport = rep;
       rep._manualConfirmedVariables = [...new Set(Object.values(state?.inferred || {})
         .filter((match) => match?.confirmed)
         .map((match) => match.variable)
         .filter(Boolean))];
-      return result;
-    };
-    window.__wippleReviewConfirmedPatched = true;
-  }
-
-  function rememberRenderedReport() {
-    if (window.__wippleReviewRenderPatched || typeof window.renderCertificate !== "function") return;
-    const previous = window.renderCertificate;
-    window.renderCertificate = function refinedRenderCertificate(rep) {
+    },
+    refineCertificate(rep) {
       currentReport = rep;
-      const result = previous.apply(this, arguments);
       queueRefine();
-      return result;
-    };
-    window.__wippleReviewRenderPatched = true;
-  }
+    },
+  });
 
   function failedNames(failure) {
     const outputs = [...new Set((failure?.details || []).map((detail) => detail.outputVariable).filter(Boolean))];
@@ -222,8 +209,6 @@
 
   function refineReview() {
     observerQueued = false;
-    rememberConfirmedVariables();
-    rememberRenderedReport();
     const rep = currentReport;
     const section = document.querySelector("#certificate .manual-audit-details");
     if (!section || !rep?._manualMappingAudit) return;
@@ -251,8 +236,6 @@
 
   function start() {
     installStyles();
-    rememberConfirmedVariables();
-    rememberRenderedReport();
     new MutationObserver(queueRefine).observe(document.body, { childList: true, subtree: true });
     queueRefine();
   }

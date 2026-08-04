@@ -40,13 +40,15 @@ MutationObservers remain deliberate progressive-enhancement behavior.
 
 Frontend CI verifies syntax, ordered assets, state ownership, section correction
 persistence, absence of inline handlers, and absence of dynamic script injection.
-Progress-animation state is owned by `00-core.js`; the old ticker cannot return.
+It permits exactly the five documented `mapping_ui.js` owner patches and rejects
+all other runtime owner replacements. Progress-animation state is owned by
+`00-core.js`; the old ticker cannot return.
 
 ## Remaining pre-Vite integration debt
 
-- `review_refinement.js` still observes `applyColumnMapping` and
-  `renderCertificate` through two runtime wrappers. These will become explicit
-  notification hooks without changing either MutationObserver.
+- `review_refinement.js` receives explicit notifications from
+  `applyColumnMapping` and `renderCertificate`; its body observer remains
+  deliberate progressive-enhancement behavior.
 - `mapping_ui.js` still replaces five owner functions. It also reads
   `renderCertificate` at three manual-editor rerender sites and `tableLabels`
   once. Those nine dependencies must become explicit before ESM.
