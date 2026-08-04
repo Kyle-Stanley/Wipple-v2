@@ -1,4 +1,4 @@
-name: Split frontend monolith
+name: Frontend split integrity
 
 on:
   push:
@@ -10,12 +10,19 @@ on:
       - static/app/**
       - scripts/split_frontend.py
       - .github/workflows/split-frontend.yml
+  pull_request:
+    paths:
+      - static/index.html
+      - static/styles/**
+      - static/app/**
+      - scripts/split_frontend.py
+      - .github/workflows/split-frontend.yml
 
 permissions:
   contents: write
 
 jobs:
-  split:
+  verify:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -30,7 +37,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Split frontend
+      - name: Split frontend when needed
         run: python scripts/split_frontend.py
 
       - name: Check generated JavaScript syntax
@@ -90,6 +97,7 @@ jobs:
           PY
 
       - name: Commit generated frontend assets
+        if: github.event_name == 'push'
         run: |
           if git diff --quiet; then
             echo "No generated changes"
