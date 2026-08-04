@@ -43,7 +43,8 @@ jobs:
           import re
           import subprocess
 
-          html = Path('static/index.html').read_text(encoding='utf-8')
+          html_path = Path('static/index.html')
+          html = html_path.read_text(encoding='utf-8')
           app_files = sorted(Path('static/app').glob('*.js'))
           expected_refs = [f'/static/app/{path.name}' for path in app_files]
           actual_refs = re.findall(r'<script src="(/static/app/[^"]+)"></script>', html)
@@ -53,6 +54,15 @@ jobs:
           assert actual_refs == expected_refs
           assert '<style>' not in html
           assert '<script>' not in html
+
+          inline_attribute = re.compile(r'\bon[a-z]+\s*=\s*(["\'])', re.IGNORECASE)
+          inline_handlers = []
+          frontend_sources = [html_path, *Path('static').rglob('*.js')]
+          for path in frontend_sources:
+              for line_number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if inline_attribute.search(line):
+                      inline_handlers.append(f'{path}:{line_number}: {line.strip()}')
+          assert not inline_handlers, 'Inline event attributes found:\n' + '\n'.join(inline_handlers)
 
           # During the migration PR, prove that the extracted files are the
           # original inline CSS and JavaScript in the original execution order.
