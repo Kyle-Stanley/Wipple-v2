@@ -1,26 +1,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
-  else {
-    root.WippleMath = api;
-    // Keep the mapping-page presentation isolated from the accounting helpers.
-    // index.html already loads this module, so these browser-only loaders let
-    // the UI enhancements remain separate static assets.
-    if (typeof document !== "undefined") {
-      if (!document.querySelector("script[data-wipple-mapping-ui]")) {
-        const script = document.createElement("script");
-        script.src = "/static/mapping_ui.js";
-        script.dataset.wippleMappingUi = "true";
-        document.head.appendChild(script);
-      }
-      if (!document.querySelector("script[data-wipple-review-refinement]")) {
-        const script = document.createElement("script");
-        script.src = "/static/review_refinement.js";
-        script.dataset.wippleReviewRefinement = "true";
-        document.head.appendChild(script);
-      }
-    }
-  }
+  else root.WippleMath = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   function deriveCanonicalVars(values) {
     const out = { ...values };
