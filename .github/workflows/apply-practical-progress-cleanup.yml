@@ -1,0 +1,111 @@
+name: Apply practical progress cleanup
+
+on:
+  push:
+    branches:
+      - agent/practical-progress-cleanup
+    paths:
+      - .github/workflows/apply-practical-progress-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/practical-progress-cleanup
+          fetch-depth: 0
+
+      - name: Remove joke ticker and keep real progress
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              path.write_text(text.replace(old, new), encoding="utf-8")
+
+          server = Path("server.py")
+          replace_once(
+              server,
+              '''    if node == "ingest":
+        # The browser owns the alternating demo stinger. Ingest details such
+        # as page chunking remain internal instead of replacing it instantly.
+        return []''',
+              '''    if node == "ingest":
+        # The stream acknowledges the upload immediately; detailed ingest
+        # mechanics remain internal until the first real extraction update.
+        return []''',
+              "ingest narration comment",
+          )
+          replace_once(
+              server,
+              '''        yield ("event: progress\\ndata: "
+               + json.dumps({"node": "upload",
+                             "message": "Watch me wipple..."})
+               + "\\n\\n")''',
+              '''        yield ("event: progress\\ndata: "
+               + json.dumps({"node": "upload",
+                             "message": "Reading and validating schedule"})
+               + "\\n\\n")''',
+              "initial progress message",
+          )
+          replace_once(
+              server,
+              '''@app.get("/")
+def index():
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    head, marker, tail = html.rpartition("</body>")
+    if marker:
+        html = (head + '<script src="/static/wipple_ticker.js"></script>\\n'
+                + marker + tail)
+    return HTMLResponse(html)''',
+              '''@app.get("/")
+def index():
+    return HTMLResponse(Path("static/index.html").read_text(encoding="utf-8"))''',
+              "ticker injection",
+          )
+
+          batch = Path("static/app/10-state-batch.js")
+          replace_once(
+              batch,
+              "  APP_STATE.progress.running=true;DOTS=0;LATEST_PROGRESS=null;",
+              "  APP_STATE.progress.running=true;",
+              "batch progress ownership",
+          )
+
+          ticker = Path("static/wipple_ticker.js")
+          if not ticker.is_file():
+              raise SystemExit("ticker file missing")
+          ticker.unlink()
+          PY
+
+          for file in static/app/*.js; do
+            node --check "$file"
+          done
+          cat static/app/*.js > /tmp/wipple-app.js
+          node --check /tmp/wipple-app.js
+          python -m py_compile server.py
+          git diff --check
+
+          if grep -RInE 'Watch me wipple|nay nayle|wipple_ticker\.js' server.py static; then
+            echo "Legacy ticker reference remains" >&2
+            exit 1
+          fi
+          if grep -RInE '\b(DOTS|LATEST_PROGRESS)\s*=' static/app --exclude=00-core.js; then
+            echo "Progress animation internals are still written outside 00-core.js" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.py static/app/10-state-batch.js static/wipple_ticker.js
+          git commit -m "simplify frontend progress updates"
+          git push origin HEAD:agent/practical-progress-cleanup
