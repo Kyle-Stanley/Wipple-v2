@@ -41,7 +41,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
-          import subprocess
 
           html_path = Path('static/index.html')
           html = html_path.read_text(encoding='utf-8')
@@ -50,6 +49,7 @@ jobs:
           actual_refs = re.findall(r'<script src="(/static/app/[^"]+)"></script>', html)
 
           assert Path('static/styles/wipple.css').is_file()
+          assert Path('static/app/01-app-state.js').is_file()
           assert '<link rel="stylesheet" href="/static/styles/wipple.css">' in html
           assert actual_refs == expected_refs
           assert '<style>' not in html
@@ -69,37 +69,83 @@ jobs:
                   line = lines[line_number - 1].strip() if lines else ''
                   inline_handlers.append(f'{path}:{line_number}: {line}')
           assert not inline_handlers, 'Inline event attributes found:\n' + '\n'.join(inline_handlers)
-
-          # During the migration PR, prove that the extracted files are the
-          # original inline CSS and JavaScript in the original execution order.
-          # Once main contains the split frontend, this legacy comparison
-          # naturally becomes unnecessary and is skipped.
-          original = subprocess.check_output(
-              ['git', 'show', 'origin/main:static/index.html'], text=True
-          )
-          if '<script>' in original:
-              style_pattern = re.compile(r'<style>\s*(.*?)\s*</style>', re.DOTALL)
-              anchor = original.index('<script src="/static/job_matching.js"></script>')
-              original_markup = original[:anchor]
-              original_tail = original[anchor:]
-
-              styles = style_pattern.findall(original_markup)
-              assert len(styles) == 2
-              expected_css = styles[0] + '\n\n' + styles[1] + '\n'
-              actual_css = Path('static/styles/wipple.css').read_text(encoding='utf-8')
-              assert actual_css == expected_css
-
-              wip_math = original_tail.index('<script src="/static/wip_math.js"></script>')
-              inline_start = original_tail.index('<script>', wip_math) + len('<script>')
-              inline_end = original_tail.rindex('</script>')
-              expected_js = original_tail[inline_start:inline_end]
-              if expected_js.startswith('\n'):
-                  expected_js = expected_js[1:]
-              if expected_js.endswith('\n'):
-                  expected_js = expected_js[:-1]
-
-              actual_js = ''.join(
-                  path.read_text(encoding='utf-8') for path in app_files
-              )
-              assert actual_js == expected_js
           PY
+
+      - name: Verify state ownership and section persistence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          migrated = [
+              'ACCEPTED', 'ACTIVE', 'ANALYSIS_SCOPE', 'BATCH_ACTIVE',
+              'BATCH_ANALYSIS_MODE', 'BILLING_TRAJECTORY_SHOW_ALL', 'DOC',
+              'MATCH_STATE', 'REPORT', 'RUNNING', 'SECSTATE', 'SECTIONS', 'VIEW',
+          ]
+          legacy = re.compile(r'\b(?:' + '|'.join(migrated) + r')\b')
+          legacy_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if legacy.search(line):
+                      legacy_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not legacy_hits, 'Legacy writable state remains:\n' + '\n'.join(legacy_hits)
+
+          derived_assignment = re.compile(r'APP_STATE\.document\.(?:report|accepted)\s*=')
+          derived_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if derived_assignment.search(line):
+                      derived_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not derived_hits, 'Derived document fields assigned directly:\n' + '\n'.join(derived_hits)
+
+          state_text = Path('static/app/01-app-state.js').read_text(encoding='utf-8')
+          assert 'saveCurrent' not in state_text
+          assert 'activeCorrectionStateIsAliased' not in state_text
+
+          # DOTS and LATEST_PROGRESS remain a deliberate Step 3 exception.
+          external_progress = []
+          progress_assignment = re.compile(r'\b(?:DOTS|LATEST_PROGRESS)\s*=')
+          for path in sorted(Path('static/app').glob('*.js')):
+              if path.name == '00-core.js':
+                  continue
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if progress_assignment.search(line):
+                      external_progress.append(f'{path}:{number}: {line.strip()}')
+          assert len(external_progress) == 1, 'Unexpected deferred progress writes:\n' + '\n'.join(external_progress)
+          assert external_progress[0].startswith('static/app/10-state-batch.js:'), external_progress[0]
+          PY
+
+          node <<'NODE'
+          const fs=require('fs');
+          const vm=require('vm');
+          const state=fs.readFileSync('static/app/01-app-state.js','utf8');
+          const test=`
+            const first={rep:{id:"first"}},second={rep:{id:"second"}};
+            const sectionOne=new Set([1]),sectionTwo=new Set([2]);
+            initializeDocumentState({
+              source:{id:"doc"},sections:[first,second],
+              correctionsBySection:[sectionOne,sectionTwo],activeSection:0
+            });
+            APP_STATE.document.accepted.add(3);
+            activateDocumentSection(1);
+            APP_STATE.document.accepted.add(4);
+            activateDocumentSection(0);
+            if(!APP_STATE.document.accepted.has(1)||!APP_STATE.document.accepted.has(3))
+              throw new Error("section one corrections did not persist");
+            if(APP_STATE.document.accepted.has(2)||APP_STATE.document.accepted.has(4))
+              throw new Error("section two corrections leaked into section one");
+            activateDocumentSection(1);
+            if(!APP_STATE.document.accepted.has(2)||!APP_STATE.document.accepted.has(4))
+              throw new Error("section two corrections did not persist");
+            if(APP_STATE.document.accepted.has(1)||APP_STATE.document.accepted.has(3))
+              throw new Error("section one corrections leaked into section two");
+            const replacement=new Set([9]);
+            replaceAcceptedCorrections(replacement);
+            if(APP_STATE.document.accepted!==replacement)
+              throw new Error("replacement Set was not stored directly");
+            activateAnalysisDocument({id:"analysis"});
+            if(APP_STATE.document.report.id!=="analysis")
+              throw new Error("analysis report not active");
+          `;
+          vm.runInNewContext(state+test,{Set,TypeError});
+          NODE

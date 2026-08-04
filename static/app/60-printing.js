@@ -63,7 +63,7 @@ function printScheduleTable(rep){
   const labels=tableLabels(t);
   const corrs=(rep.analysis||{}).corrections||[];
   corrs.forEach((c,ci)=>{
-    if(ACCEPTED.has(ci)&&vals[c.row])vals[c.row][c.col]=c.implied;
+    if(APP_STATE.document.accepted.has(ci)&&vals[c.row])vals[c.row][c.col]=c.implied;
   });
 
   const isPct=v=>["P","PB","M"].includes(v);
@@ -200,8 +200,8 @@ function printSummary(rep){
       }</tr></thead><tbody>${rows}</tbody></table>`:""}
     </section>`;
   }).join(""):'<p class="empty-print">No underwriting signals exceeded the reporting threshold.</p>';
-  const trends=BATCH_ANALYSIS_MODE?timeSeriesData():null;
-  const printEub=BATCH_ANALYSIS_MODE?earlyUnderbillingFadeData():null;
+  const trends=APP_STATE.batch.analysisMode?timeSeriesData():null;
+  const printEub=APP_STATE.batch.analysisMode?earlyUnderbillingFadeData():null;
   const printJobBorrow=signals.find(s=>s.id==="job_borrow")||null;
   const trendStrip=(trends||printJobBorrow)?`<section class="print-trends" style="margin-top:0">
     <h2 class="section-title">Across reporting periods</h2>
@@ -239,7 +239,7 @@ function printSummary(rep){
         <td>${htmlEsc(row.marginChange==null?"—":`${row.marginChange>=0?"+":""}${pct1(row.marginChange)}`)}</td></tr>`}).join("")}</tbody></table>`}
     </section>`:"";
 
-  const corrections=(a.corrections||[]).filter((_,i)=>ACCEPTED.has(i)).length;
+  const corrections=(a.corrections||[]).filter((_,i)=>APP_STATE.document.accepted.has(i)).length;
   const jobCount=tableJobCount(rep.table);
 
   const reportHtml=`<!doctype html>
@@ -376,7 +376,7 @@ function downloadCSV(rep){
   const labels=tableLabels(t);
   const applied=[];
   corrs.forEach((c,ci)=>{
-    if(!ACCEPTED.has(ci))return;
+    if(!APP_STATE.document.accepted.has(ci))return;
     vals[c.row][c.col]=c.implied;applied.push(c);
   });
   const lines=[["Job",...t.columns.map(c=>c.header||c.name||c.variable||"")].map(esc).join(","),

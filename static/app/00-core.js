@@ -300,7 +300,7 @@ dz.addEventListener("drop",e=>{
   if(files.length)scanFiles(files);
 });
 
-let RUNNING=false,DOTS=0,LATEST_PROGRESS=null;
+let DOTS=0,LATEST_PROGRESS=null;
 function animatedLines(){
   // Batch runs narrate several documents at once: every in-flight lane keeps
   // its own ticking line. A single scan still animates its newest log line.
@@ -309,7 +309,7 @@ function animatedLines(){
   return LATEST_PROGRESS?[LATEST_PROGRESS]:[];
 }
 setInterval(()=>{
-  if(!RUNNING)return;
+  if(!APP_STATE.progress.running)return;
   DOTS=(DOTS+1)%4;
   for(const el of animatedLines()){
     const base=el.dataset.base||el.textContent.replace(/\.*$/,"");
@@ -399,15 +399,15 @@ async function readStream(url,opts,onProgress=addLine){
 async function stream(url,opts){
   show("processing");$("#batchProgress").classList.add("hidden");hideBatchLanes();
   $("#log").innerHTML="";
-  RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
+  APP_STATE.progress.running=true;DOTS=0;LATEST_PROGRESS=null;
   const startedAt=performance.now();
   try{
     const doc=await readStream(url,opts);
     attachClientElapsed(doc,(performance.now()-startedAt)/1000);
-    RUNNING=false;finishProgressLine();
+    APP_STATE.progress.running=false;finishProgressLine();
     setTimeout(()=>render(doc),650);
   }catch(e){
-    RUNNING=false;finishProgressLine();
+    APP_STATE.progress.running=false;finishProgressLine();
     $("#errmsg").textContent=String(e);show("err");
   }
 }
@@ -478,7 +478,7 @@ function totalsScopeNote(td){
   if(!assessed&&!ignored)return"";
   return `${assessed} mapped additive column${assessed===1?" was":"s were"} assessed${ignored?`; ${ignored} other numeric column${ignored===1?" was":"s were"} outside this totals check`:""}.`;
 }
-function totalsDetail(rep,accepted=ACCEPTED){
+function totalsDetail(rep,accepted=APP_STATE.document.accepted){
   const nRows=tableJobCount(rep.table)||rep?.parse?.n_rows||0;
   const payload=backendTotals(rep);
   if(payload){

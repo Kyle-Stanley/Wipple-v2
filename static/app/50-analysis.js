@@ -25,14 +25,14 @@ function renderDash(rep){
       <details class="why" open><summary>Why it matters</summary><p>${s.why}</p></details>
       ${body}
     </div>`}).join("");
-  const timeSignals=BATCH_ANALYSIS_MODE?timeSeriesSectionHTML(rep):"";
+  const timeSignals=APP_STATE.batch.analysisMode?timeSeriesSectionHTML(rep):"";
   const signalBody=(sigs||timeSignals)
     ?sigs+timeSignals
     :`<p class="empty">Nothing above threshold in this book.</p>`;
   const documentScope=rep._combinedSectionCount>1
     ?`<span class="analysis-scope-label">Entire WIP · ${rep._combinedPageLabel} · ${tableJobCount(rep.table)} jobs</span>`:"<span></span>";
   $("#dash").innerHTML=`
-    <div class="analysis-topline">${BATCH_MODE&&BATCH_ACTIVE<0?analysisSwitcherHTML():documentScope}
+    <div class="analysis-topline">${BATCH_MODE&&APP_STATE.batch.activeItem<0?analysisSwitcherHTML():documentScope}
       <div class="analysis-actions"><button class="btn primary" id="openJobAnalysis">Independent job analysis</button></div></div>
     <div class="report-title"><div><h2>Underwriting report</h2>${rep.source?`<p>${htmlEsc(rep.source)}</p>`:""}</div>
       <button class="btn" id="printAnalysis">Print report</button></div>
@@ -40,7 +40,7 @@ function renderDash(rep){
       ?"Column assignments were reviewed before calculation but could not be mathematically certified."
       :"Column names were read from headers and could not be mathematically verified. Figures below are the document's claims."}</div>`:""}
     <div class="kpis">${kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val num ${String(v).startsWith("(")?"neg":""}">${v}</div></div>`).join("")}</div>
-    ${BATCH_ANALYSIS_MODE?timeSeriesKpiStripHTML(rep):""}
+    ${APP_STATE.batch.analysisMode?timeSeriesKpiStripHTML(rep):""}
     <div class="cols">
       <div class="card"><h3>Underwriting signals <small>What stands out for underwriting? Click any job to open its analysis</small></h3>
         ${signalBody}</div>
@@ -68,7 +68,7 @@ function renderDash(rep){
   $("#printAnalysis").onclick=()=>printSummary(rep);
 }
 
-function currentJobs(rep,accepted=ACCEPTED){
+function currentJobs(rep,accepted=APP_STATE.document.accepted){
   const a=rep.analysis||{};
   const jobs=(a.jobs||[]).map(j=>({...j}));
   const corrs=a.corrections||[];
@@ -241,8 +241,8 @@ function reportRowForGroup(rep,groupId){
 }
 function openGroupInValidatedWip(rep,groupId){
   let target=rep,row=reportRowForGroup(target,groupId);
-  if(row<0&&MATCH_STATE){
-    const group=MATCH_STATE.groups.find(g=>g.id===groupId);
+  if(row<0&&APP_STATE.batch.matchState){
+    const group=APP_STATE.batch.matchState.groups.find(g=>g.id===groupId);
     const periods=[...new Set((group?.observations||[]).map(o=>o.period))].sort().reverse();
     for(const period of periods){
       const candidate=periodAnalysisReport(period),candidateRow=reportRowForGroup(candidate,groupId);
@@ -274,7 +274,7 @@ function trajectoryFlagData(rep){
   return{membership,scores};
 }
 function billingTrajectoryChart(rep){
-  if(!BATCH_ANALYSIS_MODE||!MATCH_STATE)return"";
+  if(!APP_STATE.batch.analysisMode||!APP_STATE.batch.matchState)return"";
   const{membership,scores}=trajectoryFlagData(rep);
   const available=TRAJECTORY_FLAGS.filter(f=>membership.get(f.id).size);
   if(!available.length)return"";
@@ -286,7 +286,7 @@ function billingTrajectoryChart(rep){
   const y=v=>T+(H-T-B)*(1-(Math.max(-YMAX,Math.min(YMAX,v))+YMAX)/(2*YMAX));
   const trajectories=[];
   for(const groupId of selectedIds){
-    const group=MATCH_STATE.groups.find(g=>g.id===groupId);if(!group)continue;
+    const group=APP_STATE.batch.matchState.groups.find(g=>g.id===groupId);if(!group)continue;
     const points=groupPeriodSnapshots(group).map(snapshot=>{
       const v=snapshot.vars||{},p=v.P??(v.C?v.D/v.C:null),contract=v.V;
       const net=v.N??(v.B!=null&&v.E!=null?v.B-v.E:null);
@@ -304,7 +304,7 @@ function billingTrajectoryChart(rep){
   trajectories.sort((a,b)=>(b.score-a.score)||(b.latestCompletion-a.latestCompletion)
     ||(Math.abs(b.latestPosition)-Math.abs(a.latestPosition))||a.label.localeCompare(b.label));
   const total=trajectories.length;
-  const displayed=BILLING_TRAJECTORY_SHOW_ALL?trajectories:trajectories.slice(0,TOP_N);
+  const displayed=APP_STATE.billingTrajectory.showAll?trajectories:trajectories.slice(0,TOP_N);
   displayed.forEach((trajectory,index)=>trajectory.color=TRAJECTORY_COLORS[index%TRAJECTORY_COLORS.length]);
 
   const corridor=HEALTHY_BILLING_CORRIDOR;
@@ -333,8 +333,8 @@ function billingTrajectoryChart(rep){
     return`<button class="trajectory-legend-item${off?" off":""}" data-legend="${htmlEsc(t.groupId)}" aria-pressed="${!off}" title="${off?"Show":"Hide"} ${htmlEsc(t.label)} on the chart"><span class="trajectory-legend-dot" style="background:${t.color}"></span><span class="trajectory-legend-label">${htmlEsc(t.label)}</span><small>${t.points.length} stmt${t.points.length===1?"":"s"}</small><span class="trajectory-legend-open" role="button" tabindex="0" data-open="${htmlEsc(t.groupId)}" title="Open ${htmlEsc(t.label)}" aria-label="Open ${htmlEsc(t.label)}">\u2197</span></button>`;
   }).join("")}</div>`:"";
   const hiddenCount=displayed.filter(t=>BILLING_TRAJECTORY_HIDDEN.has(t.groupId)).length;
-  const showToggle=total>TOP_N?`<button class="trajectory-show-toggle" id="trajectoryShowAll">${BILLING_TRAJECTORY_SHOW_ALL?`Show highest-priority ${TOP_N}`:`Show all ${total}`}</button>`:"";
-  const summary=(active.size===0?"No signals selected":total===0?"No linked histories match the selected signals":BILLING_TRAJECTORY_SHOW_ALL
+  const showToggle=total>TOP_N?`<button class="trajectory-show-toggle" id="trajectoryShowAll">${APP_STATE.billingTrajectory.showAll?`Show highest-priority ${TOP_N}`:`Show all ${total}`}</button>`:"";
+  const summary=(active.size===0?"No signals selected":total===0?"No linked histories match the selected signals":APP_STATE.billingTrajectory.showAll
     ?`Showing all ${total} matching jobs`:`Showing ${displayed.length} of ${total} matching jobs, prioritized by signal severity`)
     +(hiddenCount?` · ${hiddenCount} hidden from the key`:"");
   const empty=active.size===0?"Select one or more signals to display job trajectories.":"No linked job histories match the selected signals.";
@@ -350,12 +350,12 @@ function wireBillingTrajectory(rep){
     const id=button.dataset.filter;
     if(BILLING_TRAJECTORY_FILTERS.has(id))BILLING_TRAJECTORY_FILTERS.delete(id);
     else BILLING_TRAJECTORY_FILTERS.add(id);
-    BILLING_TRAJECTORY_SHOW_ALL=false;
+    APP_STATE.billingTrajectory.showAll=false;
     root.outerHTML=billingTrajectoryChart(rep);wireBillingTrajectory(rep);
   });
   const showAll=root.querySelector("#trajectoryShowAll");
   if(showAll)showAll.onclick=()=>{
-    BILLING_TRAJECTORY_SHOW_ALL=!BILLING_TRAJECTORY_SHOW_ALL;
+    APP_STATE.billingTrajectory.showAll=!APP_STATE.billingTrajectory.showAll;
     root.outerHTML=billingTrajectoryChart(rep);wireBillingTrajectory(rep);
   };
   const focus=groupId=>{
@@ -542,8 +542,8 @@ function jmIsCompletedGroup(g){
   return P!=null&&P>=.995;
 }
 function jmSimilarCompleted(rep,group,subjectV){
-  if(!MATCH_STATE)return[];
-  const done=MATCH_STATE.groups.filter(g=>g!==group&&jmIsCompletedGroup(g))
+  if(!APP_STATE.batch.matchState)return[];
+  const done=APP_STATE.batch.matchState.groups.filter(g=>g!==group&&jmIsCompletedGroup(g))
     .map(g=>{
       const points=groupPeriodSnapshots(g).map(s=>jmSnapshotPoint(s.vars,s.period,s.type));
       const last=points[points.length-1];
@@ -717,7 +717,7 @@ function openWipModal(rep,focusRow){
   if(!jobs.length)return;
   const flags=signalRowFlags(rep);
   const tsByGroup=new Map();
-  if(BATCH_ANALYSIS_MODE&&MATCH_STATE){
+  if(APP_STATE.batch.analysisMode&&APP_STATE.batch.matchState){
     const trend=timeSeriesData();
     for(const r of (trend?.rows||[]))if(r.groupId)tsByGroup.set(r.groupId,r);
   }
@@ -827,7 +827,7 @@ function openSourceReview(rep,focusCi=0){
       <span class="sr-edit-col">${htmlEsc(col)}</span>
       <span class="sr-values"><span class="from">$${fmt$(c.printed)}</span><span aria-hidden="true">\u2192</span><span class="to">$${fmt$(c.implied)}</span></span>
       <span class="sr-apply"><span>${c.checks} independent check${c.checks===1?"":"s"}${c.corroborated?" + totals":""}</span>
-        <label><input type="checkbox" class="sr-check" data-ci="${ci}" ${ACCEPTED.has(ci)?"checked":""}> Applied</label></span>
+        <label><input type="checkbox" class="sr-check" data-ci="${ci}" ${APP_STATE.document.accepted.has(ci)?"checked":""}> Applied</label></span>
     </div>`;
   }).join("");
   const initialPage=sourceFinding(rep,corrs[focusCi])?.page||1;
@@ -852,7 +852,7 @@ function openSourceReview(rep,focusCi=0){
         <div class="sr-edits">${itemHTML}</div></aside></div></div>`;
   document.body.appendChild(m);document.body.style.overflow="hidden";
   const close=()=>{m.remove();document.body.style.overflow="";document.removeEventListener("keydown",esc);
-    if(VIEW==="dash")renderDash(REPORT);else renderCertificate(REPORT);};
+    if(APP_STATE.document.view==="dash")renderDash(APP_STATE.document.report);else renderCertificate(APP_STATE.document.report);};
   const esc=e=>{if(e.key==="Escape")close()};
   const select=ci=>{
     m.querySelectorAll(".sr-edit").forEach(x=>x.classList.toggle("active",+x.dataset.ci===ci));
@@ -874,7 +874,7 @@ function openSourceReview(rep,focusCi=0){
   });
   m.querySelectorAll(".sr-check").forEach(box=>box.onchange=()=>{
     const ci=+box.dataset.ci;
-    if(box.checked)ACCEPTED.add(ci);else ACCEPTED.delete(ci);
+    if(box.checked)APP_STATE.document.accepted.add(ci);else APP_STATE.document.accepted.delete(ci);
   });
 }
 function tableHTML(rep,idp="wiprow"){
