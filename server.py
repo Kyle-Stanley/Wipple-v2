@@ -47,8 +47,8 @@ def _plural(n, word):
 
 def _narrate(node: str, up: dict, state: dict) -> list[str]:
     if node == "ingest":
-        # The browser owns the alternating demo stinger. Ingest details such
-        # as page chunking remain internal instead of replacing it instantly.
+        # The stream acknowledges the upload immediately; detailed ingest
+        # mechanics remain internal until the first real extraction update.
         return []
     if node == "extract_chunks":
         frs = up.get("fragments") or []
@@ -180,7 +180,7 @@ def _stream(initial: dict):
     def gen():
         yield ("event: progress\ndata: "
                + json.dumps({"node": "upload",
-                             "message": "Watch me wipple..."})
+                             "message": "Reading and validating schedule"})
                + "\n\n")
         while True:
             try:
@@ -231,12 +231,7 @@ def _initial(**kw) -> dict:
 
 @app.get("/")
 def index():
-    html = Path("static/index.html").read_text(encoding="utf-8")
-    head, marker, tail = html.rpartition("</body>")
-    if marker:
-        html = (head + '<script src="/static/wipple_ticker.js"></script>\n'
-                + marker + tail)
-    return HTMLResponse(html)
+    return HTMLResponse(Path("static/index.html").read_text(encoding="utf-8"))
 
 
 @app.get("/how")

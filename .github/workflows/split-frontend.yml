@@ -1,114 +1,173 @@
-name: Apply practical progress cleanup
+name: Frontend integrity
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - server.py
+      - static/index.html
+      - static/wipple_ticker.js
+      - static/styles/**
+      - static/app/**
+      - .github/workflows/split-frontend.yml
   pull_request:
     paths:
       - server.py
+      - static/index.html
       - static/wipple_ticker.js
-      - static/app/10-state-batch.js
+      - static/styles/**
+      - static/app/**
       - .github/workflows/split-frontend.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out cleanup branch
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Remove joke ticker and keep real progress
+      - name: Check JavaScript syntax
         run: |
-          if [ ! -f static/wipple_ticker.js ]; then
-            echo "Practical progress cleanup already applied"
-            exit 0
-          fi
-
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new, label):
-              text = path.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected one match, found {count}")
-              path.write_text(text.replace(old, new), encoding="utf-8")
-
-          server = Path("server.py")
-          replace_once(
-              server,
-              '''    if node == "ingest":
-        # The browser owns the alternating demo stinger. Ingest details such
-        # as page chunking remain internal instead of replacing it instantly.
-        return []''',
-              '''    if node == "ingest":
-        # The stream acknowledges the upload immediately; detailed ingest
-        # mechanics remain internal until the first real extraction update.
-        return []''',
-              "ingest narration comment",
-          )
-          replace_once(
-              server,
-              '''        yield ("event: progress\\ndata: "
-               + json.dumps({"node": "upload",
-                             "message": "Watch me wipple..."})
-               + "\\n\\n")''',
-              '''        yield ("event: progress\\ndata: "
-               + json.dumps({"node": "upload",
-                             "message": "Reading and validating schedule"})
-               + "\\n\\n")''',
-              "initial progress message",
-          )
-          replace_once(
-              server,
-              '''@app.get("/")
-def index():
-    html = Path("static/index.html").read_text(encoding="utf-8")
-    head, marker, tail = html.rpartition("</body>")
-    if marker:
-        html = (head + '<script src="/static/wipple_ticker.js"></script>\\n'
-                + marker + tail)
-    return HTMLResponse(html)''',
-              '''@app.get("/")
-def index():
-    return HTMLResponse(Path("static/index.html").read_text(encoding="utf-8"))''',
-              "ticker injection",
-          )
-
-          batch = Path("static/app/10-state-batch.js")
-          replace_once(
-              batch,
-              "  APP_STATE.progress.running=true;DOTS=0;LATEST_PROGRESS=null;",
-              "  APP_STATE.progress.running=true;",
-              "batch progress ownership",
-          )
-
-          Path("static/wipple_ticker.js").unlink()
-          PY
-
           for file in static/app/*.js; do
             node --check "$file"
           done
           cat static/app/*.js > /tmp/wipple-app.js
           node --check /tmp/wipple-app.js
-          python -m py_compile server.py
-          git diff --check
 
-          if grep -RInE 'Watch me wipple|nay nayle|wipple_ticker\.js' server.py static; then
-            echo "Legacy ticker reference remains" >&2
-            exit 1
-          fi
-          if grep -RInE '\b(DOTS|LATEST_PROGRESS)\s*=' static/app --exclude=00-core.js; then
-            echo "Progress animation internals are still written outside 00-core.js" >&2
-            exit 1
-          fi
+      - name: Verify frontend asset structure
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add server.py static/app/10-state-batch.js static/wipple_ticker.js
-          git commit -m "simplify frontend progress updates"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          html_path = Path('static/index.html')
+          html = html_path.read_text(encoding='utf-8')
+          app_files = sorted(Path('static/app').glob('*.js'))
+          expected_refs = [f'/static/app/{path.name}' for path in app_files]
+          actual_refs = re.findall(r'<script src="(/static/app/[^"]+)"></script>', html)
+
+          assert Path('static/styles/wipple.css').is_file()
+          assert Path('static/app/01-app-state.js').is_file()
+          assert not Path('static/wipple_ticker.js').exists()
+          assert '<link rel="stylesheet" href="/static/styles/wipple.css">' in html
+          assert actual_refs == expected_refs
+          assert '<style>' not in html
+          assert '<script>' not in html
+
+          inline_attribute = re.compile(
+              r'''<[A-Za-z][^>]*?\b(?P<attribute>on[a-z][a-z0-9]*\s*=\s*["'])''',
+              re.IGNORECASE | re.DOTALL,
+          )
+          inline_handlers = []
+          frontend_sources = [html_path, *Path('static').rglob('*.js')]
+          for path in frontend_sources:
+              text = path.read_text(encoding='utf-8')
+              lines = text.splitlines()
+              for match in inline_attribute.finditer(text):
+                  line_number = text.count('\n', 0, match.start('attribute')) + 1
+                  line = lines[line_number - 1].strip() if lines else ''
+                  inline_handlers.append(f'{path}:{line_number}: {line}')
+          assert not inline_handlers, 'Inline event attributes found:\n' + '\n'.join(inline_handlers)
+
+          legacy_ticker = re.compile(r'Watch me wipple|nay nayle|wipple_ticker\.js', re.IGNORECASE)
+          ticker_hits = []
+          for path in [Path('server.py'), *Path('static').rglob('*.js')]:
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if legacy_ticker.search(line):
+                      ticker_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not ticker_hits, 'Legacy progress ticker remains:\n' + '\n'.join(ticker_hits)
+          PY
+
+      - name: Verify state ownership and section persistence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          migrated = [
+              'ACCEPTED', 'ACTIVE', 'ANALYSIS_SCOPE', 'BATCH_ACTIVE',
+              'BATCH_ANALYSIS_MODE', 'BILLING_TRAJECTORY_SHOW_ALL', 'DOC',
+              'MATCH_STATE', 'REPORT', 'RUNNING', 'SECSTATE', 'SECTIONS', 'VIEW',
+          ]
+          legacy = re.compile(r'\b(?:' + '|'.join(migrated) + r')\b')
+          legacy_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if legacy.search(line):
+                      legacy_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not legacy_hits, 'Legacy writable state remains:\n' + '\n'.join(legacy_hits)
+
+          derived_assignment = re.compile(r'APP_STATE\.document\.(?:report|accepted)\s*=')
+          derived_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if derived_assignment.search(line):
+                      derived_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not derived_hits, 'Derived document fields assigned directly:\n' + '\n'.join(derived_hits)
+
+          state_text = Path('static/app/01-app-state.js').read_text(encoding='utf-8')
+          assert 'saveCurrent' not in state_text
+          assert 'activeCorrectionStateIsAliased' not in state_text
+
+          external_progress = []
+          progress_assignment = re.compile(r'\b(?:DOTS|LATEST_PROGRESS)\s*=')
+          for path in sorted(Path('static/app').glob('*.js')):
+              if path.name == '00-core.js':
+                  continue
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if progress_assignment.search(line):
+                      external_progress.append(f'{path}:{number}: {line.strip()}')
+          assert not external_progress, 'Progress animation state written outside 00-core.js:\n' + '\n'.join(external_progress)
+
+          wrapper_assignment = re.compile(
+              r'^\s*(?:addLine|updateBatchLane|finishProgressLine|attachClientElapsed|renderCertificate)\s*=',
+              re.MULTILINE,
+          )
+          wrapper_hits = []
+          for path in sorted(Path('static').rglob('*.js')):
+              for match in wrapper_assignment.finditer(path.read_text(encoding='utf-8')):
+                  line_number = path.read_text(encoding='utf-8').count('\n', 0, match.start()) + 1
+                  wrapper_hits.append(f'{path}:{line_number}')
+          assert not wrapper_hits, 'Runtime function replacement remains:\n' + '\n'.join(wrapper_hits)
+          PY
+
+          node <<'NODE'
+          const fs=require('fs');
+          const vm=require('vm');
+          const state=fs.readFileSync('static/app/01-app-state.js','utf8');
+          const test=`
+            const first={rep:{id:"first"}},second={rep:{id:"second"}};
+            const sectionOne=new Set([1]),sectionTwo=new Set([2]);
+            initializeDocumentState({
+              source:{id:"doc"},sections:[first,second],
+              correctionsBySection:[sectionOne,sectionTwo],activeSection:0
+            });
+            APP_STATE.document.accepted.add(3);
+            activateDocumentSection(1);
+            APP_STATE.document.accepted.add(4);
+            activateDocumentSection(0);
+            if(!APP_STATE.document.accepted.has(1)||!APP_STATE.document.accepted.has(3))
+              throw new Error("section one corrections did not persist");
+            if(APP_STATE.document.accepted.has(2)||APP_STATE.document.accepted.has(4))
+              throw new Error("section two corrections leaked into section one");
+            activateDocumentSection(1);
+            if(!APP_STATE.document.accepted.has(2)||!APP_STATE.document.accepted.has(4))
+              throw new Error("section two corrections did not persist");
+            if(APP_STATE.document.accepted.has(1)||APP_STATE.document.accepted.has(3))
+              throw new Error("section one corrections leaked into section two");
+            const replacement=new Set([9]);
+            replaceAcceptedCorrections(replacement);
+            if(APP_STATE.document.accepted!==replacement)
+              throw new Error("replacement Set was not stored directly");
+            activateAnalysisDocument({id:"analysis"});
+            if(APP_STATE.document.report.id!=="analysis")
+              throw new Error("analysis report not active");
+          `;
+          vm.runInNewContext(state+test,{Set,TypeError});
+          NODE
