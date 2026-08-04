@@ -69,7 +69,7 @@ def main() -> None:
     if len(styles) != 2:
         raise RuntimeError(f"Expected exactly two document style blocks; found {len(styles)}")
 
-    combined_css = styles[0].rstrip() + "\n\n" + styles[1].strip() + "\n"
+    combined_css = styles[0] + "\n\n" + styles[1] + "\n"
     STYLES.parent.mkdir(parents=True, exist_ok=True)
     STYLES.write_text(combined_css, encoding="utf-8")
 
@@ -97,7 +97,7 @@ def main() -> None:
     chunks = split_exact(app_js)
     APP_DIR.mkdir(parents=True, exist_ok=True)
     for name, content in chunks:
-        (APP_DIR / name).write_text(content.rstrip() + "\n", encoding="utf-8")
+        (APP_DIR / name).write_text(content, encoding="utf-8")
 
     script_tags = "\n".join(
         f'<script src="/static/app/{name}"></script>' for name, _ in chunks
