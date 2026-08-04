@@ -1,5 +1,7 @@
 (() => {
   const handleImageError = (image, fallback) => {
+    if (!image) return;
+
     let handled = false;
     const onError = () => {
       if (handled) return;
@@ -27,6 +29,6 @@
   });
 
   const reloadPage = () => location.reload();
-  document.querySelector("#newScan").onclick = reloadPage;
-  document.querySelector("#startOver").onclick = reloadPage;
+  document.querySelector("#newScan")?.addEventListener("click", reloadPage);
+  document.querySelector("#startOver")?.addEventListener("click", reloadPage);
 })();
