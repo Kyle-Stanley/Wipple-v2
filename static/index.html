@@ -13,9 +13,9 @@
 <header>
   <!-- Starts hidden because the landing is the default view; show() reveals
        it on every other view. -->
-  <div class="mark" style="visibility:hidden"><img src="/static/logo/logo2_bw.png" alt="wipple" style="height:30px;display:block" onerror="this.outerHTML='w<span>i</span>pple'"></div>
+  <div class="mark" style="visibility:hidden"><img id="headerLogo" src="/static/logo/logo2_bw.png" alt="wipple" style="height:30px;display:block"></div>
   <nav id="nav" class="hidden" style="display:flex;gap:8px">
-    <button class="btn" onclick="location.reload()">New scan</button>
+    <button class="btn" id="newScan">New scan</button>
     <button class="btn hidden" id="navBatch">Validations</button>
     <button class="btn hidden" id="navMatch">Job matching</button>
     <button class="btn hidden" id="navConsolidated">Validated WIP</button>
@@ -27,8 +27,7 @@
 </header>
 
 <section id="landing">
-  <img class="hero-logo" src="/static/logo/wipple-text-logo.png" alt="wipple"
-       onerror="this.onerror=null;this.src='/static/logo/logo2_bw.png'">
+  <img class="hero-logo" id="heroLogo" src="/static/logo/wipple-text-logo.png" alt="wipple">
   <h1>From dense tables to instant insight.</h1>
   <p class="sub"><em>Wipple</em> scans financials, finds and corrects errors, and delivers underwriting-ready analysis.</p>
   <div class="drop" id="drop">
@@ -71,7 +70,7 @@
   <!-- The blue/green/red cycle images never shipped, so every load 404'd four
        times and fell through to the text mark. One real lockup, still pulsing. -->
   <div class="loader-logo" aria-hidden="true">
-    <img src="/static/logo/wipple-text-logo.png" alt="" onerror="this.closest('.loader-logo').classList.add('noimg')">
+    <img id="loaderLogoImage" src="/static/logo/wipple-text-logo.png" alt="">
     <span class="loader-logo-fallback mark">w<span>i</span>pple</span>
   </div>
   <div class="batch-progress hidden" id="batchProgress">
@@ -84,7 +83,6 @@
 </section>
 
 <div id="secnav" class="hidden"></div>
-
 
 <section id="certificate" class="hidden"></section>
 
@@ -104,7 +102,7 @@
   <h2>Couldn't read that document</h2>
   <p id="errmsg"></p>
   <div class="actions" style="margin-top:22px">
-    <button class="btn" onclick="location.reload()">Start over</button>
+    <button class="btn" id="startOver">Start over</button>
   </div>
 </section>
 </div>
@@ -112,6 +110,7 @@
 <script src="/static/job_matching.js"></script>
 <script src="/static/wip_math.js"></script>
 <script src="/static/app/00-core.js"></script>
+<script src="/static/app/05-static-events.js"></script>
 <script src="/static/app/10-state-batch.js"></script>
 <script src="/static/app/20-portfolio.js"></script>
 <script src="/static/app/30-document.js"></script>
