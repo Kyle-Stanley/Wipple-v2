@@ -93,26 +93,25 @@ function secLabel(sc){
 }
 function renderSecnav(){
   const nav=$("#secnav");
-  if(VIEW!=="certificate"||SECTIONS.length<2){nav.classList.add("hidden");return;}
+  if(APP_STATE.document.view!=="certificate"||APP_STATE.document.sections.length<2){nav.classList.add("hidden");return;}
   nav.classList.add("secnav");nav.classList.remove("hidden");
-  nav.innerHTML='<span class="secnav-title">Validation pages</span>'+SECTIONS.map((sc,i)=>{
-    const l=secLabel(sc),state=SECSTATE[i]||defaultAcceptedCorrections(sc.rep||{});
+  nav.innerHTML='<span class="secnav-title">Validation pages</span>'+APP_STATE.document.sections.map((sc,i)=>{
+    const l=secLabel(sc),state=APP_STATE.document.correctionsBySection[i]||defaultAcceptedCorrections(sc.rep||{});
     const counts=computeValidationChecks(sc.rep||{},state),review=counts.nBad>0||counts.nFixed>0;
-    return `<button class="${i===ACTIVE?"on ":""}${review?"review":"clean"}" data-sec="${i}">
+    return `<button class="${i===APP_STATE.document.activeSection?"on ":""}${review?"review":"clean"}" data-sec="${i}">
       <span class="sec-dot">${counts.nBad?"!":"✓"}</span><span class="sec-copy">
       <span class="sec-name">${l.name}</span><span class="sec-meta">${l.meta}</span></span></button>`;
   }).join("");
   nav.querySelectorAll("button").forEach(b=>b.onclick=()=>selectSection(+b.dataset.sec));
 }
 function selectSection(i){
-  SECSTATE[ACTIVE]=new Set(ACCEPTED);
-  ACTIVE=i;REPORT=SECTIONS[i].rep;ACCEPTED=SECSTATE[i];VIEW="certificate";
-  renderSecnav();renderCertificate(REPORT);show("certificate");
+  activateDocumentSection(i);
+  renderSecnav();renderCertificate(APP_STATE.document.report);show("certificate");
   if(!BATCH_MODE)setSingleNav("validation");
   window.scrollTo(0,0);
 }
 function syncActiveSectionReview(){
-  if(ACTIVE>=0&&SECSTATE[ACTIVE])SECSTATE[ACTIVE]=new Set(ACCEPTED);
+  if(APP_STATE.document.activeSection>=0&&APP_STATE.document.correctionsBySection[APP_STATE.document.activeSection])APP_STATE.document.correctionsBySection[APP_STATE.document.activeSection]=new Set(APP_STATE.document.accepted);
 }
 function sectionVariableSignature(sc){
   return [...new Set((sc?.rep?.table?.columns||[]).map(c=>c.variable).filter(Boolean))]
@@ -123,20 +122,20 @@ function sectionPageRange(sc){
   return p.length?[p[0],p[p.length-1]]:null;
 }
 function currentScheduleSectionIndexes(){
-  const active=SECTIONS[ACTIVE];
-  if(!active||active.type!=="wip")return ACTIVE>=0?[ACTIVE]:[];
-  const sameTable=SECTIONS.map((sc,i)=>({sc,i})).filter(x=>
+  const active=APP_STATE.document.sections[APP_STATE.document.activeSection];
+  if(!active||active.type!=="wip")return APP_STATE.document.activeSection>=0?[APP_STATE.document.activeSection]:[];
+  const sameTable=APP_STATE.document.sections.map((sc,i)=>({sc,i})).filter(x=>
     x.sc.type==="wip"&&active.tableIndex!=null&&x.sc.tableIndex===active.tableIndex).map(x=>x.i);
   if(sameTable.length>1)return sameTable;
 
   /* Conservative fallback for reports where each continuation page was emitted
      as its own logical table: combine only adjacent WIP pages with the same
      validated variable signature. Separate schedules remain separate. */
-  const sig=sectionVariableSignature(active),candidates=SECTIONS.map((sc,i)=>({sc,i,range:sectionPageRange(sc)}))
+  const sig=sectionVariableSignature(active),candidates=APP_STATE.document.sections.map((sc,i)=>({sc,i,range:sectionPageRange(sc)}))
     .filter(x=>x.sc.type==="wip"&&x.range&&sectionVariableSignature(x.sc)===sig)
     .sort((a,b)=>a.range[0]-b.range[0]);
-  const pos=candidates.findIndex(x=>x.i===ACTIVE);
-  if(pos<0)return[ACTIVE];
+  const pos=candidates.findIndex(x=>x.i===APP_STATE.document.activeSection);
+  if(pos<0)return[APP_STATE.document.activeSection];
   let lo=pos,hi=pos;
   while(lo>0&&candidates[lo].range[0]<=candidates[lo-1].range[1]+1)lo--;
   while(hi<candidates.length-1&&candidates[hi+1].range[0]<=candidates[hi].range[1]+1)hi++;
@@ -145,11 +144,11 @@ function currentScheduleSectionIndexes(){
 function combinedWipReport(indexes){
   syncActiveSectionReview();
   const ordered=[...indexes].sort((a,b)=>a-b);
-  if(ordered.length<=1)return SECTIONS[ordered[0]]?.rep||REPORT;
+  if(ordered.length<=1)return APP_STATE.document.sections[ordered[0]]?.rep||APP_STATE.document.report;
   const rows=[],ids=[],names=[],labels=[],pages=[];
-  const reps=ordered.map(i=>SECTIONS[i]?.rep||{});
+  const reps=ordered.map(i=>APP_STATE.document.sections[i]?.rep||{});
   ordered.forEach(i=>{
-    const sc=SECTIONS[i],rep=sc.rep||{},accepted=SECSTATE[i]||new Set();
+    const sc=APP_STATE.document.sections[i],rep=sc.rep||{},accepted=APP_STATE.document.correctionsBySection[i]||new Set();
     pages.push(...(sc.pages||[]));
     for(let row=0;row<tableJobCount(rep.table);row++){
       const identity=tableIdentity(rep.table,row),vars=canonicalVars(rep,row,accepted);
@@ -175,7 +174,7 @@ function combinedWipReport(indexes){
           ?"header_mapped_unverified":"unmapped")
       :"verified",
     validator_status:reps.some(r=>r.validator_status==="validation_failed")?"validation_failed":"success",
-    findings:[],witnesses:[],metrics:DOC?.metrics||reps[0]?.metrics||{},
+    findings:[],witnesses:[],metrics:APP_STATE.document.source?.metrics||reps[0]?.metrics||{},
     _combinedSectionCount:ordered.length,_combinedPages:uniquePages,_combinedPageLabel:pageLabel,
     table:{columns,values:rows.map(r=>columns.map(c=>r[c.variable]??null)),
       job_ids:ids,job_names:names,job_labels:labels},
@@ -187,7 +186,7 @@ function documentAnalysisReport(){
   return combinedWipReport(currentScheduleSectionIndexes());
 }
 function renderDocumentAnalysis(){
-  syncActiveSectionReview();VIEW="dash";renderSecnav();
+  syncActiveSectionReview();APP_STATE.document.view="dash";renderSecnav();
   renderDash(documentAnalysisReport());show("dash");
   if(!BATCH_MODE)setSingleNav("analysis");
   window.scrollTo(0,0);
@@ -319,8 +318,8 @@ function updateColumnMappingRail(rep,state){
   const analyze=$("#mappingAnalyze");
   if(analyze)analyze.onclick=()=>{
     applyColumnMapping(rep,state);
-    const savedStates=SECSTATE.map(sectionState=>new Set(sectionState));
-    render(DOC,{states:savedStates,active:ACTIVE,view:"dash"});
+    const savedStates=APP_STATE.document.correctionsBySection.map(sectionState=>new Set(sectionState));
+    render(APP_STATE.document.source,{states:savedStates,active:APP_STATE.document.activeSection,view:"dash"});
   };
 }
 
@@ -365,10 +364,10 @@ function applyColumnMapping(rep,state){
 }
 
 function renderColumnMapping(sectionIndex){
-  ACTIVE=sectionIndex;REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];
-  const rep=REPORT,state=columnMappingState(rep),source=columnMappingSource(rep);
+  activateDocumentSection(sectionIndex,{saveCurrent:false,view:APP_STATE.document.view});
+  const rep=APP_STATE.document.report,state=columnMappingState(rep),source=columnMappingSource(rep);
   refreshColumnMappingInferences(rep,state);
-  const section=SECTIONS[ACTIVE],sectionNote=SECTIONS.length>1
+  const section=APP_STATE.document.sections[APP_STATE.document.activeSection],sectionNote=APP_STATE.document.sections.length>1
     ?` · ${secLabel(section).name} · ${secLabel(section).pg}`:"";
   const header=source.headers.map((documentHeader,documentColumn)=>{
     const matrixColumn=source.matrixByDocument.get(documentColumn);
@@ -433,31 +432,30 @@ function render(doc,restore=null){
     $("#errmsg").textContent="The document could not be transcribed. If you're running without a model API key, try the sample schedule instead.";
     show("err");return;
   }
-  DOC=doc;
-  SECTIONS=doc.tables?adaptV3(doc):[{type:"wip",pages:[],rep:doc}];
-  SECTIONS.forEach(section=>{
+  const sections=doc.tables?adaptV3(doc):[{type:"wip",pages:[],rep:doc}];
+  sections.forEach(section=>{
     const rep=section.rep||{};
     if(!rep._headerComparison)rep._headerComparison=buildHeaderComparison(null,rep,[]);
   });
-  if(!SECTIONS.length){
+  if(!sections.length){
     $("#errmsg").textContent="No tables were found in that document.";
     show("err");return;
   }
-  const defaults=SECTIONS.map(sc=>defaultAcceptedCorrections(sc.rep||{}));
-  SECSTATE=restore?.states?.length===SECTIONS.length
+  const defaults=sections.map(sc=>defaultAcceptedCorrections(sc.rep||{}));
+  const correctionsBySection=restore?.states?.length===sections.length
     ?restore.states.map(s=>new Set(s)):defaults;
-  ACTIVE=Math.max(0,Math.min(restore?.active||0,SECTIONS.length-1));
-  REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];
-  const sparseSection=SECTIONS.findIndex(section=>
+  const activeSection=Math.max(0,Math.min(restore?.active||0,sections.length-1));
+  const view=restore?.view==="dash"?"dash":"certificate";
+  initializeDocumentState({source:doc,sections,correctionsBySection,activeSection,view});
+  const sparseSection=APP_STATE.document.sections.findIndex(section=>
     section.type==="wip"&&SPARSE_MAPPING_STATUSES.has(section.rep?.overall_status));
   if(sparseSection>=0){
     renderColumnMapping(sparseSection);
     return;
   }
-  VIEW=restore?.view==="dash"?"dash":"certificate";
   renderSecnav();
-  if(VIEW==="dash"){renderDash(documentAnalysisReport());show("dash");}
-  else{renderCertificate(REPORT);show("certificate");}
+  if(APP_STATE.document.view==="dash"){renderDash(documentAnalysisReport());show("dash");}
+  else{renderCertificate(APP_STATE.document.report);show("certificate");}
   const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
   if(BATCH_MODE){
     $("#navBatch").classList.remove("hidden");
@@ -466,10 +464,10 @@ function render(doc,restore=null){
     $("#navCert").classList.remove("hidden");$("#navDash").classList.remove("hidden");
     $("#navBatch").onclick=renderBatch;
   }else{
-    setSingleNav(VIEW==="dash"?"analysis":"validation");
+    setSingleNav(APP_STATE.document.view==="dash"?"analysis":"validation");
     $("#navConsolidated").onclick=renderSingleValidatedWip;
   }
-  $("#navCert").onclick=()=>{syncActiveSectionReview();VIEW="certificate";REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];renderSecnav();renderCertificate(REPORT);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};
+  $("#navCert").onclick=()=>{syncActiveSectionReview();activateDocumentSection(APP_STATE.document.activeSection,{saveCurrent:false});renderSecnav();renderCertificate(APP_STATE.document.report);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};
   $("#navDash").onclick=renderDocumentAnalysis;
 }
 

@@ -99,7 +99,7 @@ function buildMatchState(){
       if(obs.match==="pending")pending.push(obs.key);
     }
   }
-  MATCH_STATE={observations,groups,pending,selected:0,decisions:[]};
+  APP_STATE.batch.matchState={observations,groups,pending,selected:0,decisions:[]};
   const reviewable=new Set(pending.filter(key=>{
     const obs=observations.find(o=>o.key===key);
     return obs&&matchingCandidates(obs).length;
@@ -109,14 +109,14 @@ function buildMatchState(){
     const obs=observations.find(o=>o.key===key);
     if(obs)obs.match="new";
   }
-  MATCH_STATE.pending=pending.filter(key=>reviewable.has(key));
+  APP_STATE.batch.matchState.pending=pending.filter(key=>reviewable.has(key));
   wireFlowNav();
 }
 function findGroupByObs(key){
-  return MATCH_STATE?.groups.find(g=>g.observations.some(o=>o.key===key));
+  return APP_STATE.batch.matchState?.groups.find(g=>g.observations.some(o=>o.key===key));
 }
 function matchingCandidates(obs){
-  return MATCH_STATE.groups.filter(g=>!g.observations.some(o=>o.key===obs.key))
+  return APP_STATE.batch.matchState.groups.filter(g=>!g.observations.some(o=>o.key===obs.key))
     .filter(g=>g.observations.some(o=>o.period!==obs.period))
     .map(g=>({g,score:crossPeriodGroupScore(obs,g)}))
     .filter(x=>x.score>=.60&&x.g.observations.some(o=>
@@ -124,32 +124,32 @@ function matchingCandidates(obs){
     .sort((a,b)=>b.score-a.score);
 }
 function mergeObservation(obsKey,targetId,rerender=true){
-  const from=findGroupByObs(obsKey),target=MATCH_STATE.groups.find(g=>g.id===targetId);
+  const from=findGroupByObs(obsKey),target=APP_STATE.batch.matchState.groups.find(g=>g.id===targetId);
   if(!from||!target||from===target)return;
   const obs=from.observations.find(o=>o.key===obsKey);
   const moved=from.observations.every(o=>o.period===obs.period)?[...from.observations]:[obs];
   from.observations=from.observations.filter(o=>!moved.includes(o));
   target.observations.push(...moved);
   moved.forEach(o=>{o.match="manual";o.manual=true;});
-  if(!from.observations.length)MATCH_STATE.groups=MATCH_STATE.groups.filter(g=>g!==from);
-  MATCH_STATE.pending=MATCH_STATE.pending.filter(k=>k!==obsKey);
-  MATCH_STATE.decisions=MATCH_STATE.decisions.filter(d=>d.obsKey!==obsKey);
-  MATCH_STATE.decisions.push({obsKey,type:"matched",targetId,movedKeys:moved.map(o=>o.key)});
-  MATCH_STATE.selected=Math.min(MATCH_STATE.selected,MATCH_STATE.pending.length-1);
+  if(!from.observations.length)APP_STATE.batch.matchState.groups=APP_STATE.batch.matchState.groups.filter(g=>g!==from);
+  APP_STATE.batch.matchState.pending=APP_STATE.batch.matchState.pending.filter(k=>k!==obsKey);
+  APP_STATE.batch.matchState.decisions=APP_STATE.batch.matchState.decisions.filter(d=>d.obsKey!==obsKey);
+  APP_STATE.batch.matchState.decisions.push({obsKey,type:"matched",targetId,movedKeys:moved.map(o=>o.key)});
+  APP_STATE.batch.matchState.selected=Math.min(APP_STATE.batch.matchState.selected,APP_STATE.batch.matchState.pending.length-1);
   if(rerender)renderMatching(true);
 }
 function markNewJob(obsKey,rerender=true){
-  const obs=MATCH_STATE.observations.find(o=>o.key===obsKey);
+  const obs=APP_STATE.batch.matchState.observations.find(o=>o.key===obsKey);
   if(obs){obs.match="new";obs.manual=true;}
-  MATCH_STATE.pending=MATCH_STATE.pending.filter(k=>k!==obsKey);
-  MATCH_STATE.decisions=MATCH_STATE.decisions.filter(d=>d.obsKey!==obsKey);
-  MATCH_STATE.decisions.push({obsKey,type:"new"});
-  MATCH_STATE.selected=Math.min(MATCH_STATE.selected,MATCH_STATE.pending.length-1);
+  APP_STATE.batch.matchState.pending=APP_STATE.batch.matchState.pending.filter(k=>k!==obsKey);
+  APP_STATE.batch.matchState.decisions=APP_STATE.batch.matchState.decisions.filter(d=>d.obsKey!==obsKey);
+  APP_STATE.batch.matchState.decisions.push({obsKey,type:"new"});
+  APP_STATE.batch.matchState.selected=Math.min(APP_STATE.batch.matchState.selected,APP_STATE.batch.matchState.pending.length-1);
   if(rerender)renderMatching(true);
 }
 function undoMatchDecision(obsKey,rerender=true){
-  const decision=MATCH_STATE.decisions.find(d=>d.obsKey===obsKey);
-  const obs=MATCH_STATE.observations.find(o=>o.key===obsKey);
+  const decision=APP_STATE.batch.matchState.decisions.find(d=>d.obsKey===obsKey);
+  const obs=APP_STATE.batch.matchState.observations.find(o=>o.key===obsKey);
   if(!decision||!obs)return;
   if(decision.type==="matched"){
     const group=findGroupByObs(obsKey);
@@ -157,27 +157,27 @@ function undoMatchDecision(obsKey,rerender=true){
       const keys=new Set(decision.movedKeys||[obsKey]);
       const moved=group.observations.filter(o=>keys.has(o.key));
       group.observations=group.observations.filter(o=>!keys.has(o.key));
-      MATCH_STATE.groups.push({id:`g${Date.now()}`,observations:moved});
+      APP_STATE.batch.matchState.groups.push({id:`g${Date.now()}`,observations:moved});
     }
   }
   obs.match="pending";obs.manual=false;
-  if(!MATCH_STATE.pending.includes(obsKey))MATCH_STATE.pending.push(obsKey);
-  MATCH_STATE.decisions=MATCH_STATE.decisions.filter(d=>d.obsKey!==obsKey);
+  if(!APP_STATE.batch.matchState.pending.includes(obsKey))APP_STATE.batch.matchState.pending.push(obsKey);
+  APP_STATE.batch.matchState.decisions=APP_STATE.batch.matchState.decisions.filter(d=>d.obsKey!==obsKey);
   if(rerender)renderMatching(true);
 }
 function unlinkPeriodFromGroup(groupId,period,rerender=true){
-  const g=MATCH_STATE.groups.find(x=>x.id===groupId);
+  const g=APP_STATE.batch.matchState.groups.find(x=>x.id===groupId);
   if(!g||new Set(g.observations.map(o=>o.period)).size<2)return null;
   const moved=g.observations.filter(o=>o.period===period);
   if(!moved.length)return null;
   g.observations=g.observations.filter(o=>o.period!==period);
-  const ng={id:`g${Date.now()}`,observations:moved};MATCH_STATE.groups.push(ng);
+  const ng={id:`g${Date.now()}`,observations:moved};APP_STATE.batch.matchState.groups.push(ng);
   moved.forEach(o=>o.match="new");
   const decision=[...moved].sort((a,b)=>(a.type==="cc"?1:0)-(b.type==="cc"?1:0)).at(-1);
-  MATCH_STATE.decisions=MATCH_STATE.decisions.filter(d=>!moved.some(o=>o.key===d.obsKey));
-  if(decision)MATCH_STATE.decisions.push({obsKey:decision.key,type:"new",reason:"unlinked",
+  APP_STATE.batch.matchState.decisions=APP_STATE.batch.matchState.decisions.filter(d=>!moved.some(o=>o.key===d.obsKey));
+  if(decision)APP_STATE.batch.matchState.decisions.push({obsKey:decision.key,type:"new",reason:"unlinked",
     movedKeys:moved.map(o=>o.key)});
-  MATCH_STATE.selected=MATCH_STATE.pending.length-1;
+  APP_STATE.batch.matchState.selected=APP_STATE.batch.matchState.pending.length-1;
   if(rerender)renderMatching(true);
   return decision?.key||null;
 }
@@ -237,7 +237,7 @@ function linkedGroupHTML(g){
     </div></details>`;
 }
 function samePeriodDuplicates(){
-  return MATCH_STATE.groups.flatMap(g=>{
+  return APP_STATE.batch.matchState.groups.flatMap(g=>{
     const by=new Map();
     for(const o of g.observations){
       if(!by.has(o.period))by.set(o.period,[]);
@@ -263,7 +263,7 @@ function duplicatePeriodHTML({period,merged}){
     </div></details>`;
 }
 function reviewedDecisionHTML(decision){
-  const obs=MATCH_STATE.observations.find(o=>o.key===decision.obsKey);
+  const obs=APP_STATE.batch.matchState.observations.find(o=>o.key===decision.obsKey);
   if(!obs)return"";
   const group=findGroupByObs(obs.key);
   const target=decision.type==="matched"
@@ -288,7 +288,7 @@ function reviewedDecisionHTML(decision){
     </div></div></details>`;
 }
 function syncReviewedDecisions(){
-  const root=$("#matching"),reviewed=MATCH_STATE?.decisions||[];
+  const root=$("#matching"),reviewed=APP_STATE.batch.matchState?.decisions||[];
   if(!root||!reviewed.length)return;
   let section=root.querySelector(".reviewed-list");
   if(!section){
@@ -309,13 +309,13 @@ function showDecisionOverlay(node,message,buttonLabel="Review decision",decision
 }
 function renderMatching(preserveScroll=false,focusDecision=null){
   const priorY=window.scrollY;
-  if(!MATCH_STATE)buildMatchState();
-  saveActiveBatchReview();VIEW="matching";$("#secnav").classList.add("hidden");
-  const pending=MATCH_STATE.pending;
-  const pendingObs=pending.map(k=>MATCH_STATE.observations.find(o=>o.key===k)).filter(Boolean);
-  const matched=MATCH_STATE.groups.filter(g=>new Set(g.observations.map(o=>o.period)).size>1);
+  if(!APP_STATE.batch.matchState)buildMatchState();
+  saveActiveBatchReview();APP_STATE.document.view="matching";$("#secnav").classList.add("hidden");
+  const pending=APP_STATE.batch.matchState.pending;
+  const pendingObs=pending.map(k=>APP_STATE.batch.matchState.observations.find(o=>o.key===k)).filter(Boolean);
+  const matched=APP_STATE.batch.matchState.groups.filter(g=>new Set(g.observations.map(o=>o.period)).size>1);
   const duplicates=samePeriodDuplicates();
-  const reviewed=MATCH_STATE.decisions||[];
+  const reviewed=APP_STATE.batch.matchState.decisions||[];
   $("#matching").innerHTML=`<div class="flow-head"><div><h2>Job matching</h2>
       <p>This is optional cleanup for time-series analysis. Review unresolved jobs in any order; jobs you ignore remain separate.</p></div>
       <div class="match-summary"><span>${matched.length} jobs linked across periods</span><span>${duplicates.length} same-period duplicate${duplicates.length===1?"":"s"}</span><span>${pending.length} need review</span></div></div>
@@ -393,7 +393,7 @@ function mergePeriodObservations(observations){
     type:authority.type||"wip",authority,deduplicated,observations:ordered};
 }
 function consolidatedRows(period){
-  return MATCH_STATE.groups.flatMap(g=>{
+  return APP_STATE.batch.matchState.groups.flatMap(g=>{
     const obs=g.observations.filter(o=>o.period===period);
     if(!obs.length)return[];
     const merged=mergePeriodObservations(obs);
@@ -424,10 +424,9 @@ function periodAnalysisReport(period){
 }
 function renderAnalysisScope(period,portfolio=false){
   const report=periodAnalysisReport(period);
-  ANALYSIS_SCOPE=portfolio?"portfolio":period;
-  BATCH_ANALYSIS_MODE=portfolio;BATCH_ACTIVE=-1;clearSourceFile();
-  DOC=report;SECTIONS=[{type:"wip",pages:[],rep:report}];SECSTATE=[new Set()];
-  ACTIVE=0;REPORT=report;ACCEPTED=SECSTATE[0];VIEW="dash";
+  APP_STATE.batch.analysisScope=portfolio?"portfolio":period;
+  APP_STATE.batch.analysisMode=portfolio;APP_STATE.batch.activeItem=-1;clearSourceFile();
+  activateAnalysisDocument(report);
   $("#secnav").classList.add("hidden");
   renderDash(report);show("dash");
   const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
@@ -435,13 +434,13 @@ function renderAnalysisScope(period,portfolio=false){
 }
 function renderPeriodAnalysis(period){
   saveActiveBatchReview();
-  if(batchMetadataReady()&&!MATCH_STATE)buildMatchState();
-  if(MATCH_STATE)renderAnalysisScope(period,false);
+  if(batchMetadataReady()&&!APP_STATE.batch.matchState)buildMatchState();
+  if(APP_STATE.batch.matchState)renderAnalysisScope(period,false);
 }
 function renderPortfolioAnalysis(){
   saveActiveBatchReview();
-  if(batchMetadataReady()&&!MATCH_STATE)buildMatchState();
-  const periods=MATCH_STATE?[...new Set(MATCH_STATE.observations.map(o=>o.period))].sort():[];
+  if(batchMetadataReady()&&!APP_STATE.batch.matchState)buildMatchState();
+  const periods=APP_STATE.batch.matchState?[...new Set(APP_STATE.batch.matchState.observations.map(o=>o.period))].sort():[];
   if(periods.length)renderAnalysisScope(periods[periods.length-1],true);
 }
 function consolidatedTableHTML(period,expanded=false){
@@ -481,8 +480,8 @@ function consolidatedTableHTML(period,expanded=false){
     ${hasDedupe?'<p class="dedupe-key">* Completed-contract values replace the same-period WIP duplicate.</p>':""}`;
 }
 function renderConsolidated(){
-  if(!MATCH_STATE)buildMatchState();
-  const periods=[...new Set(MATCH_STATE.observations.map(o=>o.period))].sort();
+  if(!APP_STATE.batch.matchState)buildMatchState();
+  const periods=[...new Set(APP_STATE.batch.matchState.observations.map(o=>o.period))].sort();
   const current=$("#periodSelect")?.value||periods[periods.length-1];
   $("#consolidated").innerHTML=`<div class="flow-head"><div><h2>Validated WIP</h2>
       <p>WIP and completed-contract schedules stay separate during validation, then collapse into one deduplicated job table here.</p></div>
@@ -509,7 +508,7 @@ function singleValidatedTableHTML(rep){
   const rows=Array.from({length:count},(_,index)=>{
     const identity=tableIdentity(rep.table,index);
     return {label:identity.jobName||identity.jobId||identity.label||`Row ${index+1}`,
-      vars:canonicalVars(rep,index,ACCEPTED)};
+      vars:canonicalVars(rep,index,APP_STATE.document.accepted)};
   });
   const columns=PRINT_COLUMN_ORDER.filter(variable=>rows.some(row=>
     Number.isFinite(+row.vars[variable])));
@@ -537,7 +536,7 @@ function renderSingleValidatedWip(){
       ${singleValidatedTableHTML(combined)}</section>
     <div class="actions" style="justify-content:flex-end"><button class="btn" id="singleValidation">Review validation</button>
       <button class="btn primary" id="singleAnalysis">View underwriting analysis</button></div>`;
-  $("#singleValidation").onclick=()=>{VIEW="certificate";REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];renderSecnav();renderCertificate(REPORT);show("certificate");setSingleNav("validation");window.scrollTo(0,0)};
+  $("#singleValidation").onclick=()=>{activateDocumentSection(APP_STATE.document.activeSection);renderSecnav();renderCertificate(APP_STATE.document.report);show("certificate");setSingleNav("validation");window.scrollTo(0,0)};
   $("#singleAnalysis").onclick=renderDocumentAnalysis;
   show("consolidated");const nav=$("#nav");nav.classList.remove("hidden");$("#tagline").classList.add("hidden");
   setSingleNav("validated");window.scrollTo(0,0);
@@ -572,11 +571,11 @@ function medianNumber(values){
   return x.length%2?x[m]:(x[m-1]+x[m])/2;
 }
 function timeSeriesData(){
-  if(!MATCH_STATE){
+  if(!APP_STATE.batch.matchState){
     if(!batchMetadataReady())return null;
     buildMatchState();
   }
-  const series=MATCH_STATE.groups.map(g=>({group:g,snapshots:groupPeriodSnapshots(g)}))
+  const series=APP_STATE.batch.matchState.groups.map(g=>({group:g,snapshots:groupPeriodSnapshots(g)}))
     .filter(x=>x.snapshots.length>1);
   if(!series.length)return null;
 
@@ -657,10 +656,10 @@ function earlyUnderbillingFadeData(){
      how often did margin fade by the end? Evidence = jobs now past 85%
      complete with a usable margin at both points. At-risk = open jobs whose
      current or past observations match the early-underbilled profile. */
-  if(!MATCH_STATE)return null;
+  if(!APP_STATE.batch.matchState)return null;
   const EARLY_MIN=.15,EARLY_MAX=.60,UB=-.02,LATE=.85,FADE=-.01;
   const evidence=[],atRisk=[];
-  for(const g of MATCH_STATE.groups){
+  for(const g of APP_STATE.batch.matchState.groups){
     const snaps=groupPeriodSnapshots(g).map(x=>jmSnapshotPoint(x.vars,x.period,x.type));
     if(!snaps.length)continue;
     const early=snaps.find(p=>Number.isFinite(p.P)&&Number.isFinite(p.position)

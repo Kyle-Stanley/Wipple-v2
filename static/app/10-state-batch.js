@@ -1,13 +1,6 @@
-let REPORT=null;          /* the ACTIVE section's v2-shaped report */
-let ACCEPTED=new Set();   /* suggested corrections currently included */
-let DOC=null,SECTIONS=[],SECSTATE=[],ACTIVE=0,VIEW="certificate";
-let BATCH_ITEMS=[],BATCH_ACTIVE=-1,BATCH_MODE=false,BATCH_RUN=null;
-let MATCH_STATE=null;
+let BATCH_ITEMS=[],BATCH_MODE=false,BATCH_RUN=null;
 let COLUMN_MAPPING_STATE=new Map();
-let BATCH_ANALYSIS_MODE=false;
-let ANALYSIS_SCOPE="portfolio";
 let BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
-let BILLING_TRAJECTORY_SHOW_ALL=false;
 let BILLING_TRAJECTORY_HIDDEN=new Set();
 /* One healthy-billing band, shared by the portfolio trajectory chart and the
    job analysis modal so the two can never disagree. Tune here only.
@@ -61,7 +54,7 @@ function setFlowNav(active){
   const pairs=[["navBatch","batch"],["navMatch","matching"],
     ["navConsolidated","consolidated"],["navTrends","timeseries"]];
   for(const[id,key]of pairs){
-    const el=$("#"+id);el.classList.toggle("hidden",key!=="batch"&&!MATCH_STATE);
+    const el=$("#"+id);el.classList.toggle("hidden",key!=="batch"&&!APP_STATE.batch.matchState);
     el.style.borderColor=key===active?"var(--sage-deep)":"";
   }
   $("#navCert").classList.add("hidden");$("#navDash").classList.add("hidden");
@@ -79,11 +72,11 @@ function setSingleNav(active){
 }
 
 function resetBatch(){
-  BATCH_ITEMS=[];BATCH_ACTIVE=-1;BATCH_MODE=false;BATCH_RUN=null;MATCH_STATE=null;
+  BATCH_ITEMS=[];APP_STATE.batch.activeItem=-1;BATCH_MODE=false;BATCH_RUN=null;APP_STATE.batch.matchState=null;
   COLUMN_MAPPING_STATE=new Map();
-  BATCH_ANALYSIS_MODE=false;ANALYSIS_SCOPE="portfolio";
+  APP_STATE.batch.analysisMode=false;APP_STATE.batch.analysisScope="portfolio";
   BILLING_TRAJECTORY_FILTERS=new Set(["trapped_cash","profit_fade"]);
-  BILLING_TRAJECTORY_SHOW_ALL=false;
+  APP_STATE.billingTrajectory.showAll=false;
 }
 function runDuration(seconds){
   if(!(seconds>0))return"";
@@ -184,7 +177,7 @@ async function scanBatch(files){
   show("processing");resetProgressStage();renderBatchLanes();
   showBatchProgress(0,BATCH_ITEMS.length);
   $("#nav").classList.add("hidden");$("#tagline").classList.remove("hidden");
-  RUNNING=true;DOTS=0;LATEST_PROGRESS=null;
+  APP_STATE.progress.running=true;DOTS=0;LATEST_PROGRESS=null;
   const model=$("#model")?.value||"";
   const startedAt=performance.now();
   let next=0,completed=0,running=0;
@@ -216,20 +209,20 @@ async function scanBatch(files){
   await Promise.all(Array.from({length:lanes},worker));
   // Wall clock, not the sum of the documents': they overlapped on purpose.
   BATCH_RUN={seconds:(performance.now()-startedAt)/1000};
-  RUNNING=false;finishProgressLine();BATCH_ACTIVE=-1;
+  APP_STATE.progress.running=false;finishProgressLine();APP_STATE.batch.activeItem=-1;
   setTimeout(()=>{hideBatchLanes();renderBatch();},450);
 }
 function saveActiveBatchReview(){
-  if(!BATCH_MODE||VIEW==="batch"||BATCH_ACTIVE<0||!BATCH_ITEMS[BATCH_ACTIVE])return;
-  SECSTATE[ACTIVE]=ACCEPTED;
-  BATCH_ITEMS[BATCH_ACTIVE].reviewState={
-    states:SECSTATE.map(s=>new Set(s)),active:ACTIVE,
-    view:VIEW==="dash"?"dash":"certificate"
+  if(!BATCH_MODE||APP_STATE.document.view==="batch"||APP_STATE.batch.activeItem<0||!BATCH_ITEMS[APP_STATE.batch.activeItem])return;
+  APP_STATE.document.correctionsBySection[APP_STATE.document.activeSection]=APP_STATE.document.accepted;
+  BATCH_ITEMS[APP_STATE.batch.activeItem].reviewState={
+    states:APP_STATE.document.correctionsBySection.map(s=>new Set(s)),active:APP_STATE.document.activeSection,
+    view:APP_STATE.document.view==="dash"?"dash":"certificate"
   };
 }
 function renderBatch(){
   if(!BATCH_MODE)return;
-  saveActiveBatchReview();VIEW="batch";BATCH_ANALYSIS_MODE=false;clearSourceFile();
+  saveActiveBatchReview();APP_STATE.document.view="batch";APP_STATE.batch.analysisMode=false;clearSourceFile();
   $("#secnav").classList.add("hidden");
   const ready=BATCH_ITEMS.filter(x=>x.status==="ready").length;
   const failed=BATCH_ITEMS.length-ready;
@@ -268,9 +261,9 @@ function renderBatch(){
   $("#batch").querySelectorAll(".batch-review").forEach(b=>b.onclick=()=>reviewBatchItem(+b.dataset.batch,"certificate"));
   $("#batch").querySelectorAll(".batch-analysis").forEach(b=>b.onclick=()=>renderBatchItemAnalysis(+b.dataset.batch));
   $("#batch").querySelectorAll(".batch-date").forEach(el=>el.onchange=()=>{
-    BATCH_ITEMS[+el.dataset.batch].periodEnd=el.value;MATCH_STATE=null;renderBatch();});
+    BATCH_ITEMS[+el.dataset.batch].periodEnd=el.value;APP_STATE.batch.matchState=null;renderBatch();});
   $("#batch").querySelectorAll(".batch-type").forEach(el=>el.onchange=()=>{
-    BATCH_ITEMS[+el.dataset.batch].scheduleType=el.value;MATCH_STATE=null;renderBatch();});
+    BATCH_ITEMS[+el.dataset.batch].scheduleType=el.value;APP_STATE.batch.matchState=null;renderBatch();});
   const optional=$("#optionalMatching");if(optional)optional.onclick=()=>{buildMatchState();renderMatching();};
   const combined=$("#viewCombinedNow");if(combined)combined.onclick=()=>{buildMatchState();renderBatchAnalysis();};
   show("batch");
@@ -308,14 +301,14 @@ function batchCardHTML(item,i){
 }
 function reviewBatchItem(i,view="certificate",batchAnalysis=false){
   if(!BATCH_ITEMS[i]||BATCH_ITEMS[i].status!=="ready")return;
-  if(BATCH_ACTIVE!==i)saveActiveBatchReview();
-  BATCH_ANALYSIS_MODE=batchAnalysis;
-  BATCH_ACTIVE=i;
+  if(APP_STATE.batch.activeItem!==i)saveActiveBatchReview();
+  APP_STATE.batch.analysisMode=batchAnalysis;
+  APP_STATE.batch.activeItem=i;
   setSourceFile(BATCH_ITEMS[i].file);
   const saved=BATCH_ITEMS[i].reviewState;
   render(BATCH_ITEMS[i].doc,saved?{...saved,view}:{view});
   if(BATCH_MODE){
-    if(batchMetadataReady()&&!MATCH_STATE)buildMatchState();
+    if(batchMetadataReady()&&!APP_STATE.batch.matchState)buildMatchState();
     wireFlowNav();setFlowNav(view==="dash"?"timeseries":"batch");
   }
 }
@@ -328,8 +321,8 @@ function analysisSwitcherHTML(){
     .map(x=>x.periodEnd))].sort((a,b)=>a.localeCompare(b));
   if(!periods.length)return"";
   return`<nav class="analysis-switcher" aria-label="Analysis views"><span>Analysis view</span>
-    <button class="btn analysis-portfolio-switch ${ANALYSIS_SCOPE==="portfolio"?"on":""}">Full portfolio</button>
-    ${periods.map(period=>`<button class="btn analysis-period-switch ${ANALYSIS_SCOPE===period?"on":""}" data-period="${period}">
+    <button class="btn analysis-portfolio-switch ${APP_STATE.batch.analysisScope==="portfolio"?"on":""}">Full portfolio</button>
+    ${periods.map(period=>`<button class="btn analysis-period-switch ${APP_STATE.batch.analysisScope===period?"on":""}" data-period="${period}">
       ${new Date(period+"T00:00:00Z").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",timeZone:"UTC"})}</button>`).join("")}</nav>`;
 }
 

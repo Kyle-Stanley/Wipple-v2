@@ -80,7 +80,7 @@ function computeValidationChecks(rep,accepted){
   return{checks,nBad,nFixed,nWarn,passed,head,findings,witnesses,corrsC,td};
 }
 function renderCertificate(rep){
-  const{checks,nBad,head,findings,witnesses,corrsC,td}=computeValidationChecks(rep,ACCEPTED);
+  const{checks,nBad,head,findings,witnesses,corrsC,td}=computeValidationChecks(rep,APP_STATE.document.accepted);
   const totalCorrs=td?.totalCorrections||[];
   const SHOWN=6;
   const excRow=f=>{
@@ -91,7 +91,7 @@ function renderCertificate(rep){
     const jobCell=c
       ?`<td class="corr-job-cell has-toggle"><div class="corr-job-line"><button class="evtoggle" data-ev="${ci}" aria-label="show the math">\u25B8</button><span class="corr-job-name" title="${label}">${label}</span></div><small>${htmlEsc(col)}</small></td>`
       :`<td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name" title="${label}">${label}</span></div><small>${htmlEsc(col)}</small></td>`;
-    const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${ACCEPTED.has(ci)?"":"checked"} aria-label="revert to the printed value for ${f.row_label}">`
+    const use=c?`<input type="checkbox" class="certbox" data-ci="${ci}" ${APP_STATE.document.accepted.has(ci)?"":"checked"} aria-label="revert to the printed value for ${f.row_label}">`
                :`<span style="color:var(--muted);font-size:12px">review</span>`;
     const confirmation=!c?"":c.proof_kind==="joint"?"joint proof":
       c.proof_kind==="inherited"?"validated inputs":
@@ -114,7 +114,7 @@ function renderCertificate(rep){
   };
   const totalExcRow=t=>{
     const label=htmlEsc(t.header||variableName(t.variable)||"Stated total");
-    const use=`<input type="checkbox" class="totalbox" data-total-key="${htmlEsc(t.correctionKey)}" ${ACCEPTED.has(t.correctionKey)?"":"checked"} aria-label="revert to the printed total for ${label}">`;
+    const use=`<input type="checkbox" class="totalbox" data-total-key="${htmlEsc(t.correctionKey)}" ${APP_STATE.document.accepted.has(t.correctionKey)?"":"checked"} aria-label="revert to the printed total for ${label}">`;
     return `<tr><td class="corr-job-cell"><div class="corr-job-line"><span class="corr-job-name">TOTAL</span></div><small>${label}</small></td>
       <td class="mny"><span class="bad">$${fmt$(t.stated)}</span></td>
       <td class="mny">$${fmt$(t.proposedCorrection)}</td>
@@ -149,7 +149,7 @@ function renderCertificate(rep){
       }; total $${(+m.cost_usd).toFixed(4)}</li>`:""}
     </ul></details>`:"";
   $("#certificate").innerHTML=`<div class="cert"><div class="cert-inner">
-    <div class="kicker">validation results${SECTIONS.length>1?" \u00b7 "+secLabel(SECTIONS[ACTIVE]).name.toLowerCase()+" \u00b7 "+secLabel(SECTIONS[ACTIVE]).pg:""}</div>
+    <div class="kicker">validation results${APP_STATE.document.sections.length>1?" \u00b7 "+secLabel(APP_STATE.document.sections[APP_STATE.document.activeSection]).name.toLowerCase()+" \u00b7 "+secLabel(APP_STATE.document.sections[APP_STATE.document.activeSection]).pg:""}</div>
     <h2 style="font-size:22px">${head}</h2>
     <details class="more checks-fold"><summary>${nBad?"Review":"Show"} the ${checks.length} checks</summary>
     <div style="margin-top:12px">${checks.map(c=>{
@@ -170,12 +170,12 @@ function renderCertificate(rep){
   const backToBatch=$("#certBackToBatch"),viewAnalysis=$("#certViewAnalysis");
   if(backToBatch)backToBatch.onclick=()=>renderBatch();
   if(viewAnalysis)viewAnalysis.onclick=()=>{
-    if(BATCH_MODE)renderBatchItemAnalysis(BATCH_ACTIVE);
-    else{VIEW="dash";renderDash(REPORT);show("dash");window.scrollTo(0,0);}
+    if(BATCH_MODE)renderBatchItemAnalysis(APP_STATE.batch.activeItem);
+    else{APP_STATE.document.view="dash";renderDash(APP_STATE.document.report);show("dash");window.scrollTo(0,0);}
   };
   const ua=$("#useAll"),st=$("#applyStatus"),ap=$("#applySel"),src=$("#reviewSource");
   /* Boxes now mean "revert to printed": checked = keep the document's value.
-     ACCEPTED remains the set of applied corrections, so it is the complement
+     APP_STATE.document.accepted remains the set of applied corrections, so it is the complement
      of the checked boxes. */
   const correctionKeys=()=>[...corrsC.map((_,i)=>i),...totalCorrs.map(t=>t.correctionKey)];
   const selection=()=>{
@@ -190,14 +190,14 @@ function renderCertificate(rep){
   const syncStatus=()=>{if(!st)return;
     const sel=selection(),keys=correctionKeys();
     const active=keys.filter(k=>sel.has(k)).length;
-    const same=keys.every(k=>sel.has(k)===ACCEPTED.has(k));
+    const same=keys.every(k=>sel.has(k)===APP_STATE.document.accepted.has(k));
     st.textContent=same?`${active} of ${keys.length} correction${keys.length===1?"":"s"} applied`:"selection changed; update the figures when ready";
     st.style.color=same?"var(--muted)":"var(--brick)";};
   document.querySelectorAll(".certbox,.totalbox").forEach(b=>b.onchange=()=>{syncUA();syncStatus();});
   if(ua){syncUA();ua.onchange=()=>{document.querySelectorAll(".certbox,.totalbox").forEach(b=>{b.checked=ua.checked;});syncStatus();};}
   if(ap)ap.onclick=()=>{
     const applied=selection(),keys=correctionKeys();const restored=keys.filter(k=>!applied.has(k)).length;
-    ACCEPTED=applied;
+    replaceAcceptedCorrections(applied);
     renderCertificate(rep);
     const st2=$("#applyStatus");
     if(st2){st2.textContent=`✓ ${keys.length-restored} applied${restored?`; ${restored} kept as printed`:""}`;
