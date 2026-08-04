@@ -1,18 +1,30 @@
 (() => {
+  const handleImageError = (image, fallback) => {
+    let handled = false;
+    const onError = () => {
+      if (handled) return;
+      handled = true;
+      image.removeEventListener("error", onError);
+      fallback();
+    };
+    image.addEventListener("error", onError);
+    if (image.complete && image.naturalWidth === 0) onError();
+  };
+
   const headerLogo = document.querySelector("#headerLogo");
-  headerLogo.addEventListener("error", () => {
+  handleImageError(headerLogo, () => {
     headerLogo.outerHTML = "w<span>i</span>pple";
-  }, { once: true });
+  });
 
   const heroLogo = document.querySelector("#heroLogo");
-  heroLogo.addEventListener("error", () => {
+  handleImageError(heroLogo, () => {
     heroLogo.src = "/static/logo/logo2_bw.png";
-  }, { once: true });
+  });
 
   const loaderLogoImage = document.querySelector("#loaderLogoImage");
-  loaderLogoImage.addEventListener("error", () => {
+  handleImageError(loaderLogoImage, () => {
     loaderLogoImage.closest(".loader-logo")?.classList.add("noimg");
-  }, { once: true });
+  });
 
   const reloadPage = () => location.reload();
   document.querySelector("#newScan").onclick = reloadPage;
