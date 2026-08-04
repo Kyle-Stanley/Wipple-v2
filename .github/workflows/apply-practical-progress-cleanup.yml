@@ -1,9 +1,7 @@
 name: Apply practical progress cleanup
 
 on:
-  push:
-    branches:
-      - agent/practical-progress-cleanup
+  pull_request:
     paths:
       - .github/workflows/apply-practical-progress-cleanup.yml
 
@@ -17,11 +15,16 @@ jobs:
       - name: Check out cleanup branch
         uses: actions/checkout@v4
         with:
-          ref: agent/practical-progress-cleanup
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
       - name: Remove joke ticker and keep real progress
         run: |
+          if [ ! -f static/wipple_ticker.js ]; then
+            echo "Practical progress cleanup already applied"
+            exit 0
+          fi
+
           python - <<'PY'
           from pathlib import Path
 
@@ -81,10 +84,7 @@ def index():
               "batch progress ownership",
           )
 
-          ticker = Path("static/wipple_ticker.js")
-          if not ticker.is_file():
-              raise SystemExit("ticker file missing")
-          ticker.unlink()
+          Path("static/wipple_ticker.js").unlink()
           PY
 
           for file in static/app/*.js; do
@@ -108,4 +108,4 @@ def index():
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add server.py static/app/10-state-batch.js static/wipple_ticker.js
           git commit -m "simplify frontend progress updates"
-          git push origin HEAD:agent/practical-progress-cleanup
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
