@@ -1,6 +1,14 @@
-name: Frontend state migration
+name: Frontend integrity
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - static/index.html
+      - static/styles/**
+      - static/app/**
+      - .github/workflows/split-frontend.yml
   pull_request:
     paths:
       - static/index.html
@@ -9,291 +17,99 @@ on:
       - .github/workflows/split-frontend.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  migrate:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out pull request branch
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Centralize frontend workflow state
+      - name: Check JavaScript syntax
+        run: |
+          for file in static/app/*.js; do
+            node --check "$file"
+          done
+          cat static/app/*.js > /tmp/wipple-app.js
+          node --check /tmp/wipple-app.js
+
+      - name: Verify frontend asset structure
         run: |
           python - <<'PY'
           from pathlib import Path
           import re
 
-          state_path = Path('static/app/01-app-state.js')
-          if state_path.exists():
-              print('Frontend state migration already applied')
-              raise SystemExit(0)
+          html_path = Path('static/index.html')
+          html = html_path.read_text(encoding='utf-8')
+          app_files = sorted(Path('static/app').glob('*.js'))
+          expected_refs = [f'/static/app/{path.name}' for path in app_files]
+          actual_refs = re.findall(r'<script src="(/static/app/[^"]+)"></script>', html)
 
-          def replace_once(path, old, new, label):
+          assert Path('static/styles/wipple.css').is_file()
+          assert Path('static/app/01-app-state.js').is_file()
+          assert '<link rel="stylesheet" href="/static/styles/wipple.css">' in html
+          assert actual_refs == expected_refs
+          assert '<style>' not in html
+          assert '<script>' not in html
+
+          inline_attribute = re.compile(
+              r'''<[A-Za-z][^>]*?\b(?P<attribute>on[a-z][a-z0-9]*\s*=\s*["'])''',
+              re.IGNORECASE | re.DOTALL,
+          )
+          inline_handlers = []
+          frontend_sources = [html_path, *Path('static').rglob('*.js')]
+          for path in frontend_sources:
               text = path.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one match, found {count}')
-              path.write_text(text.replace(old, new), encoding='utf-8')
-
-          state_path.write_text('''const APP_STATE={
-            document:{
-              source:null,
-              sections:[],
-              correctionsBySection:[],
-              activeSection:0,
-              view:"certificate",
-              get report(){return this.sections[this.activeSection]?.rep||null;},
-              get accepted(){
-                if(!this.correctionsBySection[this.activeSection])
-                  this.correctionsBySection[this.activeSection]=new Set();
-                return this.correctionsBySection[this.activeSection];
-              }
-            },
-            batch:{
-              activeItem:-1,
-              matchState:null,
-              analysisMode:false,
-              analysisScope:"portfolio"
-            },
-            progress:{running:false},
-            billingTrajectory:{showAll:false}
-          };
-
-          function initializeDocumentState({source,sections,correctionsBySection,activeSection=0,view="certificate"}){
-            const session=APP_STATE.document;
-            session.source=source;
-            session.sections=sections;
-            session.correctionsBySection=correctionsBySection;
-            session.activeSection=Math.max(0,Math.min(activeSection,Math.max(0,sections.length-1)));
-            session.view=view;
-            void session.accepted;
-            return session;
-          }
-
-          function activateDocumentSection(index,{saveCurrent=true,view="certificate"}={}){
-            const session=APP_STATE.document;
-            if(!session.sections[index])return false;
-            if(saveCurrent&&session.correctionsBySection[session.activeSection])
-              session.correctionsBySection[session.activeSection]=new Set(session.accepted);
-            session.activeSection=index;
-            session.view=view;
-            void session.accepted;
-            return true;
-          }
-
-          function activateAnalysisDocument(report){
-            return initializeDocumentState({
-              source:report,
-              sections:[{type:"wip",pages:[],rep:report}],
-              correctionsBySection:[new Set()],
-              activeSection:0,
-              view:"dash"
-            });
-          }
-
-          function replaceAcceptedCorrections(corrections){
-            if(!(corrections instanceof Set))throw new TypeError("Accepted corrections must be a Set");
-            const session=APP_STATE.document;
-            session.correctionsBySection[session.activeSection]=corrections;
-            return corrections;
-          }
-
-          function activeCorrectionStateIsAliased(){
-            const session=APP_STATE.document;
-            return session.accepted===session.correctionsBySection[session.activeSection];
-          }
-          ''', encoding='utf-8')
-
-          index = Path('static/index.html')
-          replace_once(
-              index,
-              '<script src="/static/app/00-core.js"></script>\n<script src="/static/app/05-static-events.js"></script>',
-              '<script src="/static/app/00-core.js"></script>\n<script src="/static/app/01-app-state.js"></script>\n<script src="/static/app/05-static-events.js"></script>',
-              'index state script',
-          )
-
-          core = Path('static/app/00-core.js')
-          replace_once(
-              core,
-              'let RUNNING=false,DOTS=0,LATEST_PROGRESS=null;',
-              'let DOTS=0,LATEST_PROGRESS=null;',
-              'progress declaration',
-          )
-
-          batch = Path('static/app/10-state-batch.js')
-          batch_text = batch.read_text(encoding='utf-8')
-          declaration_replacements = [
-              ('let REPORT=null;          /* the ACTIVE section\'s v2-shaped report */\n', ''),
-              ('let ACCEPTED=new Set();   /* suggested corrections currently included */\n', ''),
-              ('let DOC=null,SECTIONS=[],SECSTATE=[],ACTIVE=0,VIEW="certificate";\n', ''),
-              ('let BATCH_ITEMS=[],BATCH_ACTIVE=-1,BATCH_MODE=false,BATCH_RUN=null;\n',
-               'let BATCH_ITEMS=[],BATCH_MODE=false,BATCH_RUN=null;\n'),
-              ('let MATCH_STATE=null;\n', ''),
-              ('let BATCH_ANALYSIS_MODE=false;\n', ''),
-              ('let ANALYSIS_SCOPE="portfolio";\n', ''),
-              ('let BILLING_TRAJECTORY_SHOW_ALL=false;\n', ''),
-          ]
-          for old, new in declaration_replacements:
-              if batch_text.count(old) != 1:
-                  raise SystemExit(f'state declaration mismatch: {old.strip()}')
-              batch_text = batch_text.replace(old, new)
-          batch.write_text(batch_text, encoding='utf-8')
-
-          document_file = Path('static/app/30-document.js')
-          replace_once(
-              document_file,
-              '''function selectSection(i){
-            SECSTATE[ACTIVE]=new Set(ACCEPTED);
-            ACTIVE=i;REPORT=SECTIONS[i].rep;ACCEPTED=SECSTATE[i];VIEW="certificate";''',
-              '''function selectSection(i){
-            activateDocumentSection(i);''',
-              'section activation',
-          )
-          replace_once(
-              document_file,
-              '''function renderColumnMapping(sectionIndex){
-            ACTIVE=sectionIndex;REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];''',
-              '''function renderColumnMapping(sectionIndex){
-            activateDocumentSection(sectionIndex,{saveCurrent:false,view:APP_STATE.document.view});''',
-              'mapping section activation',
-          )
-          replace_once(
-              document_file,
-              '''  DOC=doc;
-            SECTIONS=doc.tables?adaptV3(doc):[{type:"wip",pages:[],rep:doc}];
-            SECTIONS.forEach(section=>{
-              const rep=section.rep||{};
-              if(!rep._headerComparison)rep._headerComparison=buildHeaderComparison(null,rep,[]);
-            });
-            if(!SECTIONS.length){
-              $("#errmsg").textContent="No tables were found in that document.";
-              show("err");return;
-            }
-            const defaults=SECTIONS.map(sc=>defaultAcceptedCorrections(sc.rep||{}));
-            SECSTATE=restore?.states?.length===SECTIONS.length
-              ?restore.states.map(s=>new Set(s)):defaults;
-            ACTIVE=Math.max(0,Math.min(restore?.active||0,SECTIONS.length-1));
-            REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];
-            const sparseSection=SECTIONS.findIndex(section=>
-              section.type==="wip"&&SPARSE_MAPPING_STATUSES.has(section.rep?.overall_status));
-            if(sparseSection>=0){
-              renderColumnMapping(sparseSection);
-              return;
-            }
-            VIEW=restore?.view==="dash"?"dash":"certificate";''',
-              '''  const sections=doc.tables?adaptV3(doc):[{type:"wip",pages:[],rep:doc}];
-            sections.forEach(section=>{
-              const rep=section.rep||{};
-              if(!rep._headerComparison)rep._headerComparison=buildHeaderComparison(null,rep,[]);
-            });
-            if(!sections.length){
-              $("#errmsg").textContent="No tables were found in that document.";
-              show("err");return;
-            }
-            const defaults=sections.map(sc=>defaultAcceptedCorrections(sc.rep||{}));
-            const correctionsBySection=restore?.states?.length===sections.length
-              ?restore.states.map(s=>new Set(s)):defaults;
-            const activeSection=Math.max(0,Math.min(restore?.active||0,sections.length-1));
-            const view=restore?.view==="dash"?"dash":"certificate";
-            initializeDocumentState({source:doc,sections,correctionsBySection,activeSection,view});
-            const sparseSection=APP_STATE.document.sections.findIndex(section=>
-              section.type==="wip"&&SPARSE_MAPPING_STATUSES.has(section.rep?.overall_status));
-            if(sparseSection>=0){
-              renderColumnMapping(sparseSection);
-              return;
-            }''',
-              'document initialization',
-          )
-          replace_once(
-              document_file,
-              '$("#navCert").onclick=()=>{syncActiveSectionReview();VIEW="certificate";REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];renderSecnav();renderCertificate(REPORT);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};',
-              '$("#navCert").onclick=()=>{syncActiveSectionReview();activateDocumentSection(APP_STATE.document.activeSection,{saveCurrent:false});renderSecnav();renderCertificate(APP_STATE.document.report);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};',
-              'validation navigation',
-          )
-
-          portfolio = Path('static/app/20-portfolio.js')
-          replace_once(
-              portfolio,
-              '''  ANALYSIS_SCOPE=portfolio?"portfolio":period;
-            BATCH_ANALYSIS_MODE=portfolio;BATCH_ACTIVE=-1;clearSourceFile();
-            DOC=report;SECTIONS=[{type:"wip",pages:[],rep:report}];SECSTATE=[new Set()];
-            ACTIVE=0;REPORT=report;ACCEPTED=SECSTATE[0];VIEW="dash";''',
-              '''  APP_STATE.batch.analysisScope=portfolio?"portfolio":period;
-            APP_STATE.batch.analysisMode=portfolio;APP_STATE.batch.activeItem=-1;clearSourceFile();
-            activateAnalysisDocument(report);''',
-              'analysis document activation',
-          )
-          replace_once(
-              portfolio,
-              '$("#singleValidation").onclick=()=>{VIEW="certificate";REPORT=SECTIONS[ACTIVE].rep;ACCEPTED=SECSTATE[ACTIVE];renderSecnav();renderCertificate(REPORT);show("certificate");setSingleNav("validation");window.scrollTo(0,0)};',
-              '$("#singleValidation").onclick=()=>{activateDocumentSection(APP_STATE.document.activeSection);renderSecnav();renderCertificate(APP_STATE.document.report);show("certificate");setSingleNav("validation");window.scrollTo(0,0)};',
-              'single validation navigation',
-          )
-
-          validation = Path('static/app/40-validation.js')
-          replace_once(
-              validation,
-              '    ACCEPTED=applied;',
-              '    replaceAcceptedCorrections(applied);',
-              'accepted correction replacement',
-          )
-
-          replacements = {
-              'BILLING_TRAJECTORY_SHOW_ALL':'APP_STATE.billingTrajectory.showAll',
-              'BATCH_ANALYSIS_MODE':'APP_STATE.batch.analysisMode',
-              'ANALYSIS_SCOPE':'APP_STATE.batch.analysisScope',
-              'BATCH_ACTIVE':'APP_STATE.batch.activeItem',
-              'MATCH_STATE':'APP_STATE.batch.matchState',
-              'RUNNING':'APP_STATE.progress.running',
-              'ACCEPTED':'APP_STATE.document.accepted',
-              'SECSTATE':'APP_STATE.document.correctionsBySection',
-              'SECTIONS':'APP_STATE.document.sections',
-              'REPORT':'APP_STATE.document.report',
-              'ACTIVE':'APP_STATE.document.activeSection',
-              'VIEW':'APP_STATE.document.view',
-              'DOC':'APP_STATE.document.source',
-          }
-          for path in sorted(Path('static/app').glob('*.js')):
-              if path == state_path:
-                  continue
-              text = path.read_text(encoding='utf-8')
-              for old, new in replacements.items():
-                  text = re.sub(rf'\b{old}\b', new, text)
-              path.write_text(text, encoding='utf-8')
-
-          legacy = re.compile(r'\b(?:'+'|'.join(map(re.escape,replacements))+r')\b')
-          remaining=[]
-          for path in sorted(Path('static/app').glob('*.js')):
-              for number,line in enumerate(path.read_text(encoding='utf-8').splitlines(),1):
-                  if legacy.search(line):remaining.append(f'{path}:{number}: {line.strip()}')
-          if remaining:
-              raise SystemExit('Legacy state identifiers remain:\n'+'\n'.join(remaining))
-
-          for path in sorted(Path('static/app').glob('*.js')):
-              text=path.read_text(encoding='utf-8')
-              if re.search(r'APP_STATE\.document\.(?:report|accepted)\s*=',text):
-                  raise SystemExit(f'Derived document field assigned directly in {path}')
-
-          external_progress=[]
-          progress_assignment=re.compile(r'\b(?:DOTS|LATEST_PROGRESS)\s*=')
-          for path in sorted(Path('static/app').glob('*.js')):
-              if path.name=='00-core.js':continue
-              for number,line in enumerate(path.read_text(encoding='utf-8').splitlines(),1):
-                  if progress_assignment.search(line):external_progress.append((str(path),number,line.strip()))
-          if len(external_progress)!=1 or external_progress[0][0]!='static/app/10-state-batch.js':
-              raise SystemExit(f'Unexpected deferred progress writes: {external_progress}')
-          print('Deferred to Step 3:',external_progress[0])
+              lines = text.splitlines()
+              for match in inline_attribute.finditer(text):
+                  line_number = text.count('\n', 0, match.start('attribute')) + 1
+                  line = lines[line_number - 1].strip() if lines else ''
+                  inline_handlers.append(f'{path}:{line_number}: {line}')
+          assert not inline_handlers, 'Inline event attributes found:\n' + '\n'.join(inline_handlers)
           PY
 
-          for file in static/*.js static/app/*.js; do
-            node --check "$file"
-          done
-          cat static/app/*.js > /tmp/wipple-app.js
-          node --check /tmp/wipple-app.js
+      - name: Verify state ownership and aliases
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          migrated = [
+              'ACCEPTED', 'ACTIVE', 'ANALYSIS_SCOPE', 'BATCH_ACTIVE',
+              'BATCH_ANALYSIS_MODE', 'BILLING_TRAJECTORY_SHOW_ALL', 'DOC',
+              'MATCH_STATE', 'REPORT', 'RUNNING', 'SECSTATE', 'SECTIONS', 'VIEW',
+          ]
+          legacy = re.compile(r'\b(?:' + '|'.join(migrated) + r')\b')
+          legacy_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if legacy.search(line):
+                      legacy_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not legacy_hits, 'Legacy writable state remains:\n' + '\n'.join(legacy_hits)
+
+          derived_assignment = re.compile(r'APP_STATE\.document\.(?:report|accepted)\s*=')
+          derived_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if derived_assignment.search(line):
+                      derived_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not derived_hits, 'Derived document fields assigned directly:\n' + '\n'.join(derived_hits)
+
+          # DOTS and LATEST_PROGRESS remain a deliberate Step 3 exception.
+          external_progress = []
+          progress_assignment = re.compile(r'\b(?:DOTS|LATEST_PROGRESS)\s*=')
+          for path in sorted(Path('static/app').glob('*.js')):
+              if path.name == '00-core.js':
+                  continue
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if progress_assignment.search(line):
+                      external_progress.append(f'{path}:{number}: {line.strip()}')
+          assert len(external_progress) == 1, 'Unexpected deferred progress writes:\n' + '\n'.join(external_progress)
+          assert external_progress[0].startswith('static/app/10-state-batch.js:'), external_progress[0]
+          PY
 
           node <<'NODE'
           const fs=require('fs');
@@ -321,10 +137,3 @@ jobs:
           `;
           vm.runInNewContext(state+test,{Set,TypeError});
           NODE
-
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add static/index.html static/app
-          git commit -m "centralize frontend workflow state"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
