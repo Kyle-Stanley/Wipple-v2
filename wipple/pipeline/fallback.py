@@ -24,7 +24,7 @@ import logging
 
 from ..core.model_client import Metrics, extract_json, get_client
 from ..core.state import WippleState
-from ..accounting.concordance import match_header
+from ..accounting.header_names import match_header
 from ..accounting.schemas import (
     ALL_VAR_NAMES as VAR_NAMES,
     CC_VAR_NAMES,

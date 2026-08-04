@@ -204,18 +204,6 @@ def g6_document():
          and len(s3["findings"]) == 1)
 
 
-def g7_concordance():
-    book = build_book(seed=3, n_wip=14, wip_errors=0)
-    hdrs = list(book["wip"]["headers"])
-    hdrs[4] = "Billed to Date"
-    frag = [{"chunk_id": 0, "pages": [1], "headers": hdrs,
-             "rows": book["wip"]["rows"], "table_index": 0}]
-    rep, _ = run_document(fragments=frag, source_name="g7")
-    disc = rep["document"]["concordance"]["discordant"]
-    gate("G7 lying header -> discordance finding, math outranks label",
-         any(d["column"] == 4 and d["variable"] == "D" for d in disc))
-
-
 def main():
     g0_corpus()
     g1_cc_engine()
@@ -223,7 +211,6 @@ def main():
     g4_splitter()
     g5_misalignment()
     g6_document()
-    g7_concordance()
     n_ok = sum(1 for _, ok in _results if ok)
     print(f"\n{n_ok}/{len(_results)} gates pass")
     return 0 if n_ok == len(_results) else 1

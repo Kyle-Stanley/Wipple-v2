@@ -3,7 +3,7 @@
 import numpy as np
 
 from wipple.accounting.cc import validate_cc
-from wipple.accounting.concordance import match_header
+from wipple.accounting.header_names import match_header
 from wipple.accounting.schemas import CC_VAR_NAMES, WIP_VAR_NAMES
 from wipple.accounting.validation import run_schema_race
 

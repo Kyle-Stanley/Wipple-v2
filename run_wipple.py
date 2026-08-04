@@ -30,10 +30,5 @@ if __name__ == "__main__":
         for mf in t.get("misalignment_findings") or []:
             print(f"--   block misalignment on pages "
                   f"{mf.get('pages')} (repaired)", file=err)
-    doc = report.get("document") or {}
-    disc = (doc.get("concordance") or {}).get("discordant") or []
-    for d in disc:
-        print(f"--   header '{d.get('header')}' discordant with certified "
-              f"{d.get('variable')}", file=err)
     print(f"\n-- {metrics['api_calls']} call(s), "
           f"${metrics['cost_usd']:.6f}", file=err)
