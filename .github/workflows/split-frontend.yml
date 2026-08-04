@@ -21,6 +21,8 @@ jobs:
           fetch-depth: 0
 
       - name: Remove misleading state helpers
+        env:
+          FINAL_WORKFLOW_B64: bmFtZTogRnJvbnRlbmQgaW50ZWdyaXR5CgpvbjoKICBwdXNoOgogICAgYnJhbmNoZXM6CiAgICAgIC0gbWFpbgogICAgcGF0aHM6CiAgICAgIC0gc3RhdGljL2luZGV4Lmh0bWwKICAgICAgLSBzdGF0aWMvc3R5bGVzLyoqCiAgICAgIC0gc3RhdGljL2FwcC8qKgogICAgICAtIC5naXRodWIvd29ya2Zsb3dzL3NwbGl0LWZyb250ZW5kLnltbAogIHB1bGxfcmVxdWVzdDoKICAgIHBhdGhzOgogICAgICAtIHN0YXRpYy9pbmRleC5odG1sCiAgICAgIC0gc3RhdGljL3N0eWxlcy8qKgogICAgICAtIHN0YXRpYy9hcHAvKioKICAgICAgLSAuZ2l0aHViL3dvcmtmbG93cy9zcGxpdC1mcm9udGVuZC55bWwKCnBlcm1pc3Npb25zOgogIGNvbnRlbnRzOiByZWFkCgpqb2JzOgogIHZlcmlmeToKICAgIHJ1bnMtb246IHVidW50dS1sYXRlc3QKICAgIHN0ZXBzOgogICAgICAtIG5hbWU6IENoZWNrIG91dCByZXBvc2l0b3J5CiAgICAgICAgdXNlczogYWN0aW9ucy9jaGVja291dEB2NAogICAgICAgIHdpdGg6CiAgICAgICAgICBmZXRjaC1kZXB0aDogMAoKICAgICAgLSBuYW1lOiBDaGVjayBKYXZhU2NyaXB0IHN5bnRheAogICAgICAgIHJ1bjogfAogICAgICAgICAgZm9yIGZpbGUgaW4gc3RhdGljL2FwcC8qLmpzOyBkbwogICAgICAgICAgICBub2RlIC0tY2hlY2sgIiRmaWxlIgogICAgICAgICAgZG9uZQogICAgICAgICAgY2F0IHN0YXRpYy9hcHAvKi5qcyA+IC90bXAvd2lwcGxlLWFwcC5qcwogICAgICAgICAgbm9kZSAtLWNoZWNrIC90bXAvd2lwcGxlLWFwcC5qcwoKICAgICAgLSBuYW1lOiBWZXJpZnkgZnJvbnRlbmQgYXNzZXQgc3RydWN0dXJlCiAgICAgICAgcnVuOiB8CiAgICAgICAgICBweXRob24gLSA8PCdQWScKICAgICAgICAgIGZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAogICAgICAgICAgaW1wb3J0IHJlCgogICAgICAgICAgaHRtbF9wYXRoID0gUGF0aCgnc3RhdGljL2luZGV4Lmh0bWwnKQogICAgICAgICAgaHRtbCA9IGh0bWxfcGF0aC5yZWFkX3RleHQoZW5jb2Rpbmc9J3V0Zi04JykKICAgICAgICAgIGFwcF9maWxlcyA9IHNvcnRlZChQYXRoKCdzdGF0aWMvYXBwJykuZ2xvYignKi5qcycpKQogICAgICAgICAgZXhwZWN0ZWRfcmVmcyA9IFtmJy9zdGF0aWMvYXBwL3twYXRoLm5hbWV9JyBmb3IgcGF0aCBpbiBhcHBfZmlsZXNdCiAgICAgICAgICBhY3R1YWxfcmVmcyA9IHJlLmZpbmRhbGwocic8c2NyaXB0IHNyYz0iKC9zdGF0aWMvYXBwL1teIl0rKSI+PC9zY3JpcHQ+JywgaHRtbCkKCiAgICAgICAgICBhc3NlcnQgUGF0aCgnc3RhdGljL3N0eWxlcy93aXBwbGUuY3NzJykuaXNfZmlsZSgpCiAgICAgICAgICBhc3NlcnQgUGF0aCgnc3RhdGljL2FwcC8wMS1hcHAtc3RhdGUuanMnKS5pc19maWxlKCkKICAgICAgICAgIGFzc2VydCAnPGxpbmsgcmVsPSJzdHlsZXNoZWV0IiBocmVmPSIvc3RhdGljL3N0eWxlcy93aXBwbGUuY3NzIj4nIGluIGh0bWwKICAgICAgICAgIGFzc2VydCBhY3R1YWxfcmVmcyA9PSBleHBlY3RlZF9yZWZzCiAgICAgICAgICBhc3NlcnQgJzxzdHlsZT4nIG5vdCBpbiBodG1sCiAgICAgICAgICBhc3NlcnQgJzxzY3JpcHQ+JyBub3QgaW4gaHRtbAoKICAgICAgICAgIGlubGluZV9hdHRyaWJ1dGUgPSByZS5jb21waWxlKAogICAgICAgICAgICAgIHInJyc8W0EtWmEtel1bXj5dKj9cYig/UDxhdHRyaWJ1dGU+b25bYS16XVthLXowLTldKlxzKj1ccypbIiddKScnJywKICAgICAgICAgICAgICByZS5JR05PUkVDQVNFIHwgcmUuRE9UQUxMLAogICAgICAgICAgKQogICAgICAgICAgaW5saW5lX2hhbmRsZXJzID0gW10KICAgICAgICAgIGZyb250ZW5kX3NvdXJjZXMgPSBbaHRtbF9wYXRoLCAqUGF0aCgnc3RhdGljJykucmdsb2IoJyouanMnKV0KICAgICAgICAgIGZvciBwYXRoIGluIGZyb250ZW5kX3NvdXJjZXM6CiAgICAgICAgICAgICAgdGV4dCA9IHBhdGgucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCiAgICAgICAgICAgICAgbGluZXMgPSB0ZXh0LnNwbGl0bGluZXMoKQogICAgICAgICAgICAgIGZvciBtYXRjaCBpbiBpbmxpbmVfYXR0cmlidXRlLmZpbmRpdGVyKHRleHQpOgogICAgICAgICAgICAgICAgICBsaW5lX251bWJlciA9IHRleHQuY291bnQoJ1xuJywgMCwgbWF0Y2guc3RhcnQoJ2F0dHJpYnV0ZScpKSArIDEKICAgICAgICAgICAgICAgICAgbGluZSA9IGxpbmVzW2xpbmVfbnVtYmVyIC0gMV0uc3RyaXAoKSBpZiBsaW5lcyBlbHNlICcnCiAgICAgICAgICAgICAgICAgIGlubGluZV9oYW5kbGVycy5hcHBlbmQoZid7cGF0aH06e2xpbmVfbnVtYmVyfToge2xpbmV9JykKICAgICAgICAgIGFzc2VydCBub3QgaW5saW5lX2hhbmRsZXJzLCAnSW5saW5lIGV2ZW50IGF0dHJpYnV0ZXMgZm91bmQ6XG4nICsgJ1xuJy5qb2luKGlubGluZV9oYW5kbGVycykKICAgICAgICAgIFBZCgogICAgICAtIG5hbWU6IFZlcmlmeSBzdGF0ZSBvd25lcnNoaXAgYW5kIHNlY3Rpb24gcGVyc2lzdGVuY2UKICAgICAgICBydW46IHwKICAgICAgICAgIHB5dGhvbiAtIDw8J1BZJwogICAgICAgICAgZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCiAgICAgICAgICBpbXBvcnQgcmUKCiAgICAgICAgICBtaWdyYXRlZCA9IFsKICAgICAgICAgICAgICAnQUNDRVBURUQnLCAnQUNUSVZFJywgJ0FOQUxZU0lTX1NDT1BFJywgJ0JBVENIX0FDVElWRScsCiAgICAgICAgICAgICAgJ0JBVENIX0FOQUxZU0lTX01PREUnLCAnQklMTElOR19UUkFKRUNUT1JZX1NIT1dfQUxMJywgJ0RPQycsCiAgICAgICAgICAgICAgJ01BVENIX1NUQVRFJywgJ1JFUE9SVCcsICdSVU5OSU5HJywgJ1NFQ1NUQVRFJywgJ1NFQ1RJT05TJywgJ1ZJRVcnLAogICAgICAgICAgXQogICAgICAgICAgbGVnYWN5ID0gcmUuY29tcGlsZShyJ1xiKD86JyArICd8Jy5qb2luKG1pZ3JhdGVkKSArIHInKVxiJykKICAgICAgICAgIGxlZ2FjeV9oaXRzID0gW10KICAgICAgICAgIGZvciBwYXRoIGluIHNvcnRlZChQYXRoKCdzdGF0aWMvYXBwJykuZ2xvYignKi5qcycpKToKICAgICAgICAgICAgICBmb3IgbnVtYmVyLCBsaW5lIGluIGVudW1lcmF0ZShwYXRoLnJlYWRfdGV4dChlbmNvZGluZz0ndXRmLTgnKS5zcGxpdGxpbmVzKCksIDEpOgogICAgICAgICAgICAgICAgICBpZiBsZWdhY3kuc2VhcmNoKGxpbmUpOgogICAgICAgICAgICAgICAgICAgICAgbGVnYWN5X2hpdHMuYXBwZW5kKGYne3BhdGh9OntudW1iZXJ9OiB7bGluZS5zdHJpcCgpfScpCiAgICAgICAgICBhc3NlcnQgbm90IGxlZ2FjeV9oaXRzLCAnTGVnYWN5IHdyaXRhYmxlIHN0YXRlIHJlbWFpbnM6XG4nICsgJ1xuJy5qb2luKGxlZ2FjeV9oaXRzKQoKICAgICAgICAgIGRlcml2ZWRfYXNzaWdubWVudCA9IHJlLmNvbXBpbGUocidBUFBfU1RBVEVcLmRvY3VtZW50XC4oPzpyZXBvcnR8YWNjZXB0ZWQpXHMqPScpCiAgICAgICAgICBkZXJpdmVkX2hpdHMgPSBbXQogICAgICAgICAgZm9yIHBhdGggaW4gc29ydGVkKFBhdGgoJ3N0YXRpYy9hcHAnKS5nbG9iKCcqLmpzJykpOgogICAgICAgICAgICAgIGZvciBudW1iZXIsIGxpbmUgaW4gZW51bWVyYXRlKHBhdGgucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpLnNwbGl0bGluZXMoKSwgMSk6CiAgICAgICAgICAgICAgICAgIGlmIGRlcml2ZWRfYXNzaWdubWVudC5zZWFyY2gobGluZSk6CiAgICAgICAgICAgICAgICAgICAgICBkZXJpdmVkX2hpdHMuYXBwZW5kKGYne3BhdGh9OntudW1iZXJ9OiB7bGluZS5zdHJpcCgpfScpCiAgICAgICAgICBhc3NlcnQgbm90IGRlcml2ZWRfaGl0cywgJ0Rlcml2ZWQgZG9jdW1lbnQgZmllbGRzIGFzc2lnbmVkIGRpcmVjdGx5OlxuJyArICdcbicuam9pbihkZXJpdmVkX2hpdHMpCgogICAgICAgICAgc3RhdGVfdGV4dCA9IFBhdGgoJ3N0YXRpYy9hcHAvMDEtYXBwLXN0YXRlLmpzJykucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCiAgICAgICAgICBhc3NlcnQgJ3NhdmVDdXJyZW50JyBub3QgaW4gc3RhdGVfdGV4dAogICAgICAgICAgYXNzZXJ0ICdhY3RpdmVDb3JyZWN0aW9uU3RhdGVJc0FsaWFzZWQnIG5vdCBpbiBzdGF0ZV90ZXh0CgogICAgICAgICAgIyBET1RTIGFuZCBMQVRFU1RfUFJPR1JFU1MgcmVtYWluIGEgZGVsaWJlcmF0ZSBTdGVwIDMgZXhjZXB0aW9uLgogICAgICAgICAgZXh0ZXJuYWxfcHJvZ3Jlc3MgPSBbXQogICAgICAgICAgcHJvZ3Jlc3NfYXNzaWdubWVudCA9IHJlLmNvbXBpbGUocidcYig/OkRPVFN8TEFURVNUX1BST0dSRVNTKVxzKj0nKQogICAgICAgICAgZm9yIHBhdGggaW4gc29ydGVkKFBhdGgoJ3N0YXRpYy9hcHAnKS5nbG9iKCcqLmpzJykpOgogICAgICAgICAgICAgIGlmIHBhdGgubmFtZSA9PSAnMDAtY29yZS5qcyc6CiAgICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgICAgZm9yIG51bWJlciwgbGluZSBpbiBlbnVtZXJhdGUocGF0aC5yZWFkX3RleHQoZW5jb2Rpbmc9J3V0Zi04Jykuc3BsaXRsaW5lcygpLCAxKToKICAgICAgICAgICAgICAgICAgaWYgcHJvZ3Jlc3NfYXNzaWdubWVudC5zZWFyY2gobGluZSk6CiAgICAgICAgICAgICAgICAgICAgICBleHRlcm5hbF9wcm9ncmVzcy5hcHBlbmQoZid7cGF0aH06e251bWJlcn06IHtsaW5lLnN0cmlwKCl9JykKICAgICAgICAgIGFzc2VydCBsZW4oZXh0ZXJuYWxfcHJvZ3Jlc3MpID09IDEsICdVbmV4cGVjdGVkIGRlZmVycmVkIHByb2dyZXNzIHdyaXRlczpcbicgKyAnXG4nLmpvaW4oZXh0ZXJuYWxfcHJvZ3Jlc3MpCiAgICAgICAgICBhc3NlcnQgZXh0ZXJuYWxfcHJvZ3Jlc3NbMF0uc3RhcnRzd2l0aCgnc3RhdGljL2FwcC8xMC1zdGF0ZS1iYXRjaC5qczonKSwgZXh0ZXJuYWxfcHJvZ3Jlc3NbMF0KICAgICAgICAgIFBZCgogICAgICAgICAgbm9kZSA8PCdOT0RFJwogICAgICAgICAgY29uc3QgZnM9cmVxdWlyZSgnZnMnKTsKICAgICAgICAgIGNvbnN0IHZtPXJlcXVpcmUoJ3ZtJyk7CiAgICAgICAgICBjb25zdCBzdGF0ZT1mcy5yZWFkRmlsZVN5bmMoJ3N0YXRpYy9hcHAvMDEtYXBwLXN0YXRlLmpzJywndXRmOCcpOwogICAgICAgICAgY29uc3QgdGVzdD1gCiAgICAgICAgICAgIGNvbnN0IGZpcnN0PXtyZXA6e2lkOiJmaXJzdCJ9fSxzZWNvbmQ9e3JlcDp7aWQ6InNlY29uZCJ9fTsKICAgICAgICAgICAgY29uc3Qgc2VjdGlvbk9uZT1uZXcgU2V0KFsxXSksc2VjdGlvblR3bz1uZXcgU2V0KFsyXSk7CiAgICAgICAgICAgIGluaXRpYWxpemVEb2N1bWVudFN0YXRlKHsKICAgICAgICAgICAgICBzb3VyY2U6e2lkOiJkb2MifSxzZWN0aW9uczpbZmlyc3Qsc2Vjb25kXSwKICAgICAgICAgICAgICBjb3JyZWN0aW9uc0J5U2VjdGlvbjpbc2VjdGlvbk9uZSxzZWN0aW9uVHdvXSxhY3RpdmVTZWN0aW9uOjAKICAgICAgICAgICAgfSk7CiAgICAgICAgICAgIEFQUF9TVEFURS5kb2N1bWVudC5hY2NlcHRlZC5hZGQoMyk7CiAgICAgICAgICAgIGFjdGl2YXRlRG9jdW1lbnRTZWN0aW9uKDEpOwogICAgICAgICAgICBBUFBfU1RBVEUuZG9jdW1lbnQuYWNjZXB0ZWQuYWRkKDQpOwogICAgICAgICAgICBhY3RpdmF0ZURvY3VtZW50U2VjdGlvbigwKTsKICAgICAgICAgICAgaWYoIUFQUF9TVEFURS5kb2N1bWVudC5hY2NlcHRlZC5oYXMoMSl8fCFBUFBfU1RBVEUuZG9jdW1lbnQuYWNjZXB0ZWQuaGFzKDMpKQogICAgICAgICAgICAgIHRocm93IG5ldyBFcnJvcigic2VjdGlvbiBvbmUgY29ycmVjdGlvbnMgZGlkIG5vdCBwZXJzaXN0Iik7CiAgICAgICAgICAgIGlmKEFQUF9TVEFURS5kb2N1bWVudC5hY2NlcHRlZC5oYXMoMil8fEFQUF9TVEFURS5kb2N1bWVudC5hY2NlcHRlZC5oYXMoNCkpCiAgICAgICAgICAgICAgdGhyb3cgbmV3IEVycm9yKCJzZWN0aW9uIHR3byBjb3JyZWN0aW9ucyBsZWFrZWQgaW50byBzZWN0aW9uIG9uZSIpOwogICAgICAgICAgICBhY3RpdmF0ZURvY3VtZW50U2VjdGlvbigxKTsKICAgICAgICAgICAgaWYoIUFQUF9TVEFURS5kb2N1bWVudC5hY2NlcHRlZC5oYXMoMil8fCFBUFBfU1RBVEUuZG9jdW1lbnQuYWNjZXB0ZWQuaGFzKDQpKQogICAgICAgICAgICAgIHRocm93IG5ldyBFcnJvcigic2VjdGlvbiB0d28gY29ycmVjdGlvbnMgZGlkIG5vdCBwZXJzaXN0Iik7CiAgICAgICAgICAgIGlmKEFQUF9TVEFURS5kb2N1bWVudC5hY2NlcHRlZC5oYXMoMSl8fEFQUF9TVEFURS5kb2N1bWVudC5hY2NlcHRlZC5oYXMoMykpCiAgICAgICAgICAgICAgdGhyb3cgbmV3IEVycm9yKCJzZWN0aW9uIG9uZSBjb3JyZWN0aW9ucyBsZWFrZWQgaW50byBzZWN0aW9uIHR3byIpOwogICAgICAgICAgICBjb25zdCByZXBsYWNlbWVudD1uZXcgU2V0KFs5XSk7CiAgICAgICAgICAgIHJlcGxhY2VBY2NlcHRlZENvcnJlY3Rpb25zKHJlcGxhY2VtZW50KTsKICAgICAgICAgICAgaWYoQVBQX1NUQVRFLmRvY3VtZW50LmFjY2VwdGVkIT09cmVwbGFjZW1lbnQpCiAgICAgICAgICAgICAgdGhyb3cgbmV3IEVycm9yKCJyZXBsYWNlbWVudCBTZXQgd2FzIG5vdCBzdG9yZWQgZGlyZWN0bHkiKTsKICAgICAgICAgICAgYWN0aXZhdGVBbmFseXNpc0RvY3VtZW50KHtpZDoiYW5hbHlzaXMifSk7CiAgICAgICAgICAgIGlmKEFQUF9TVEFURS5kb2N1bWVudC5yZXBvcnQuaWQhPT0iYW5hbHlzaXMiKQogICAgICAgICAgICAgIHRocm93IG5ldyBFcnJvcigiYW5hbHlzaXMgcmVwb3J0IG5vdCBhY3RpdmUiKTsKICAgICAgICAgIGA7CiAgICAgICAgICB2bS5ydW5Jbk5ld0NvbnRleHQoc3RhdGUrdGVzdCx7U2V0LFR5cGVFcnJvcn0pOwogICAgICAgICAgTk9ERQo=
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -35,44 +37,19 @@ jobs:
           state = Path('static/app/01-app-state.js')
           replace_once(
               state,
-              '''    get report(){return this.sections[this.activeSection]?.rep||null;},
-              get accepted(){''',
-              '''    get report(){return this.sections[this.activeSection]?.rep||null;},
-              // Each section owns one persistent correction Set. Reading this getter
-              // lazily creates a missing slot so callers always receive that section's Set.
-              get accepted(){''',
+              '    get report(){return this.sections[this.activeSection]?.rep||null;},\n    get accepted(){',
+              '    get report(){return this.sections[this.activeSection]?.rep||null;},\n    // Each section owns one persistent correction Set. Reading this getter\n    // lazily creates a missing slot so callers always receive that section\'s Set.\n    get accepted(){',
               'accepted getter comment',
           )
           replace_once(
               state,
-              '''function activateDocumentSection(index,{saveCurrent=true,view="certificate"}={}){
-            const session=APP_STATE.document;
-            if(!session.sections[index])return false;
-            if(saveCurrent&&session.correctionsBySection[session.activeSection])
-              session.correctionsBySection[session.activeSection]=new Set(session.accepted);
-            session.activeSection=index;
-            session.view=view;
-            void session.accepted;
-            return true;
-          }''',
-              '''function activateDocumentSection(index,{view="certificate"}={}){
-            const session=APP_STATE.document;
-            if(!session.sections[index])return false;
-            session.activeSection=index;
-            session.view=view;
-            void session.accepted;
-            return true;
-          }''',
+              'function activateDocumentSection(index,{saveCurrent=true,view="certificate"}={}){\n  const session=APP_STATE.document;\n  if(!session.sections[index])return false;\n  if(saveCurrent&&session.correctionsBySection[session.activeSection])\n    session.correctionsBySection[session.activeSection]=new Set(session.accepted);\n  session.activeSection=index;\n  session.view=view;\n  void session.accepted;\n  return true;\n}',
+              'function activateDocumentSection(index,{view="certificate"}={}){\n  const session=APP_STATE.document;\n  if(!session.sections[index])return false;\n  session.activeSection=index;\n  session.view=view;\n  void session.accepted;\n  return true;\n}',
               'section activation semantics',
           )
           replace_once(
               state,
-              '''
-          function activeCorrectionStateIsAliased(){
-            const session=APP_STATE.document;
-            return session.accepted===session.correctionsBySection[session.activeSection];
-          }
-          ''',
+              '\nfunction activeCorrectionStateIsAliased(){\n  const session=APP_STATE.document;\n  return session.accepted===session.correctionsBySection[session.activeSection];\n}\n',
               '\n',
               'tautological alias helper',
           )
@@ -91,163 +68,8 @@ jobs:
               'validation activation call',
           )
 
-          final_workflow = '''name: Frontend integrity
-
-          on:
-            push:
-              branches:
-                - main
-              paths:
-                - static/index.html
-                - static/styles/**
-                - static/app/**
-                - .github/workflows/split-frontend.yml
-            pull_request:
-              paths:
-                - static/index.html
-                - static/styles/**
-                - static/app/**
-                - .github/workflows/split-frontend.yml
-
-          permissions:
-            contents: read
-
-          jobs:
-            verify:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v4
-                  with:
-                    fetch-depth: 0
-
-                - name: Check JavaScript syntax
-                  run: |
-                    for file in static/app/*.js; do
-                      node --check "$file"
-                    done
-                    cat static/app/*.js > /tmp/wipple-app.js
-                    node --check /tmp/wipple-app.js
-
-                - name: Verify frontend asset structure
-                  run: |
-                    python - <<'PY_CHECK'
-                    from pathlib import Path
-                    import re
-
-                    html_path = Path('static/index.html')
-                    html = html_path.read_text(encoding='utf-8')
-                    app_files = sorted(Path('static/app').glob('*.js'))
-                    expected_refs = [f'/static/app/{path.name}' for path in app_files]
-                    actual_refs = re.findall(r'<script src="(/static/app/[^"]+)"></script>', html)
-
-                    assert Path('static/styles/wipple.css').is_file()
-                    assert Path('static/app/01-app-state.js').is_file()
-                    assert '<link rel="stylesheet" href="/static/styles/wipple.css">' in html
-                    assert actual_refs == expected_refs
-                    assert '<style>' not in html
-                    assert '<script>' not in html
-
-                    inline_attribute = re.compile(
-                        r'''<[A-Za-z][^>]*?\\b(?P<attribute>on[a-z][a-z0-9]*\\s*=\\s*["'])''',
-                        re.IGNORECASE | re.DOTALL,
-                    )
-                    inline_handlers = []
-                    frontend_sources = [html_path, *Path('static').rglob('*.js')]
-                    for path in frontend_sources:
-                        text = path.read_text(encoding='utf-8')
-                        lines = text.splitlines()
-                        for match in inline_attribute.finditer(text):
-                            line_number = text.count('\\n', 0, match.start('attribute')) + 1
-                            line = lines[line_number - 1].strip() if lines else ''
-                            inline_handlers.append(f'{path}:{line_number}: {line}')
-                    assert not inline_handlers, 'Inline event attributes found:\\n' + '\\n'.join(inline_handlers)
-                    PY_CHECK
-
-                - name: Verify state ownership and section persistence
-                  run: |
-                    python - <<'PY_CHECK'
-                    from pathlib import Path
-                    import re
-
-                    migrated = [
-                        'ACCEPTED', 'ACTIVE', 'ANALYSIS_SCOPE', 'BATCH_ACTIVE',
-                        'BATCH_ANALYSIS_MODE', 'BILLING_TRAJECTORY_SHOW_ALL', 'DOC',
-                        'MATCH_STATE', 'REPORT', 'RUNNING', 'SECSTATE', 'SECTIONS', 'VIEW',
-                    ]
-                    legacy = re.compile(r'\\b(?:' + '|'.join(migrated) + r')\\b')
-                    legacy_hits = []
-                    for path in sorted(Path('static/app').glob('*.js')):
-                        for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
-                            if legacy.search(line):
-                                legacy_hits.append(f'{path}:{number}: {line.strip()}')
-                    assert not legacy_hits, 'Legacy writable state remains:\\n' + '\\n'.join(legacy_hits)
-
-                    derived_assignment = re.compile(r'APP_STATE\\.document\\.(?:report|accepted)\\s*=')
-                    derived_hits = []
-                    for path in sorted(Path('static/app').glob('*.js')):
-                        for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
-                            if derived_assignment.search(line):
-                                derived_hits.append(f'{path}:{number}: {line.strip()}')
-                    assert not derived_hits, 'Derived document fields assigned directly:\\n' + '\\n'.join(derived_hits)
-
-                    state_text = Path('static/app/01-app-state.js').read_text(encoding='utf-8')
-                    assert 'saveCurrent' not in state_text
-                    assert 'activeCorrectionStateIsAliased' not in state_text
-
-                    # DOTS and LATEST_PROGRESS remain a deliberate Step 3 exception.
-                    external_progress = []
-                    progress_assignment = re.compile(r'\\b(?:DOTS|LATEST_PROGRESS)\\s*=')
-                    for path in sorted(Path('static/app').glob('*.js')):
-                        if path.name == '00-core.js':
-                            continue
-                        for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
-                            if progress_assignment.search(line):
-                                external_progress.append(f'{path}:{number}: {line.strip()}')
-                    assert len(external_progress) == 1, 'Unexpected deferred progress writes:\\n' + '\\n'.join(external_progress)
-                    assert external_progress[0].startswith('static/app/10-state-batch.js:'), external_progress[0]
-                    PY_CHECK
-
-                    node <<'NODE'
-                    const fs=require('fs');
-                    const vm=require('vm');
-                    const state=fs.readFileSync('static/app/01-app-state.js','utf8');
-                    const test=`
-                      const first={rep:{id:"first"}},second={rep:{id:"second"}};
-                      const sectionOne=new Set([1]),sectionTwo=new Set([2]);
-                      initializeDocumentState({
-                        source:{id:"doc"},sections:[first,second],
-                        correctionsBySection:[sectionOne,sectionTwo],activeSection:0
-                      });
-                      APP_STATE.document.accepted.add(3);
-                      activateDocumentSection(1);
-                      APP_STATE.document.accepted.add(4);
-                      activateDocumentSection(0);
-                      if(!APP_STATE.document.accepted.has(1)||!APP_STATE.document.accepted.has(3))
-                        throw new Error("section one corrections did not persist");
-                      if(APP_STATE.document.accepted.has(2)||APP_STATE.document.accepted.has(4))
-                        throw new Error("section two corrections leaked into section one");
-                      activateDocumentSection(1);
-                      if(!APP_STATE.document.accepted.has(2)||!APP_STATE.document.accepted.has(4))
-                        throw new Error("section two corrections did not persist");
-                      if(APP_STATE.document.accepted.has(1)||APP_STATE.document.accepted.has(3))
-                        throw new Error("section one corrections leaked into section two");
-                      const replacement=new Set([9]);
-                      replaceAcceptedCorrections(replacement);
-                      if(APP_STATE.document.accepted!==replacement)
-                        throw new Error("replacement Set was not stored directly");
-                      activateAnalysisDocument({id:"analysis"});
-                      if(APP_STATE.document.report.id!=="analysis")
-                        throw new Error("analysis report not active");
-                    `;
-                    vm.runInNewContext(state+test,{Set,TypeError});
-                    NODE
-          '''
-          lines = final_workflow.splitlines()
-          indent = min(len(line)-len(line.lstrip()) for line in lines if line.strip())
-          Path('.github/workflows/split-frontend.yml').write_text(
-              '\n'.join(line[indent:] if line.strip() else '' for line in lines) + '\n',
-              encoding='utf-8',
+          Path('.github/workflows/split-frontend.yml').write_bytes(
+              __import__('base64').b64decode(__import__('os').environ['FINAL_WORKFLOW_B64'])
           )
           PY
 
