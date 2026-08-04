@@ -36,6 +36,34 @@ jobs:
           cat static/app/*.js > /tmp/wipple-app.js
           node --check /tmp/wipple-app.js
 
+      - name: Audit frontend state ownership
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          names = [
+              'ACCEPTED', 'ACTIVE', 'ANALYSIS_SCOPE', 'BATCH_ACTIVE',
+              'BATCH_ANALYSIS_MODE', 'BILLING_TRAJECTORY_SHOW_ALL', 'DOC',
+              'DOTS', 'LATEST_PROGRESS', 'MATCH_STATE', 'REPORT', 'RUNNING',
+              'SECSTATE', 'SECTIONS', 'VIEW',
+          ]
+          assignment = re.compile(
+              rf'(?<![.$\w])(?:{'|'.join(names)})\s*(?:\+\+|--|[+\-*/%]?=(?!=))'
+          )
+          declaration = re.compile(
+              rf'\b(?:let|const|var)\s+(?:[^;\n]*?\b)?(?:{'|'.join(names)})\b'
+          )
+
+          print('STATE_OWNERSHIP_AUDIT_BEGIN')
+          for path in sorted(Path('static/app').glob('*.js')):
+              lines = path.read_text(encoding='utf-8').splitlines()
+              for number, line in enumerate(lines, 1):
+                  if assignment.search(line) or declaration.search(line):
+                      print(f'{path}:{number}: {line.strip()}')
+          print('STATE_OWNERSHIP_AUDIT_END')
+          PY
+
       - name: Verify frontend asset structure
         run: |
           python - <<'PY'
@@ -70,10 +98,6 @@ jobs:
                   inline_handlers.append(f'{path}:{line_number}: {line}')
           assert not inline_handlers, 'Inline event attributes found:\n' + '\n'.join(inline_handlers)
 
-          # During the migration PR, prove that the extracted files are the
-          # original inline CSS and JavaScript in the original execution order.
-          # Once main contains the split frontend, this legacy comparison
-          # naturally becomes unnecessary and is skipped.
           original = subprocess.check_output(
               ['git', 'show', 'origin/main:static/index.html'], text=True
           )
