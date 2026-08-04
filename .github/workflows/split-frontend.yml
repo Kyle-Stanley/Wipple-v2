@@ -1,84 +1,151 @@
-name: Tighten frontend state semantics
+name: Frontend integrity
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - static/index.html
+      - static/styles/**
+      - static/app/**
+      - .github/workflows/split-frontend.yml
   pull_request:
     paths:
-      - static/app/01-app-state.js
-      - static/app/30-document.js
+      - static/index.html
+      - static/styles/**
+      - static/app/**
       - .github/workflows/split-frontend.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  tighten:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out pull request branch
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Remove misleading state helpers
+      - name: Check JavaScript syntax
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected one match, found {count}')
-              return text.replace(old, new)
-
-          state_path = Path('static/app/01-app-state.js')
-          state = state_path.read_text(encoding='utf-8')
-          state = replace_once(
-              state,
-              '    get report(){return this.sections[this.activeSection]?.rep||null;},\n    get accepted(){',
-              '    get report(){return this.sections[this.activeSection]?.rep||null;},\n    // Each section owns one persistent correction Set. Reading this getter\n    // lazily creates a missing slot so callers always receive that section\'s Set.\n    get accepted(){',
-              'accepted getter comment',
-          )
-          state = replace_once(
-              state,
-              'function activateDocumentSection(index,{saveCurrent=true,view="certificate"}={}){\n  const session=APP_STATE.document;\n  if(!session.sections[index])return false;\n  if(saveCurrent&&session.correctionsBySection[session.activeSection])\n    session.correctionsBySection[session.activeSection]=new Set(session.accepted);\n  session.activeSection=index;\n  session.view=view;\n  void session.accepted;\n  return true;\n}',
-              'function activateDocumentSection(index,{view="certificate"}={}){\n  const session=APP_STATE.document;\n  if(!session.sections[index])return false;\n  session.activeSection=index;\n  session.view=view;\n  void session.accepted;\n  return true;\n}',
-              'section activation semantics',
-          )
-          state = replace_once(
-              state,
-              '\nfunction activeCorrectionStateIsAliased(){\n  const session=APP_STATE.document;\n  return session.accepted===session.correctionsBySection[session.activeSection];\n}\n',
-              '\n',
-              'tautological alias helper',
-          )
-          state_path.write_text(state.rstrip() + '\n', encoding='utf-8')
-
-          document_path = Path('static/app/30-document.js')
-          document = document_path.read_text(encoding='utf-8')
-          document = replace_once(
-              document,
-              'activateDocumentSection(sectionIndex,{saveCurrent:false,view:APP_STATE.document.view})',
-              'activateDocumentSection(sectionIndex,{view:APP_STATE.document.view})',
-              'mapping activation call',
-          )
-          document = replace_once(
-              document,
-              'activateDocumentSection(APP_STATE.document.activeSection,{saveCurrent:false})',
-              'activateDocumentSection(APP_STATE.document.activeSection)',
-              'validation activation call',
-          )
-          document_path.write_text(document, encoding='utf-8')
-          PY
-
           for file in static/app/*.js; do
             node --check "$file"
           done
           cat static/app/*.js > /tmp/wipple-app.js
           node --check /tmp/wipple-app.js
-          git diff --check
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add static/app/01-app-state.js static/app/30-document.js
-          git commit -m "clarify section correction persistence"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Verify frontend asset structure
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          html_path = Path('static/index.html')
+          html = html_path.read_text(encoding='utf-8')
+          app_files = sorted(Path('static/app').glob('*.js'))
+          expected_refs = [f'/static/app/{path.name}' for path in app_files]
+          actual_refs = re.findall(r'<script src="(/static/app/[^"]+)"></script>', html)
+
+          assert Path('static/styles/wipple.css').is_file()
+          assert Path('static/app/01-app-state.js').is_file()
+          assert '<link rel="stylesheet" href="/static/styles/wipple.css">' in html
+          assert actual_refs == expected_refs
+          assert '<style>' not in html
+          assert '<script>' not in html
+
+          inline_attribute = re.compile(
+              r'''<[A-Za-z][^>]*?\b(?P<attribute>on[a-z][a-z0-9]*\s*=\s*["'])''',
+              re.IGNORECASE | re.DOTALL,
+          )
+          inline_handlers = []
+          frontend_sources = [html_path, *Path('static').rglob('*.js')]
+          for path in frontend_sources:
+              text = path.read_text(encoding='utf-8')
+              lines = text.splitlines()
+              for match in inline_attribute.finditer(text):
+                  line_number = text.count('\n', 0, match.start('attribute')) + 1
+                  line = lines[line_number - 1].strip() if lines else ''
+                  inline_handlers.append(f'{path}:{line_number}: {line}')
+          assert not inline_handlers, 'Inline event attributes found:\n' + '\n'.join(inline_handlers)
+          PY
+
+      - name: Verify state ownership and section persistence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          migrated = [
+              'ACCEPTED', 'ACTIVE', 'ANALYSIS_SCOPE', 'BATCH_ACTIVE',
+              'BATCH_ANALYSIS_MODE', 'BILLING_TRAJECTORY_SHOW_ALL', 'DOC',
+              'MATCH_STATE', 'REPORT', 'RUNNING', 'SECSTATE', 'SECTIONS', 'VIEW',
+          ]
+          legacy = re.compile(r'\b(?:' + '|'.join(migrated) + r')\b')
+          legacy_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if legacy.search(line):
+                      legacy_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not legacy_hits, 'Legacy writable state remains:\n' + '\n'.join(legacy_hits)
+
+          derived_assignment = re.compile(r'APP_STATE\.document\.(?:report|accepted)\s*=')
+          derived_hits = []
+          for path in sorted(Path('static/app').glob('*.js')):
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if derived_assignment.search(line):
+                      derived_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not derived_hits, 'Derived document fields assigned directly:\n' + '\n'.join(derived_hits)
+
+          state_text = Path('static/app/01-app-state.js').read_text(encoding='utf-8')
+          assert 'saveCurrent' not in state_text
+          assert 'activeCorrectionStateIsAliased' not in state_text
+
+          # DOTS and LATEST_PROGRESS remain a deliberate Step 3 exception.
+          external_progress = []
+          progress_assignment = re.compile(r'\b(?:DOTS|LATEST_PROGRESS)\s*=')
+          for path in sorted(Path('static/app').glob('*.js')):
+              if path.name == '00-core.js':
+                  continue
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if progress_assignment.search(line):
+                      external_progress.append(f'{path}:{number}: {line.strip()}')
+          assert len(external_progress) == 1, 'Unexpected deferred progress writes:\n' + '\n'.join(external_progress)
+          assert external_progress[0].startswith('static/app/10-state-batch.js:'), external_progress[0]
+          PY
+
+          node <<'NODE'
+          const fs=require('fs');
+          const vm=require('vm');
+          const state=fs.readFileSync('static/app/01-app-state.js','utf8');
+          const test=`
+            const first={rep:{id:"first"}},second={rep:{id:"second"}};
+            const sectionOne=new Set([1]),sectionTwo=new Set([2]);
+            initializeDocumentState({
+              source:{id:"doc"},sections:[first,second],
+              correctionsBySection:[sectionOne,sectionTwo],activeSection:0
+            });
+            APP_STATE.document.accepted.add(3);
+            activateDocumentSection(1);
+            APP_STATE.document.accepted.add(4);
+            activateDocumentSection(0);
+            if(!APP_STATE.document.accepted.has(1)||!APP_STATE.document.accepted.has(3))
+              throw new Error("section one corrections did not persist");
+            if(APP_STATE.document.accepted.has(2)||APP_STATE.document.accepted.has(4))
+              throw new Error("section two corrections leaked into section one");
+            activateDocumentSection(1);
+            if(!APP_STATE.document.accepted.has(2)||!APP_STATE.document.accepted.has(4))
+              throw new Error("section two corrections did not persist");
+            if(APP_STATE.document.accepted.has(1)||APP_STATE.document.accepted.has(3))
+              throw new Error("section one corrections leaked into section two");
+            const replacement=new Set([9]);
+            replaceAcceptedCorrections(replacement);
+            if(APP_STATE.document.accepted!==replacement)
+              throw new Error("replacement Set was not stored directly");
+            activateAnalysisDocument({id:"analysis"});
+            if(APP_STATE.document.report.id!=="analysis")
+              throw new Error("analysis report not active");
+          `;
+          vm.runInNewContext(state+test,{Set,TypeError});
+          NODE
