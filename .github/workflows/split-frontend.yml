@@ -1,0 +1,62 @@
+name: Split frontend monolith
+
+on:
+  push:
+    branches:
+      - frontend-cleanup
+    paths:
+      - static/index.html
+      - scripts/split_frontend.py
+      - .github/workflows/split-frontend.yml
+
+permissions:
+  contents: write
+
+jobs:
+  split:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@v4
+        with:
+          ref: frontend-cleanup
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Split frontend
+        run: python scripts/split_frontend.py
+
+      - name: Check generated JavaScript syntax
+        run: |
+          for file in static/app/*.js; do
+            node --check "$file"
+          done
+
+      - name: Verify slim entry point
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          html = Path('static/index.html').read_text(encoding='utf-8')
+          assert '<link rel="stylesheet" href="/static/styles/wipple.css">' in html
+          assert '<script src="/static/app/00-core.js"></script>' in html
+          assert '<script src="/static/app/60-printing.js"></script>' in html
+          assert '<style>' not in html
+          assert '<script>' not in html
+          PY
+
+      - name: Commit generated frontend assets
+        run: |
+          if git diff --quiet; then
+            echo "No generated changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add static/index.html static/styles/wipple.css static/app FRONTEND_ARCHITECTURE.md
+          git commit -m "Split frontend monolith into ordered assets"
+          git push
