@@ -133,16 +133,52 @@ jobs:
                       external_progress.append(f'{path}:{number}: {line.strip()}')
           assert not external_progress, 'Progress animation state written outside 00-core.js:\n' + '\n'.join(external_progress)
 
-          wrapper_assignment = re.compile(
-              r'^\s*(?:addLine|updateBatchLane|finishProgressLine|attachClientElapsed|renderCertificate)\s*=',
+          owned_names = (
+              "addLine",
+              "updateBatchLane",
+              "finishProgressLine",
+              "attachClientElapsed",
+              "applyColumnMapping",
+              "totalsDetail",
+              "computeValidationChecks",
+              "renderCertificate",
+              "renderDash",
+          )
+          owned_assignment = re.compile(
+              rf'^\s*(?:window\.)?(?P<name>{"|".join(owned_names)})\s*=',
               re.MULTILINE,
           )
-          wrapper_hits = []
-          for path in sorted(Path('static').rglob('*.js')):
-              for match in wrapper_assignment.finditer(path.read_text(encoding='utf-8')):
-                  line_number = path.read_text(encoding='utf-8').count('\n', 0, match.start()) + 1
-                  wrapper_hits.append(f'{path}:{line_number}')
-          assert not wrapper_hits, 'Runtime function replacement remains:\n' + '\n'.join(wrapper_hits)
+          owned_hits = []
+          for path in js_paths:
+              source = path.read_text(encoding="utf-8")
+              for match in owned_assignment.finditer(source):
+                  owned_hits.append((path.as_posix(), match.group("name")))
+
+          allowed_owned_hits = {
+              ("static/mapping_ui.js", "applyColumnMapping"),
+              ("static/mapping_ui.js", "totalsDetail"),
+              ("static/mapping_ui.js", "computeValidationChecks"),
+              ("static/mapping_ui.js", "renderCertificate"),
+              ("static/mapping_ui.js", "renderDash"),
+          }
+          assert len(owned_hits) == 5, f"Expected five mapping patches, found: {owned_hits}"
+          assert set(owned_hits) == allowed_owned_hits, (
+              f"Unexpected runtime owner replacements: {owned_hits}"
+          )
+
+          review_source = Path("static/review_refinement.js").read_text(encoding="utf-8")
+          document_source = Path("static/app/30-document.js").read_text(encoding="utf-8")
+          validation_source = Path("static/app/40-validation.js").read_text(encoding="utf-8")
+          assert "rememberConfirmedVariables" not in review_source
+          assert "rememberRenderedReport" not in review_source
+          assert "__wippleReview" not in review_source
+          assert "window.WippleReviewRefinement = Object.freeze" in review_source
+          assert document_source.count(
+              "window.WippleReviewRefinement?.recordConfirmedVariables(rep,state);"
+          ) == 1
+          assert validation_source.count(
+              "window.WippleReviewRefinement?.refineCertificate(rep);"
+          ) == 1
           PY
 
           node <<'NODE'
@@ -178,4 +214,27 @@ jobs:
               throw new Error("analysis report not active");
           `;
           vm.runInNewContext(state+test,{Set,TypeError});
+
+          let refineFrames=0;
+          const reviewSource=fs.readFileSync('static/review_refinement.js','utf8');
+          const reviewContext={
+            window:{},
+            document:{readyState:'loading',addEventListener(){}},
+            requestAnimationFrame(){refineFrames+=1;},
+            Set,Map,Object,
+          };
+          vm.runInNewContext(reviewSource,reviewContext);
+          const report={};
+          reviewContext.window.WippleReviewRefinement.recordConfirmedVariables(report,{
+            inferred:{
+              first:{confirmed:true,variable:'V'},
+              second:{confirmed:false,variable:'C'},
+              duplicate:{confirmed:true,variable:'V'},
+              third:{confirmed:true,variable:'D'},
+            },
+          });
+          assert(JSON.stringify(report._manualConfirmedVariables)==='["V","D"]',
+            'review hook must capture unique confirmed variables in order');
+          reviewContext.window.WippleReviewRefinement.refineCertificate(report);
+          assert(refineFrames===1,'review hook must queue exactly one refinement frame');
           NODE
