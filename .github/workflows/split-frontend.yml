@@ -148,6 +148,7 @@ jobs:
               rf'^\s*(?:window\.)?(?P<name>{"|".join(owned_names)})\s*=',
               re.MULTILINE,
           )
+          js_paths = sorted(Path("static").rglob("*.js"))
           owned_hits = []
           for path in js_paths:
               source = path.read_text(encoding="utf-8")
