@@ -1,29 +1,54 @@
 # Wipple frontend architecture
 
-The frontend remains a dependency-free, server-served browser application. This cleanup changes file boundaries only; it does not change the UI, API contract, state model, validation rules, or deployment flow.
+Wipple's frontend remains a dependency-free, server-served browser application.
+The files are classic scripts for now: load order is explicit, while state and the
+largest feature domains have named owners. Vite, ESM, and React are not present.
 
 ## Entry point
 
-- `static/index.html` — page structure and ordered asset loading only.
-- `static/styles/wipple.css` — all application styling, including responsive and print-shell styles.
+- `static/index.html` owns page structure and the complete script order.
+- `static/styles/wipple.css` owns the application, responsive, and print-shell styles.
+- Inline event attributes are prohibited; listeners are attached from JavaScript.
+
+## Explicit helper order
+
+The focused helpers load before the numbered application scripts:
+
+1. `static/job_matching.js` exposes deterministic identity matching.
+2. `static/wip_math.js` exposes deterministic WIP derivation and mapping checks.
+3. `static/mapping_ui.js` enhances manual mapping and audit presentation.
+4. `static/review_refinement.js` refines the manual-review cards.
+
+The two UI helpers are explicit assets; math code no longer injects them. Their
+MutationObservers remain deliberate progressive-enhancement behavior.
 
 ## Application scripts
 
-Scripts are classic browser scripts loaded in numeric order so the existing shared global scope and inline handlers continue to behave exactly as before.
+- `00-core.js` — formatting, header terminology, upload/streaming, source files, and progress animation.
+- `01-app-state.js` — document, section, batch-analysis, processing, and billing-view state.
+- `05-static-events.js` — static page listeners and image fallbacks.
+- `10-state-batch.js` — batch scanning, review, metadata, and navigation.
+- `15-totals.js` — totals reconciliation and default correction selection.
+- `20-portfolio.js` — matching, consolidation, and portfolio/time-series preparation.
+- `30-document.js` — document adaptation, section navigation, and sparse-column mapping.
+- `40-validation.js` — validation checks, correction review, and certificate rendering.
+- `50-analysis.js` — underwriting dashboard, signals, source review, and schedule rendering.
+- `55-job-modal.js` — independent job analysis, charts, history, and modal interactions.
+- `60-printing.js` — print layouts, report generation, and CSV export.
 
-- `static/app/00-core.js` — shared formatting, header terminology, upload controls, streaming, source-file handling, and totals logic.
-- `static/app/10-state-batch.js` — application state, batch scanning, batch review, metadata, and batch navigation.
-- `static/app/20-portfolio.js` — cross-period job matching, consolidated schedules, and portfolio/time-series analysis preparation.
-- `static/app/30-document.js` — document adaptation, section navigation, sparse-column mapping, and top-level rendering.
-- `static/app/40-validation.js` — validation checks, correction review, and validation certificate rendering.
-- `static/app/50-analysis.js` — underwriting dashboard, signals, charts, job analysis, source review, and schedule table rendering.
-- `static/app/60-printing.js` — print layouts, report generation, and CSV export.
+## Enforced boundaries
 
-## Existing focused helpers
+Frontend CI verifies syntax, ordered assets, state ownership, section correction
+persistence, absence of inline handlers, and absence of dynamic script injection.
+Progress-animation state is owned by `00-core.js`; the old ticker cannot return.
 
-- `static/job_matching.js` — identity scoring and candidate plausibility.
-- `static/wip_math.js` — deterministic WIP derivation and mapping-readiness helpers.
+## Remaining pre-Vite integration debt
 
-## Deliberate next steps
-
-The safe next refactor is to replace shared mutable globals with an explicit state object and convert direct DOM-rendering functions one workflow at a time. React or Vite can be evaluated after these boundaries are stable; neither is required for this structural cleanup.
+- `review_refinement.js` still observes `applyColumnMapping` and
+  `renderCertificate` through two runtime wrappers. These will become explicit
+  notification hooks without changing either MutationObserver.
+- `mapping_ui.js` still replaces five owner functions. It also reads
+  `renderCertificate` at three manual-editor rerender sites and `tableLabels`
+  once. Those nine dependencies must become explicit before ESM.
+- The mapping and review MutationObservers are intentionally retained until their
+  rendering responsibilities move into an explicit component lifecycle.
