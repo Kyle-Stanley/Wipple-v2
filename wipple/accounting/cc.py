@@ -204,8 +204,8 @@ def _leftovers(cols, mapping, triples, cfg):
         if nfin >= cfg.min_rows and nfin - int(ok.sum()) <= allowed_bad:
             equal.append(j)
     # More than one duplicate-total leftover is not semantically identifiable
-    # from values alone. Header concordance may describe it later, but the CC
-    # validator will not guess which duplicate is billings.
+    # from values alone. The validator will not guess which duplicate is
+    # billings.
     if len(equal) == 1:
         mapping[equal[0]] = "BC"
 

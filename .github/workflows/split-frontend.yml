@@ -5,13 +5,17 @@ on:
     branches:
       - main
     paths:
+      - server.py
       - static/index.html
+      - static/wipple_ticker.js
       - static/styles/**
       - static/app/**
       - .github/workflows/split-frontend.yml
   pull_request:
     paths:
+      - server.py
       - static/index.html
+      - static/wipple_ticker.js
       - static/styles/**
       - static/app/**
       - .github/workflows/split-frontend.yml
@@ -50,6 +54,7 @@ jobs:
 
           assert Path('static/styles/wipple.css').is_file()
           assert Path('static/app/01-app-state.js').is_file()
+          assert not Path('static/wipple_ticker.js').exists()
           assert '<link rel="stylesheet" href="/static/styles/wipple.css">' in html
           assert actual_refs == expected_refs
           assert '<style>' not in html
@@ -69,6 +74,14 @@ jobs:
                   line = lines[line_number - 1].strip() if lines else ''
                   inline_handlers.append(f'{path}:{line_number}: {line}')
           assert not inline_handlers, 'Inline event attributes found:\n' + '\n'.join(inline_handlers)
+
+          legacy_ticker = re.compile(r'Watch me wipple|nay nayle|wipple_ticker\.js', re.IGNORECASE)
+          ticker_hits = []
+          for path in [Path('server.py'), *Path('static').rglob('*.js')]:
+              for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if legacy_ticker.search(line):
+                      ticker_hits.append(f'{path}:{number}: {line.strip()}')
+          assert not ticker_hits, 'Legacy progress ticker remains:\n' + '\n'.join(ticker_hits)
           PY
 
       - name: Verify state ownership and section persistence
@@ -102,7 +115,6 @@ jobs:
           assert 'saveCurrent' not in state_text
           assert 'activeCorrectionStateIsAliased' not in state_text
 
-          # DOTS and LATEST_PROGRESS remain a deliberate Step 3 exception.
           external_progress = []
           progress_assignment = re.compile(r'\b(?:DOTS|LATEST_PROGRESS)\s*=')
           for path in sorted(Path('static/app').glob('*.js')):
@@ -111,8 +123,18 @@ jobs:
               for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
                   if progress_assignment.search(line):
                       external_progress.append(f'{path}:{number}: {line.strip()}')
-          assert len(external_progress) == 1, 'Unexpected deferred progress writes:\n' + '\n'.join(external_progress)
-          assert external_progress[0].startswith('static/app/10-state-batch.js:'), external_progress[0]
+          assert not external_progress, 'Progress animation state written outside 00-core.js:\n' + '\n'.join(external_progress)
+
+          wrapper_assignment = re.compile(
+              r'^\s*(?:addLine|updateBatchLane|finishProgressLine|attachClientElapsed|renderCertificate)\s*=',
+              re.MULTILINE,
+          )
+          wrapper_hits = []
+          for path in sorted(Path('static').rglob('*.js')):
+              for match in wrapper_assignment.finditer(path.read_text(encoding='utf-8')):
+                  line_number = path.read_text(encoding='utf-8').count('\n', 0, match.start()) + 1
+                  wrapper_hits.append(f'{path}:{line_number}')
+          assert not wrapper_hits, 'Runtime function replacement remains:\n' + '\n'.join(wrapper_hits)
           PY
 
           node <<'NODE'

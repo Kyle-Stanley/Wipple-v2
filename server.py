@@ -4,8 +4,8 @@ Same architecture as v2 (thread runs the graph, queue feeds the SSE
 generator, heartbeats keep proxies alive); what changed is the graph and
 therefore the narration. Extraction is per-page with live progress lines,
 and the new stages -- assembly, the schema race, splitting, block
-misalignment, concordance -- each narrate what they proved, not what they
-did. Everything the old endpoints accepted still works: spreadsheets and
+misalignment -- each narrates what it proved, not what it did. Everything
+the old endpoints accepted still works: spreadsheets and
 CSVs are sniffed inside the graph's own ingest node now, so /api/scan just
 forwards bytes.
 
@@ -25,7 +25,7 @@ import time
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from wipple.support.demo import demo_raw_table
@@ -47,8 +47,8 @@ def _plural(n, word):
 
 def _narrate(node: str, up: dict, state: dict) -> list[str]:
     if node == "ingest":
-        # The browser owns the alternating demo stinger. Ingest details such
-        # as page chunking remain internal instead of replacing it instantly.
+        # The stream acknowledges the upload immediately; detailed ingest
+        # mechanics remain internal until the first real extraction update.
         return []
     if node == "extract_chunks":
         frs = up.get("fragments") or []
@@ -132,19 +132,6 @@ def _narrate(node: str, up: dict, state: dict) -> list[str]:
         pages = ", ".join(str(b + 1) for b in bad) or "?"
         return [f"Re-reading page {pages} with a stronger model -- "
                 "the rest of the document stands"]
-    if node == "concordance":
-        c = up.get("concordance") or {}
-        disc = c.get("discordant") or []
-        ann = c.get("annotations") or []
-        if disc:
-            d = disc[0]
-            return [f"Header '{d.get('header')}' disagrees with what the "
-                    f"numbers prove (column certifies as "
-                    f"{d.get('variable')}) -- the math outranks the label"]
-        if ann:
-            return [f"Headers agree with the certified mapping on "
-                    f"{_plural(len(ann), 'column')}"]
-        return []
     if node == "emit":
         rep = up.get("report") or {}
         n = len(rep.get("tables") or [])
@@ -180,7 +167,7 @@ def _stream(initial: dict):
     def gen():
         yield ("event: progress\ndata: "
                + json.dumps({"node": "upload",
-                             "message": "Watch me wipple..."})
+                             "message": "Reading and validating schedule"})
                + "\n\n")
         while True:
             try:
@@ -231,17 +218,8 @@ def _initial(**kw) -> dict:
 
 @app.get("/")
 def index():
-    html = Path("static/index.html").read_text(encoding="utf-8")
-    head, marker, tail = html.rpartition("</body>")
-    if marker:
-        html = (head + '<script src="/static/wipple_ticker.js"></script>\n'
-                + marker + tail)
-    return HTMLResponse(html)
+    return HTMLResponse(Path("static/index.html").read_text(encoding="utf-8"))
 
-
-@app.get("/how")
-def how():
-    return FileResponse("static/how.html")
 
 
 @app.get("/api/sample")

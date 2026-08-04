@@ -177,7 +177,7 @@ async function scanBatch(files){
   show("processing");resetProgressStage();renderBatchLanes();
   showBatchProgress(0,BATCH_ITEMS.length);
   $("#nav").classList.add("hidden");$("#tagline").classList.remove("hidden");
-  APP_STATE.progress.running=true;DOTS=0;LATEST_PROGRESS=null;
+  APP_STATE.progress.running=true;
   const model=$("#model")?.value||"";
   const startedAt=performance.now();
   let next=0,completed=0,running=0;

@@ -29,7 +29,7 @@ CC_VAR_NAMES = {
     "GC": "Gross Profit Current Year",
     "BC": "Billed to Date (Completed)",
     # Retainage is a receivable subset of billings, not an additive component
-    # of revenue. It stays in the vocabulary for display/header concordance,
+    # of revenue. It stays in the vocabulary for display/header matching,
     # but the CC math engine intentionally does not map it.
     "RR": "Retainage Receivable",
 }
@@ -50,7 +50,7 @@ CC_LATTICE = [
 PERIOD_SWAP = {"RP": "RC", "RC": "RP", "KP": "KC", "KC": "KP",
                "GP": "GC", "GC": "GP"}
 
-# Merged lookup for emit/concordance layers.
+# Merged lookup for emit and sparse-header fallback layers.
 ALL_VAR_NAMES = {**WIP_VAR_NAMES, **CC_VAR_NAMES}
 
 

@@ -3,7 +3,6 @@
    v2-shaped by design, so renderCertificate/renderDash work untouched. */
 function adaptV3(doc){
   const secs=[];
-  const disc=(((doc.document||{}).concordance)||{}).discordant||[];
   for(const [tableIndex,t] of (doc.tables||[]).entries()){
     /* doc-level grand-totals verdict, explained against pooled findings */
     let dtd=null;
@@ -50,7 +49,7 @@ function adaptV3(doc){
         else if(iss.kind==="hjoin_rowcount_mismatch")rep._extra.push({st:"warn",
           label:"Facing pages carry different row counts",note:iss.note||""});
       }
-      rep._headerComparison=buildHeaderComparison(t,rep,disc);
+      rep._headerComparison=buildHeaderComparison(t,rep);
       /* CC: synthesize the corrections array the reviewer UI drives */
       const a=rep.analysis||{};
       if(a.schema==="cc"&&!(a.corrections||[]).length){

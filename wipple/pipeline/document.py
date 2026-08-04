@@ -1,7 +1,7 @@
 """
 Document graph: page-table perception around the existing per-section engine.
 
-    ingest -> chunk -> extract_chunks -> assemble -> tables -+-> concordance -> emit
+    ingest -> chunk -> extract_chunks -> assemble -> tables -+-> emit
                 ^                                            |
                 +------------- re_extract <------------------+   (bad chunks, x1)
 
@@ -24,7 +24,6 @@ from typing import Any, Optional, TypedDict
 from ..documents import ingest as ingest_mod
 from ..reconstruction.alignment import check_bands
 from ..documents.chunking import chunk_document
-from ..accounting.concordance import concordance_node
 from ..documents.extraction import extract_chunks_node
 from .graph import build_graph
 from ..reconstruction.layout import assemble
@@ -50,7 +49,6 @@ class DocState(TypedDict, total=False):
     reporting_period_texts: list
     logical_tables: list
     tables: list
-    concordance: dict
     report: dict
     reporting_date: Optional[str]
     reporting_date_error: Optional[str]
@@ -257,7 +255,6 @@ def tables_node(state: DocState) -> dict:
         entry["validation_summary"] = {"status": v["status"],
                                        "schema": v["schema"],
                                        "reason": v["reason"]}
-        entry["validation"] = v          # concordance reads the mapping
 
         # -- split: over-merged WIP+CC comes apart on exact degeneracy ------
         seg = {"split_at": None, "lone_rows": []}
@@ -338,7 +335,7 @@ def route_after_tables(state: DocState) -> str:
     if state.get("bad_chunks") and state.get("chunks") \
             and int(state.get("reextract_count", 0)) < 1:
         return "re_extract"
-    return "concordance"
+    return "emit"
 
 
 def emit_doc_node(state: DocState) -> dict:
@@ -374,7 +371,6 @@ def emit_doc_node(state: DocState) -> dict:
             "extraction_attempts": state.get("extraction_attempts", []),
             "reextract_count": state.get("reextract_count", 0),
             "unresolved_chunks": state.get("bad_chunks") or [],
-            "concordance": state.get("concordance", {}),
             **period,
             "schedule_types": schedule_types,
         },
@@ -389,7 +385,6 @@ def build_doc_graph():
     g.add_node("assemble", assemble_node)
     g.add_node("tables", tables_node)
     g.add_node("re_extract", re_extract_doc_node)
-    g.add_node("concordance", concordance_node)
     g.add_node("emit", emit_doc_node)
 
     g.set_entry_point("ingest")
@@ -401,9 +396,8 @@ def build_doc_graph():
     g.add_edge("assemble", "tables")
     g.add_conditional_edges("tables", route_after_tables,
                             {"re_extract": "re_extract",
-                             "concordance": "concordance"})
+                             "emit": "emit"})
     g.add_edge("re_extract", "extract_chunks")
-    g.add_edge("concordance", "emit")
     g.add_edge("emit", END)
     return g.compile()
 
