@@ -6,6 +6,8 @@ const APP_STATE={
     activeSection:0,
     view:"certificate",
     get report(){return this.sections[this.activeSection]?.rep||null;},
+    // Each section owns one persistent correction Set. Reading this getter
+    // lazily creates a missing slot so callers always receive that section's Set.
     get accepted(){
       if(!this.correctionsBySection[this.activeSection])
         this.correctionsBySection[this.activeSection]=new Set();
@@ -33,11 +35,9 @@ function initializeDocumentState({source,sections,correctionsBySection,activeSec
   return session;
 }
 
-function activateDocumentSection(index,{saveCurrent=true,view="certificate"}={}){
+function activateDocumentSection(index,{view="certificate"}={}){
   const session=APP_STATE.document;
   if(!session.sections[index])return false;
-  if(saveCurrent&&session.correctionsBySection[session.activeSection])
-    session.correctionsBySection[session.activeSection]=new Set(session.accepted);
   session.activeSection=index;
   session.view=view;
   void session.accepted;
@@ -59,9 +59,4 @@ function replaceAcceptedCorrections(corrections){
   const session=APP_STATE.document;
   session.correctionsBySection[session.activeSection]=corrections;
   return corrections;
-}
-
-function activeCorrectionStateIsAliased(){
-  const session=APP_STATE.document;
-  return session.accepted===session.correctionsBySection[session.activeSection];
 }

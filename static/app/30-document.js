@@ -364,7 +364,7 @@ function applyColumnMapping(rep,state){
 }
 
 function renderColumnMapping(sectionIndex){
-  activateDocumentSection(sectionIndex,{saveCurrent:false,view:APP_STATE.document.view});
+  activateDocumentSection(sectionIndex,{view:APP_STATE.document.view});
   const rep=APP_STATE.document.report,state=columnMappingState(rep),source=columnMappingSource(rep);
   refreshColumnMappingInferences(rep,state);
   const section=APP_STATE.document.sections[APP_STATE.document.activeSection],sectionNote=APP_STATE.document.sections.length>1
@@ -467,7 +467,7 @@ function render(doc,restore=null){
     setSingleNav(APP_STATE.document.view==="dash"?"analysis":"validation");
     $("#navConsolidated").onclick=renderSingleValidatedWip;
   }
-  $("#navCert").onclick=()=>{syncActiveSectionReview();activateDocumentSection(APP_STATE.document.activeSection,{saveCurrent:false});renderSecnav();renderCertificate(APP_STATE.document.report);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};
+  $("#navCert").onclick=()=>{syncActiveSectionReview();activateDocumentSection(APP_STATE.document.activeSection);renderSecnav();renderCertificate(APP_STATE.document.report);show("certificate");if(!BATCH_MODE)setSingleNav("validation");window.scrollTo(0,0)};
   $("#navDash").onclick=renderDocumentAnalysis;
 }
 
